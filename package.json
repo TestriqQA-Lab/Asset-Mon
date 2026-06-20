@@ -1,0 +1,22 @@
+{
+  "name": "assetmon",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "db:catalog:generate": "npm -w @assetmon/db-catalog run generate",
+    "db:catalog:migrate": "npm -w @assetmon/db-catalog run migrate",
+    "db:tenant:generate": "npm -w @assetmon/db-tenant run generate",
+    "db:setup": "npm run db:catalog:generate && npm run db:tenant:generate && npm run db:catalog:migrate",
+    "api:dev": "npm -w @assetmon/api run start:dev",
+    "web:dev": "npm -w @assetmon/web run dev",
+    "build": "npm -w @assetmon/api run build && npm -w @assetmon/web run build",
+    "platform:bootstrap-admin": "npm -w @assetmon/api run platform:bootstrap-admin --"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

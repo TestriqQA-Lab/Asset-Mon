@@ -1,0 +1,10 @@
+# LOCAL TEST ONLY — do not use on the server.
+# Run with:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+# Exposes the API on localhost:4000 and keeps Caddy out (no public domain locally).
+services:
+  api:
+    ports:
+      - "4000:4000"
+  caddy:
+    profiles: ["never"]

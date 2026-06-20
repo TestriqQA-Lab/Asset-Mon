@@ -1,0 +1,30 @@
+# AssetMon line-ending & binary policy.
+# This repo deploys to Linux and its shell scripts run in bash/WSL, so all
+# text is normalised to LF (in the repo AND the working tree), overriding the
+# machine's core.autocrlf. Binaries are never line-ending-converted.
+
+* text=auto eol=lf
+
+# Shell scripts MUST stay LF (a CRLF breaks bash on WSL/Linux).
+*.sh text eol=lf
+
+# Windows-only scripts keep CRLF.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Binaries — never apply line-ending conversion.
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.eot   binary
+*.zip   binary
+*.gz    binary

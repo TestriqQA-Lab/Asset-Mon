@@ -1,0 +1,36 @@
+export const SITE = {
+  name: 'AssetMon',
+  tagline: 'Multi-tenant office asset management for modern teams',
+  description:
+    'AssetMon is a modern asset management platform: track hardware, software licenses, maintenance, audits, depreciation and procurement in one secure workspace. Free 30-day trial. No credit card required.',
+  url: process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
+  contactEmail: 'hello@assetmon.app',
+  supportEmail: 'support@assetmon.app',
+  twitter: '@assetmon',
+  social: {
+    twitter: 'https://twitter.com/assetmon',
+    linkedin: 'https://www.linkedin.com/company/assetmon',
+    github: 'https://github.com/assetmon',
+    youtube: 'https://youtube.com/@assetmon',
+    facebook: 'https://facebook.com/assetmon',
+  },
+  trial: {
+    days: 30,
+    headline: '30-day free trial',
+    promise: 'No credit card. No questions asked. Cancel anytime.',
+  },
+  keywords: [
+    'asset management software',
+    'IT asset management',
+    'ITAM',
+    'hardware asset tracking',
+    'software license management',
+    'multi-tenant SaaS',
+    'asset depreciation software',
+    'preventive maintenance software',
+    'QR code asset tags',
+    'audit-ready inventory',
+    'procurement software',
+    'asset reservation',
+  ],
+};

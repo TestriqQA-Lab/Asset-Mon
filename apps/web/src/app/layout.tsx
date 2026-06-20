@@ -1,0 +1,46 @@
+import './globals.css';
+import { Inter } from 'next/font/google';
+import { Providers } from './providers';
+import { Toaster } from 'sonner';
+import { pageMetadata } from '@/lib/seo';
+import { SITE } from '@/lib/site';
+import { ThemeBootstrap } from '@/components/ThemeBootstrap';
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-sans',
+  display: 'swap',
+});
+
+export const metadata = pageMetadata({
+  title: `${SITE.name} · ${SITE.tagline}`,
+  description: SITE.description,
+  path: '/',
+});
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  themeColor: '#0b1020',
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" className={inter.variable}>
+      <head>
+        {/* Read the cached theme out of localStorage and apply the resolved CSS
+            variables onto :root BEFORE React hydrates. Stops dashboards loading
+            with the default palette and snapping to the tenant's preset 200ms
+            later. The marketing site renders the same script — which simply
+            no-ops when no cached theme exists. */}
+        <ThemeBootstrap />
+      </head>
+      <body className="min-h-screen bg-ink-50 text-ink-900 antialiased">
+        <Providers>
+          {children}
+          <Toaster richColors closeButton position="top-right" />
+        </Providers>
+      </body>
+    </html>
+  );
+}

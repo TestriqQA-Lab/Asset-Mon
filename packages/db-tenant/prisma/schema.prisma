@@ -1,0 +1,630 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("TENANT_DATABASE_URL")
+}
+
+// ------------ Users / Auth ------------
+model User {
+  id            String          @id @default(uuid())
+  email         String          @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  role          Role            @default(EMPLOYEE)
+  active        Boolean         @default(true)
+  totpSecret    String?
+  totpEnabled   Boolean         @default(false)
+  // Brute-force / credential-stuffing defence
+  failedLoginCount Int          @default(0)
+  lockedUntil   DateTime?
+  // Incremented when password/role/active changes or on "logout all" → invalidates outstanding access tokens
+  tokenVersion  Int             @default(0)
+  passwordChangedAt DateTime?
+  // RBAC scope: when set, the user only sees data in this department.
+  // (`departmentId` is reporting-style; `scopedDepartmentId` is access-control.)
+  scopedDepartmentId String?
+  scopedDepartment   Department? @relation("ScopedUsers", fields: [scopedDepartmentId], references: [id])
+  uploadedAttachments AssetAttachment[] @relation("AttachmentUploader")
+  savedViews    SavedView[]
+  departmentId  String?
+  department    Department?     @relation(fields: [departmentId], references: [id])
+  assignments   Assignment[]
+  performedAudits AuditLog[]    @relation("PerformedBy")
+  openedTickets   ServiceTicket[] @relation("OpenedTickets")
+  assignedTickets ServiceTicket[] @relation("AssignedTickets")
+  requestedPRs    PurchaseRequest[] @relation("RequestedPRs")
+  approvedPRs     PurchaseRequest[] @relation("ApprovedPRs")
+  softwareAssignments SoftwareAssignment[]
+  reservations  Reservation[]
+  startedAudits AuditSession[] @relation("StartedAudits")
+  auditScans    AuditScan[]    @relation("ScannedBy")
+  createdApiKeys ApiKey[]      @relation("ApiKeyCreator")
+  notifications Notification[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([role])
+}
+
+enum Role {
+  ADMIN
+  ASSET_MANAGER
+  EMPLOYEE
+}
+
+// ------------ Org structure ------------
+model Department {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  costCenter String?
+  users     User[]
+  scopedUsers User[] @relation("ScopedUsers")
+  assets    Asset[]
+  purchaseRequests PurchaseRequest[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Location {
+  id        String     @id @default(uuid())
+  name      String
+  type      LocationType
+  parentId  String?
+  parent    Location?  @relation("LocationTree", fields: [parentId], references: [id])
+  children  Location[] @relation("LocationTree")
+  assets    Asset[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([name, parentId])
+}
+
+enum LocationType {
+  BUILDING
+  FLOOR
+  ROOM
+  DESK
+}
+
+// ------------ Catalog ------------
+model Category {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  description   String?
+  customFields  Json     @default("[]") // [{name, type, required}]
+  assets        Asset[]
+  prItems       PurchaseRequestItem[]
+  poItems       PurchaseOrderItem[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Vendor {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  contact   String?
+  email     String?
+  phone     String?
+  assets    Asset[]
+  serviceTickets ServiceTicket[]
+  purchaseOrders PurchaseOrder[]
+  softwareLicenses SoftwareLicense[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ------------ Assets ------------
+model Asset {
+  id            String        @id @default(uuid())
+  assetTag      String        @unique
+  name          String
+  serialNumber  String?
+  status        AssetStatus   @default(IN_STOCK)
+  categoryId    String
+  category      Category      @relation(fields: [categoryId], references: [id])
+  locationId    String?
+  location      Location?     @relation(fields: [locationId], references: [id])
+  departmentId  String?
+  department    Department?   @relation(fields: [departmentId], references: [id])
+  vendorId      String?
+  vendor        Vendor?       @relation(fields: [vendorId], references: [id])
+  purchaseDate  DateTime?
+  purchaseCost  Decimal?      @db.Decimal(12, 2)
+  warrantyEnd   DateTime?
+  purchaseOrderId String?
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  depreciationMethod DepreciationMethod @default(NONE)
+  salvageValue  Decimal?      @db.Decimal(12, 2)
+  usefulLifeMonths Int?
+  depreciationStart DateTime?
+  notes         String?
+  customFields  Json          @default("{}")
+  photoUrl      String?
+  assignments   Assignment[]
+  auditLogs     AuditLog[]
+  maintenanceSchedules MaintenanceSchedule[]
+  serviceTickets ServiceTicket[]
+  softwareAssignments SoftwareAssignment[]
+  reservations  Reservation[]
+  auditScans    AuditScan[]
+  // Parent / accessory relationships — e.g. laptop has charger, dock, sleeve.
+  parentId      String?
+  parent        Asset?        @relation("AssetParent", fields: [parentId], references: [id])
+  children      Asset[]       @relation("AssetParent")
+  attachments   AssetAttachment[]
+  // Optional custom status display (system status enum stays canonical for business logic).
+  statusDefId   String?
+  statusDef     AssetStatusDef? @relation(fields: [statusDefId], references: [id])
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([status])
+  @@index([categoryId])
+  @@index([locationId])
+}
+
+enum AssetStatus {
+  IN_STOCK
+  ASSIGNED
+  IN_REPAIR
+  RETIRED
+  LOST
+}
+
+// ------------ Assignments / Check-in-out ------------
+model Assignment {
+  id          String    @id @default(uuid())
+  assetId     String
+  asset       Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  checkedOutAt DateTime @default(now())
+  dueAt       DateTime?
+  returnedAt  DateTime?
+  notes       String?
+
+  @@index([assetId])
+  @@index([userId])
+  @@index([returnedAt])
+}
+
+// ------------ Maintenance ------------
+model MaintenanceSchedule {
+  id              String    @id @default(uuid())
+  assetId         String
+  asset           Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  title           String
+  description     String?
+  intervalDays    Int       // recurrence interval in days
+  nextDueAt       DateTime
+  lastRunAt       DateTime?
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([assetId])
+  @@index([nextDueAt])
+  @@index([active])
+}
+
+model ServiceTicket {
+  id            String          @id @default(uuid())
+  ticketNumber  String          @unique
+  assetId       String
+  asset         Asset           @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  title         String
+  description   String?
+  priority      TicketPriority  @default(MEDIUM)
+  status        TicketStatus    @default(OPEN)
+  openedById    String?
+  openedBy      User?           @relation("OpenedTickets", fields: [openedById], references: [id])
+  assignedToId  String?
+  assignedTo    User?           @relation("AssignedTickets", fields: [assignedToId], references: [id])
+  vendorId      String?
+  vendor        Vendor?         @relation(fields: [vendorId], references: [id])
+  cost          Decimal?        @db.Decimal(12, 2)
+  openedAt      DateTime        @default(now())
+  resolvedAt    DateTime?
+  resolution    String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([assetId])
+  @@index([status])
+  @@index([assignedToId])
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_VENDOR
+  RESOLVED
+  CLOSED
+  CANCELLED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// ------------ Procurement ------------
+model PurchaseRequest {
+  id            String         @id @default(uuid())
+  number        String         @unique
+  title         String
+  justification String?
+  status        PRStatus       @default(DRAFT)
+  requestedById String
+  requestedBy   User           @relation("RequestedPRs", fields: [requestedById], references: [id])
+  approvedById  String?
+  approvedBy    User?          @relation("ApprovedPRs", fields: [approvedById], references: [id])
+  approvedAt    DateTime?
+  departmentId  String?
+  department    Department?    @relation(fields: [departmentId], references: [id])
+  totalEstimate Decimal?       @db.Decimal(12, 2)
+  notes         String?
+  items         PurchaseRequestItem[]
+  purchaseOrders PurchaseOrder[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([status])
+}
+
+enum PRStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  ORDERED
+  CANCELLED
+}
+
+model PurchaseRequestItem {
+  id           String   @id @default(uuid())
+  prId         String
+  pr           PurchaseRequest @relation(fields: [prId], references: [id], onDelete: Cascade)
+  categoryId   String?
+  category     Category? @relation(fields: [categoryId], references: [id])
+  description  String
+  quantity     Int
+  unitPriceEstimate Decimal? @db.Decimal(12, 2)
+}
+
+model PurchaseOrder {
+  id          String   @id @default(uuid())
+  poNumber    String   @unique
+  prId        String?
+  pr          PurchaseRequest? @relation(fields: [prId], references: [id])
+  vendorId    String?
+  vendor      Vendor?  @relation(fields: [vendorId], references: [id])
+  status      POStatus @default(DRAFT)
+  orderedAt   DateTime?
+  receivedAt  DateTime?
+  totalCost   Decimal? @db.Decimal(12, 2)
+  notes       String?
+  items       PurchaseOrderItem[]
+  assets      Asset[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+}
+
+enum POStatus {
+  DRAFT
+  SENT
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+model PurchaseOrderItem {
+  id           String   @id @default(uuid())
+  poId         String
+  po           PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  categoryId   String?
+  category     Category? @relation(fields: [categoryId], references: [id])
+  description  String
+  quantity     Int
+  unitCost     Decimal  @db.Decimal(12, 2)
+  receivedQty  Int      @default(0)
+}
+
+enum DepreciationMethod {
+  NONE
+  STRAIGHT_LINE
+  DECLINING_BALANCE
+}
+
+// ------------ Software & Licenses ------------
+model Software {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  publisher   String?
+  description String?
+  licenses    SoftwareLicense[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SoftwareLicense {
+  id            String          @id @default(uuid())
+  softwareId    String
+  software      Software        @relation(fields: [softwareId], references: [id], onDelete: Cascade)
+  licenseKey    String?
+  type          LicenseType     @default(SUBSCRIPTION)
+  seats         Int             @default(1)
+  purchaseDate  DateTime?
+  expiresAt     DateTime?
+  cost          Decimal?        @db.Decimal(12, 2)
+  vendorId      String?
+  vendor        Vendor?         @relation(fields: [vendorId], references: [id])
+  notes         String?
+  assignments   SoftwareAssignment[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([softwareId])
+  @@index([expiresAt])
+}
+
+enum LicenseType {
+  PERPETUAL
+  SUBSCRIPTION
+  TRIAL
+  OPEN_SOURCE
+}
+
+model SoftwareAssignment {
+  id           String   @id @default(uuid())
+  licenseId    String
+  license      SoftwareLicense @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id])
+  assetId      String?
+  asset        Asset?   @relation(fields: [assetId], references: [id])
+  assignedAt   DateTime @default(now())
+  returnedAt   DateTime?
+  notes        String?
+
+  @@index([licenseId])
+  @@index([userId])
+  @@index([assetId])
+  @@index([returnedAt])
+}
+
+// ------------ Reservations ------------
+model Reservation {
+  id        String   @id @default(uuid())
+  assetId   String
+  asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  startAt   DateTime
+  endAt     DateTime
+  status    ReservationStatus @default(CONFIRMED)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assetId, startAt])
+  @@index([userId])
+  @@index([status])
+}
+
+enum ReservationStatus {
+  REQUESTED
+  CONFIRMED
+  CHECKED_OUT
+  COMPLETED
+  CANCELLED
+}
+
+// ------------ Physical Audits ------------
+model AuditSession {
+  id            String        @id @default(uuid())
+  name          String
+  scope         Json?         // { locationId?, departmentId?, categoryId? }
+  scheduledAt   DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  status        AuditStatus   @default(PLANNED)
+  startedById   String?
+  startedBy     User?         @relation("StartedAudits", fields: [startedById], references: [id])
+  scans         AuditScan[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([status])
+}
+
+enum AuditStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model AuditScan {
+  id           String        @id @default(uuid())
+  sessionId    String
+  session      AuditSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  assetId      String?
+  asset        Asset?        @relation(fields: [assetId], references: [id])
+  rawTag       String?       // tag scanned but not matched to an asset
+  scannedById  String?
+  scannedBy    User?         @relation("ScannedBy", fields: [scannedById], references: [id])
+  notes        String?
+  createdAt    DateTime      @default(now())
+
+  @@unique([sessionId, assetId])
+  @@index([sessionId])
+}
+
+// ------------ Attachments / status defs / saved views ------------
+model AssetAttachment {
+  id          String   @id @default(uuid())
+  assetId     String
+  asset       Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  kind        String   // photo | document | other
+  filename    String
+  url         String
+  size        Int
+  mimeType    String
+  uploadedById String?
+  uploadedBy   User?   @relation("AttachmentUploader", fields: [uploadedById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([assetId])
+}
+
+model AssetStatusDef {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  label     String
+  color     String   @default("gray")
+  mapsTo    AssetStatus
+  order     Int      @default(0)
+  isSystem  Boolean  @default(false)
+  assets    Asset[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SavedView {
+  id        String   @id @default(uuid())
+  name      String
+  kind      String   // assets | tickets | maintenance | reservations
+  filters   Json     @default("{}")
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  isShared  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([kind])
+}
+
+// ------------ Integrations ------------
+model ApiKey {
+  id          String   @id @default(uuid())
+  name        String
+  hash        String   @unique
+  prefix      String
+  scope       String   @default("read_write")
+  createdById String?
+  createdBy   User?    @relation("ApiKeyCreator", fields: [createdById], references: [id])
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([revokedAt])
+}
+
+model Webhook {
+  id          String   @id @default(uuid())
+  url         String
+  events      String[]
+  secret      String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  deliveries  WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id          String   @id @default(uuid())
+  webhookId   String
+  webhook     Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event       String
+  payload     Json
+  status      Int?
+  attempts    Int      @default(0)
+  lastError   String?
+  succeededAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([webhookId, createdAt])
+  @@index([succeededAt])
+}
+
+model EmailLog {
+  id        String   @id @default(uuid())
+  toEmail   String
+  subject   String
+  body      String
+  sent      Boolean  @default(false)
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ------------ Audit ------------
+model AuditLog {
+  id           String   @id @default(uuid())
+  assetId      String?
+  asset        Asset?   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  action       String
+  detail       Json?
+  performedById String?
+  performedBy   User?   @relation("PerformedBy", fields: [performedById], references: [id])
+  // Tamper-evidence: each entry hashes (prevHash, fields…) — verifiable end-to-end.
+  prevHash      String?
+  entryHash     String?
+  seq           Int      @default(autoincrement())
+  createdAt    DateTime @default(now())
+
+  @@index([assetId])
+  @@index([createdAt])
+  @@index([seq])
+}
+
+// ------------ Notifications (in-app inbox) ------------
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  body        String?
+  href        String?
+  kind        String   // e.g. ticket.assigned, warranty.expiring, maint.due, license.expiring
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, readAt])
+  @@index([createdAt])
+}
+
+// Persisted denylist of consumed refresh-token JTIs (per tenant DB).
+// Replaces the in-memory Map so a process restart cannot resurrect a reused token.
+model RefreshTokenJti {
+  jti         String   @id
+  userId      String?
+  // "logout" or "refresh" — see auth.service.ts theft-detection logic.
+  reason      String   @default("refresh")
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+// Idempotency-key store for replay-safe mutations.
+model IdempotencyKey {
+  key       String
+  scope     String
+  createdAt DateTime @default(now())
+
+  @@id([scope, key])
+}

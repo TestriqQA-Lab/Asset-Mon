@@ -1,0 +1,34 @@
+# Dependencies — host is Windows; must NOT be copied into the Linux image
+node_modules
+**/node_modules
+
+# Secrets / env files — never bake into the image (real values come at runtime)
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Build output (regenerated inside the image)
+dist
+**/dist
+.next
+**/.next
+**/.turbo
+
+# Generated Prisma clients (regenerated during the Docker build)
+packages/*/src/generated
+
+# VCS / local / docs not needed for the build
+.git
+.gitignore
+uploads
+*.log
+coverage
+*.pdf
+tools/screenshots
+
+# Editor / OS cruft
+.vscode
+.idea
+.DS_Store
+Thumbs.db

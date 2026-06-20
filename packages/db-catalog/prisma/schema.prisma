@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("CATALOG_DATABASE_URL")
+}
+
+model Tenant {
+  id          String       @id @default(uuid())
+  slug        String       @unique
+  name        String
+  dbName      String       @unique
+  status      TenantStatus @default(PROVISIONING)
+  plan        String       @default("starter")
+  settings    Json         @default("{}")
+  // Subscription / billing
+  subscriptionStatus String   @default("trialing")
+  trialEndsAt        DateTime?
+  currentPeriodEnd   DateTime?
+  razorpayCustomerId   String?
+  razorpaySubscriptionId String?
+  razorpayPlanId         String?
+  inviteToken String?      @unique
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  tenantUsers TenantUser[]
+}
+
+enum TenantStatus {
+  PROVISIONING
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+model TenantUser {
+  id        String   @id @default(uuid())
+  email     String
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([email, tenantId])
+  @@index([email])
+}
+
+// Platform-level operator (your in-house team that manages every tenant).
+// Lives in the catalog DB so it is fully cross-tenant.
+model PlatformUser {
+  id                String        @id @default(uuid())
+  email             String        @unique
+  passwordHash      String
+  firstName         String
+  lastName          String
+  role              PlatformRole  @default(SUPPORT)
+  active            Boolean       @default(true)
+  totpSecret        String?
+  totpEnabled       Boolean       @default(false)
+  failedLoginCount  Int           @default(0)
+  lockedUntil       DateTime?
+  tokenVersion      Int           @default(0)
+  passwordChangedAt DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+enum PlatformRole {
+  SUPER_ADMIN
+  SUPPORT
+}
+
+// Append-only record of every platform-level mutation. Useful for forensics
+// and for showing the operator team what each member has been doing.
+//
+// Tamper-evidence: each row hashes (prevHash, actor, action, target, metadata,
+// createdAt) with SHA-256. Rewriting an old row without recomputing every
+// downstream `entryHash` breaks the chain — and recomputing them requires
+// write access to the catalog DB *plus* recomputing every subsequent hash,
+// which is detectable by a periodic integrity sweep.
+model PlatformAuditLog {
+  id         String   @id @default(uuid())
+  actorId    String
+  actorEmail String
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   Json     @default("{}")
+  ipAddress  String?
+  userAgent  String?
+  prevHash   String?
+  entryHash  String?
+  seq        Int      @default(autoincrement())
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([action])
+  @@index([targetType, targetId])
+  @@index([seq])
+}
+
+model PlatformRefreshTokenJti {
+  jti       String   @id
+  userId    String?
+  reason    String   @default("refresh")
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
+}

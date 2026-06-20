@@ -1,0 +1,9 @@
+{
+	# email you@yourco.com   # (optional) uncomment for cert-expiry notices
+}
+
+# Replace api.yourco.com with your real API subdomain before deploying.
+api.yourco.com {
+	reverse_proxy api:4000
+	encode gzip
+}
