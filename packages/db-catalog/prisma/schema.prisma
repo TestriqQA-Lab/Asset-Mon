@@ -63,13 +63,28 @@ model PlatformUser {
   lockedUntil       DateTime?
   tokenVersion      Int           @default(0)
   passwordChangedAt DateTime?
+  // --- MFA / 3FA enrolment + recovery (mandatory for platform operators) ---
+  primaryEmailVerifiedAt  DateTime?
+  recoveryEmail           String?
+  recoveryEmailVerifiedAt DateTime?
+  backupCodesGeneratedAt  DateTime?
+  mfaEnrolledAt           DateTime?  // single authoritative gate column; NULL => incomplete => force-gated
+  lastTotpStep            BigInt?    // last accepted TOTP step T; reject step <= this (replay defense)
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
+  mfaPending        PlatformMfaPending[]
+  backupCodes       PlatformBackupCode[]
 }
 
 enum PlatformRole {
   SUPER_ADMIN
   SUPPORT
+}
+
+// Stage of the multi-step MFA login chain (also reused by backup-code "usedFor").
+enum PlatformMfaStage {
+  EMAIL
+  TOTP
 }
 
 // Append-only record of every platform-level mutation. Useful for forensics
@@ -110,5 +125,66 @@ model PlatformRefreshTokenJti {
   createdAt DateTime @default(now())
 
   @@index([expiresAt])
+  @@index([userId])
+}
+
+// One row per in-flight operator login chain. ALL mutable state (attempt
+// counters, live OTP hash, stage, tv/pwd snapshots) lives here so a process
+// restart cannot reset attempt/send budgets. The signed MFA-pending ticket is
+// only a pointer to this row (by `nonce`, rotated each step).
+model PlatformMfaPending {
+  id                String           @id @default(uuid())
+  userId            String
+  user              PlatformUser     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nonce             String           @unique
+  stage             PlatformMfaStage
+  pwdAtSnapshot     DateTime?
+  tvSnapshot        Int
+  emailOtpHash      String?
+  emailTarget       String?
+  emailExpiresAt    DateTime?
+  emailLastSentAt   DateTime?
+  emailSendCount    Int              @default(0)
+  emailCodeAttempts Int              @default(0)
+  chainAttempts     Int              @default(0)
+  backupCodeUsed    Boolean          @default(false)
+  consumedAt        DateTime?
+  expiresAt         DateTime
+  createdAt         DateTime         @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// Single-use recovery codes. Stored only as HMAC-SHA256(code, OTP_PEPPER),
+// stamped with the pepperVersion that produced the hash so a pepper rotation
+// auto-invalidates old codes (and the next-login gate forces regeneration).
+model PlatformBackupCode {
+  id            String            @id @default(uuid())
+  userId        String
+  user          PlatformUser      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash      String
+  pepperVersion Int
+  usedAt        DateTime?
+  usedFor       PlatformMfaStage?
+  createdAt     DateTime          @default(now())
+
+  @@unique([userId, codeHash])
+}
+
+// Platform-side email send log. Platform email has no tenant context, so it
+// cannot use the tenant EmailLog. NEVER stores the OTP body. FK-less indexed
+// userId, matching the PlatformAuditLog convention (logs are retained).
+model PlatformOperatorEmailLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  toEmail   String
+  purpose   String
+  subject   String?
+  sent      Boolean  @default(false)
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
   @@index([userId])
 }
