@@ -45,6 +45,14 @@ model User {
   auditScans    AuditScan[]    @relation("ScannedBy")
   createdApiKeys ApiKey[]      @relation("ApiKeyCreator")
   notifications Notification[]
+  // --- MFA (optional; company admin + employees) ---
+  mfaMethod               TenantMfaMethod @default(NONE)
+  mfaEnabledAt            DateTime?
+  recoveryEmail           String?
+  recoveryEmailVerifiedAt DateTime?
+  lastTotpStep            BigInt?
+  mfaPending              TenantMfaPending[]
+  backupCodes             TenantBackupCode[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
@@ -55,6 +63,20 @@ enum Role {
   ADMIN
   ASSET_MANAGER
   EMPLOYEE
+}
+
+// How a tenant user's MFA is configured. NONE = off (most users). EMAIL = 2FA
+// (password + email code). EMAIL_TOTP = 3FA (+ authenticator app).
+enum TenantMfaMethod {
+  NONE
+  EMAIL
+  EMAIL_TOTP
+}
+
+// Stage of the multi-step MFA login chain (also reused by backup-code "usedFor").
+enum TenantMfaStage {
+  EMAIL
+  TOTP
 }
 
 // ------------ Org structure ------------
@@ -627,4 +649,46 @@ model IdempotencyKey {
   createdAt DateTime @default(now())
 
   @@id([scope, key])
+}
+
+// Per-tenant mirror of PlatformMfaPending: one row per in-flight MFA login chain.
+// All mutable state (attempt counters, live OTP hash, stage, snapshots) lives
+// here so a restart can't reset attempt/send budgets. Located via `nonce`.
+model TenantMfaPending {
+  id                String         @id @default(uuid())
+  userId            String
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nonce             String         @unique
+  stage             TenantMfaStage
+  pwdAtSnapshot     DateTime?
+  tvSnapshot        Int
+  emailOtpHash      String?
+  emailTarget       String?
+  emailExpiresAt    DateTime?
+  emailLastSentAt   DateTime?
+  emailSendCount    Int            @default(0)
+  emailCodeAttempts Int            @default(0)
+  chainAttempts     Int            @default(0)
+  backupCodeUsed    Boolean        @default(false)
+  consumedAt        DateTime?
+  expiresAt         DateTime
+  createdAt         DateTime       @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// Per-tenant mirror of PlatformBackupCode: single-use recovery codes, stored
+// only as HMAC+pepper hash, stamped with the producing pepperVersion.
+model TenantBackupCode {
+  id            String          @id @default(uuid())
+  userId        String
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash      String
+  pepperVersion Int
+  usedAt        DateTime?
+  usedFor       TenantMfaStage?
+  createdAt     DateTime        @default(now())
+
+  @@unique([userId, codeHash])
 }
