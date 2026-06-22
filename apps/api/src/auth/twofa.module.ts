@@ -8,6 +8,7 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { CurrentUser } from './current-user.decorator';
 import { SITE_NAME } from './twofa.constants';
 import { encryptSecret, decryptSecret } from '../common/crypto';
+import { AuthService } from './auth.service';
 
 // Pending TOTP secrets are kept in memory until the user verifies the first code.
 // Until then the previously-enabled secret stays valid, so a half-finished
@@ -37,27 +38,30 @@ class TwoFAService {
     if (!pending) throw new BadRequestException('Start enrollment first');
     if (!authenticator.check(token, pending)) throw new UnauthorizedException('Invalid TOTP code');
     // Only at this point do we overwrite any previously enabled secret.
-    await this.ctx.prisma().user.update({
+    const updated = await this.ctx.prisma().user.update({
       where: { id: userId },
       data: { totpSecret: encryptSecret(pending), totpEnabled: true, tokenVersion: { increment: 1 } },
+      select: { tokenVersion: true },
     });
     pendingSecrets.delete(userId);
-    return { ok: true };
+    // tokenVersion (post-bump) lets the controller re-issue the caller's session.
+    return { ok: true, tokenVersion: updated.tokenVersion };
   }
 
   async disable(userId: string, token: string) {
     const u = await this.ctx.prisma().user.findUnique({ where: { id: userId } });
-    if (!u?.totpEnabled || !u.totpSecret) return { ok: true };
+    if (!u?.totpEnabled || !u.totpSecret) return { ok: true }; // no-op: no bump, no re-issue
     let secret: string;
     try { secret = decryptSecret(u.totpSecret); }
     catch { throw new BadRequestException('Re-enroll required'); }
     if (!authenticator.check(token, secret)) throw new UnauthorizedException('Invalid TOTP code');
-    await this.ctx.prisma().user.update({
+    const updated = await this.ctx.prisma().user.update({
       where: { id: userId },
       data: { totpSecret: null, totpEnabled: false, tokenVersion: { increment: 1 } },
+      select: { tokenVersion: true },
     });
     pendingSecrets.delete(userId);
-    return { ok: true };
+    return { ok: true, tokenVersion: updated.tokenVersion };
   }
 
   async status(userId: string) {
@@ -73,7 +77,16 @@ class VerifyDto { @IsString() @Length(6, 6) token: string; }
 @UseGuards(JwtAuthGuard)
 @Controller('me/2fa')
 class TwoFAController {
-  constructor(private readonly svc: TwoFAService) {}
+  constructor(
+    private readonly svc: TwoFAService,
+    private readonly auth: AuthService,
+  ) {}
+
+  // Re-issue the caller's own session after a tokenVersion bump (enable/disable),
+  // so the acting device stays signed in. Mirrors req.user's claims.
+  private reissue(u: any, tokenVersion: number) {
+    return this.auth.issueTokens(u.tid, u.slug, u.db, u.sub, u.role, u.email, tokenVersion);
+  }
 
   @Get()
   status(@CurrentUser('sub') uid: string) { return this.svc.status(uid); }
@@ -86,14 +99,16 @@ class TwoFAController {
 
   @Post('verify')
   @Throttle({ short: { limit: 5, ttl: 60_000 }, medium: { limit: 20, ttl: 600_000 } })
-  verify(@CurrentUser('sub') uid: string, @Body() dto: VerifyDto) {
-    return this.svc.verifyAndEnable(uid, dto.token);
+  async verify(@CurrentUser() u: any, @Body() dto: VerifyDto) {
+    const { tokenVersion, ...rest } = await this.svc.verifyAndEnable(u.sub, dto.token);
+    return { ...rest, tokens: this.reissue(u, tokenVersion) };
   }
 
   @Post('disable')
   @Throttle({ short: { limit: 5, ttl: 60_000 }, medium: { limit: 20, ttl: 600_000 } })
-  disable(@CurrentUser('sub') uid: string, @Body() dto: VerifyDto) {
-    return this.svc.disable(uid, dto.token);
+  async disable(@CurrentUser() u: any, @Body() dto: VerifyDto) {
+    const { tokenVersion, ...rest } = await this.svc.disable(u.sub, dto.token) as any;
+    return tokenVersion == null ? rest : { ...rest, tokens: this.reissue(u, tokenVersion) };
   }
 }
 

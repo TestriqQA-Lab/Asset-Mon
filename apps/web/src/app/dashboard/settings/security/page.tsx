@@ -59,6 +59,10 @@ export default function SecuritySettingsPage() {
   const [saved, setSaved] = useState(false);
   const [showDisable, setShowDisable] = useState(false); // reveals the turn-off password step-up
   const [disablePassword, setDisablePassword] = useState('');
+  const [switchMode, setSwitchMode] = useState<null | 'up' | 'down'>(null); // level switch in progress
+  const [switchPassword, setSwitchPassword] = useState('');
+  const [totpEnroll, setTotpEnroll] = useState<{ secret: string; otpauth: string } | null>(null); // inline authenticator enroll
+  const [enrollCode, setEnrollCode] = useState('');
 
   function resetEnrollState() {
     setRecoveryEmail('');
@@ -137,6 +141,44 @@ export default function SecuritySettingsPage() {
     onError: (e) => toast.error(e.message || 'Could not turn off verification.'),
   });
 
+  // ── level switch: email-only (EMAIL) <-> email + authenticator app (EMAIL_TOTP) ──
+  function cancelSwitch() {
+    setSwitchMode(null);
+    setSwitchPassword('');
+    setTotpEnroll(null);
+    setEnrollCode('');
+  }
+
+  // Inline authenticator enrollment, needed before switching UP when the user
+  // hasn't set up an app yet. Reuses the existing /me/2fa endpoints.
+  const startEnrollForSwitch = useMutation<any, Error, void>({
+    mutationFn: () => api('/me/2fa/enroll', { method: 'POST' }),
+    onSuccess: (r: any) => setTotpEnroll(r),
+    onError: (e) => toast.error(e.message),
+  });
+  const confirmEnrollForSwitch = useMutation<any, Error, void>({
+    mutationFn: () => api('/me/2fa/verify', { method: 'POST', body: JSON.stringify({ token: enrollCode }) }),
+    onSuccess: (r: any) => {
+      if (r?.tokens) setSession(r.tokens); // enrolling bumps the session version — keep this device signed in
+      toast.success('Authenticator app added — now confirm your password.');
+      setTotpEnroll(null);
+      setEnrollCode('');
+      qc.invalidateQueries({ queryKey: ['me-mfa'] }); // totpEnabled flips true -> the password step shows
+      qc.invalidateQueries({ queryKey: ['2fa-status'] });
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const switchLevel = useMutation<any, Error, 'EMAIL' | 'EMAIL_TOTP'>({
+    mutationFn: (method) => api('/me/mfa/enable', { method: 'POST', body: JSON.stringify({ method, password: switchPassword }) }),
+    onSuccess: (r: any) => {
+      if (r?.tokens) setSession(r.tokens); // stay signed in (changing level bumps the session version)
+      cancelSwitch();
+      setCodes(Array.isArray(r?.codes) ? r.codes : []); // changing level re-issues recovery codes — show them
+      setSaved(false);
+    },
+    onError: (e: any) => toast.error(/password/i.test(e?.message || '') ? 'Incorrect password.' : (e.message || 'Could not change the level.')),
+  });
+
   function finishCodes() {
     setCodes(null);
     setSaved(false);
@@ -156,12 +198,12 @@ export default function SecuritySettingsPage() {
   });
   const verify = useMutation<any, Error, void>({
     mutationFn: () => api('/me/2fa/verify', { method: 'POST', body: JSON.stringify({ token }) }),
-    onSuccess: () => { toast.success('Two-factor authentication enabled'); setEnroll(null); setToken(''); qc.invalidateQueries({ queryKey: ['2fa-status'] }); },
+    onSuccess: (r: any) => { if (r?.tokens) setSession(r.tokens); toast.success('Two-factor authentication enabled'); setEnroll(null); setToken(''); qc.invalidateQueries({ queryKey: ['2fa-status'] }); qc.invalidateQueries({ queryKey: ['me-mfa'] }); },
     onError: (e) => toast.error(e.message),
   });
   const disable = useMutation<any, Error, void>({
     mutationFn: () => api('/me/2fa/disable', { method: 'POST', body: JSON.stringify({ token }) }),
-    onSuccess: () => { toast.success('Two-factor authentication disabled'); setToken(''); qc.invalidateQueries({ queryKey: ['2fa-status'] }); },
+    onSuccess: (r: any) => { if (r?.tokens) setSession(r.tokens); toast.success('Two-factor authentication disabled'); setToken(''); qc.invalidateQueries({ queryKey: ['2fa-status'] }); qc.invalidateQueries({ queryKey: ['me-mfa'] }); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -227,7 +269,7 @@ export default function SecuritySettingsPage() {
               </div>
             )}
 
-            {/* 2) Already on — summary + turn-off (with password step-up) */}
+            {/* 2) Already on — summary + level switch + turn-off (all with password step-up) */}
             {!codes && enabled && (
               <div className="mt-4 space-y-3 text-sm">
                 <div className="space-y-1.5">
@@ -236,9 +278,80 @@ export default function SecuritySettingsPage() {
                   <p className="text-ink-500">Recovery codes left: <span className="font-medium text-ink-700">{m?.backupCodesRemaining ?? 0}</span></p>
                 </div>
 
-                {!showDisable ? (
-                  <Button variant="secondary" onClick={() => setShowDisable(true)}>Turn off email verification</Button>
-                ) : (
+                {/* Action row — shown when no sub-flow is open */}
+                {!showDisable && switchMode === null && (
+                  <div className="flex flex-wrap gap-2">
+                    {m!.mfaMethod === 'EMAIL'
+                      ? <Button variant="secondary" onClick={() => { setSwitchMode('up'); setSwitchPassword(''); if (!m!.totpEnabled) startEnrollForSwitch.mutate(); }}>Also require an authenticator app</Button>
+                      : <Button variant="secondary" onClick={() => { setSwitchMode('down'); setSwitchPassword(''); }}>Switch to email only</Button>}
+                    <Button variant="secondary" onClick={() => setShowDisable(true)}>Turn off email verification</Button>
+                  </div>
+                )}
+
+                {/* Switch UP: email -> email + authenticator app */}
+                {switchMode === 'up' && (
+                  <div className="space-y-3 rounded-lg border border-ink-200 bg-ink-50/60 p-3">
+                    {!m!.totpEnabled ? (
+                      <div>
+                        <p className="font-medium text-ink-800">Step 1 — set up your authenticator app</p>
+                        {totpEnroll ? (
+                          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                            <div>
+                              <img alt="Authenticator QR code" className="h-40 w-40 rounded-md border border-ink-200 bg-white" src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(totpEnroll.otpauth)}`} />
+                              <div className="mt-2 flex items-center gap-2">
+                                <code className="block flex-1 break-all rounded-md border border-ink-200 bg-white px-2 py-1 font-mono text-[10px] text-ink-700">{totpEnroll.secret}</code>
+                                <Button size="sm" variant="secondary" icon={<Copy className="h-3.5 w-3.5" />} onClick={async () => { const ok = await copyToClipboard(totpEnroll.secret); ok ? toast.success('Secret copied') : toast.error('Could not copy — select the text and press Ctrl+C / ⌘C'); }}>Copy</Button>
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-xs font-medium text-ink-500">Enter the 6-digit code from the app</p>
+                              <input className={inputClass + ' mt-1 max-w-[10rem] font-mono tracking-widest'} maxLength={6} inputMode="numeric" autoFocus value={enrollCode} onChange={(e) => setEnrollCode(e.target.value.replace(/\D/g, ''))} />
+                              <div className="mt-2">
+                                <Button loading={confirmEnrollForSwitch.isPending} disabled={enrollCode.length !== 6} onClick={() => confirmEnrollForSwitch.mutate()}>Confirm app</Button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-ink-500">Preparing your authenticator setup…</p>
+                        )}
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-ink-700">Confirm your password to also require your authenticator app at sign-in.</p>
+                        <input
+                          type="password" autoComplete="current-password" autoFocus
+                          className={inputClass + ' mt-2 max-w-xs'} placeholder="Your password"
+                          value={switchPassword} onChange={(e) => setSwitchPassword(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && switchPassword) switchLevel.mutate('EMAIL_TOTP'); }}
+                        />
+                        <div className="mt-3 flex gap-2">
+                          <Button loading={switchLevel.isPending} disabled={!switchPassword} onClick={() => switchLevel.mutate('EMAIL_TOTP')}>Turn on authenticator step</Button>
+                        </div>
+                      </div>
+                    )}
+                    <Button variant="ghost" onClick={cancelSwitch}>Cancel</Button>
+                  </div>
+                )}
+
+                {/* Switch DOWN: email + authenticator app -> email only */}
+                {switchMode === 'down' && (
+                  <div className="rounded-lg border border-ink-200 bg-ink-50/60 p-3">
+                    <p className="text-ink-700">Confirm your password to switch to email-only verification. Your authenticator app will no longer be required at sign-in.</p>
+                    <input
+                      type="password" autoComplete="current-password" autoFocus
+                      className={inputClass + ' mt-2 max-w-xs'} placeholder="Your password"
+                      value={switchPassword} onChange={(e) => setSwitchPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && switchPassword) switchLevel.mutate('EMAIL'); }}
+                    />
+                    <div className="mt-3 flex gap-2">
+                      <Button loading={switchLevel.isPending} disabled={!switchPassword} onClick={() => switchLevel.mutate('EMAIL')}>Switch to email only</Button>
+                      <Button variant="secondary" onClick={cancelSwitch}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Turn off entirely */}
+                {showDisable && (
                   <div className="rounded-lg border border-ink-200 bg-ink-50/60 p-3">
                     <p className="text-ink-700">For your security, confirm your password to turn off email verification.</p>
                     <input
