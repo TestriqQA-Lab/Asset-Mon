@@ -6,6 +6,7 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser } from './current-user.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { TenantMfaService } from './tenant-mfa.service';
+import { AuthService } from './auth.service';
 
 class RecoveryDto {
   @IsEmail() email: string;
@@ -35,7 +36,15 @@ export class TenantMfaController {
   constructor(
     private readonly svc: TenantMfaService,
     private readonly ctx: TenantContextService,
+    private readonly auth: AuthService,
   ) {}
+
+  // Re-issue the CALLER's own session after an MFA change bumped tokenVersion,
+  // so the acting device stays signed in while every other session is dropped.
+  // Mirrors the claims already on the request's access token (req.user).
+  private reissue(u: any, tokenVersion: number) {
+    return this.auth.issueTokens(u.tid, u.slug, u.db, u.sub, u.role, u.email, tokenVersion);
+  }
 
   @Get()
   status(@CurrentUser('sub') uid: string) {
@@ -56,13 +65,16 @@ export class TenantMfaController {
 
   @Post('enable')
   @Throttle({ short: { limit: 5, ttl: 60_000 }, medium: { limit: 15, ttl: 600_000 } })
-  enable(@CurrentUser('sub') uid: string, @Body() dto: EnableDto) {
-    return this.svc.enable(this.ctx.prisma(), uid, dto.method, dto.password);
+  async enable(@CurrentUser() u: any, @Body() dto: EnableDto) {
+    const { tokenVersion, ...rest } = await this.svc.enable(this.ctx.prisma(), u.sub, dto.method, dto.password);
+    return { ...rest, tokens: this.reissue(u, tokenVersion) };
   }
 
   @Post('disable')
   @Throttle({ short: { limit: 5, ttl: 60_000 }, medium: { limit: 15, ttl: 600_000 } })
-  disable(@CurrentUser('sub') uid: string, @Body() dto: DisableDto) {
-    return this.svc.disable(this.ctx.prisma(), uid, dto.password);
+  async disable(@CurrentUser() u: any, @Body() dto: DisableDto) {
+    const { tokenVersion, ...rest } = await this.svc.disable(this.ctx.prisma(), u.sub, dto.password) as any;
+    // tokenVersion is absent on the no-op path (MFA was already off) — nothing to re-issue.
+    return tokenVersion == null ? rest : { ...rest, tokens: this.reissue(u, tokenVersion) };
   }
 }

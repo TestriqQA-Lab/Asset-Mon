@@ -595,7 +595,10 @@ export class AuthService {
     }
   }
 
-  private issueTokens(tid: string, slug: string, db: string, sub: string, role: string, email: string, tv: number = 0) {
+  // Public so settings flows that bump tokenVersion (e.g. tenant MFA enable/
+  // disable) can re-issue the CURRENT session — keeping the acting device signed
+  // in while other sessions are invalidated by the version bump.
+  issueTokens(tid: string, slug: string, db: string, sub: string, role: string, email: string, tv: number = 0) {
     const access = this.jwt.sign(
       { sub, tid, slug, db, role, email, tv },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: Number(process.env.JWT_ACCESS_TTL || 900) },

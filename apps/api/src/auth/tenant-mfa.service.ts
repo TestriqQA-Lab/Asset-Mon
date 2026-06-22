@@ -85,31 +85,38 @@ export class TenantMfaService {
     if (method === 'EMAIL_TOTP' && !user.totpEnabled) throw new BadRequestException('Enroll an authenticator app first.');
 
     const codes = generateBackupCodes(BACKUP_CODE_COUNT);
+    let tokenVersion = 0;
     await db.$transaction(async (tx: any) => {
       await tx.tenantBackupCode.deleteMany({ where: { userId } });
       await tx.tenantBackupCode.createMany({ data: codes.map((c) => ({ userId, codeHash: c.hash, pepperVersion: c.pepperVersion })) });
       await tx.tenantMfaPending.deleteMany({ where: { userId } });
-      await tx.user.update({ where: { id: userId }, data: { mfaMethod: method, mfaEnabledAt: new Date(), tokenVersion: { increment: 1 } } });
+      const updated = await tx.user.update({ where: { id: userId }, data: { mfaMethod: method, mfaEnabledAt: new Date(), tokenVersion: { increment: 1 } }, select: { tokenVersion: true } });
+      tokenVersion = updated.tokenVersion;
     });
-    return { ok: true, method, codes: codes.map((c) => c.plain) };
+    // tokenVersion is the POST-bump value so the controller can re-issue the
+    // caller's own session (the bump invalidates every other session).
+    return { ok: true, method, codes: codes.map((c) => c.plain), tokenVersion };
   }
 
   async disable(db: any, userId: string, password: string) {
     const user = await db.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException();
-    if (user.mfaMethod === 'NONE') return { ok: true };
+    if (user.mfaMethod === 'NONE') return { ok: true }; // no-op: nothing changed, no re-issue needed
     // Step-up: re-assert a current factor (the password) before turning MFA off.
     const ok = await bcrypt.compare(password || '', user.passwordHash);
     if (!ok) throw new UnauthorizedException('Incorrect password.');
+    let tokenVersion = 0;
     await db.$transaction(async (tx: any) => {
       await tx.tenantBackupCode.deleteMany({ where: { userId } });
       await tx.tenantMfaPending.deleteMany({ where: { userId } });
-      await tx.user.update({
+      const updated = await tx.user.update({
         where: { id: userId },
         data: { mfaMethod: 'NONE', mfaEnabledAt: null, recoveryEmail: null, recoveryEmailVerifiedAt: null, tokenVersion: { increment: 1 } },
+        select: { tokenVersion: true },
       });
+      tokenVersion = updated.tokenVersion;
     });
-    return { ok: true };
+    return { ok: true, tokenVersion };
   }
 
   // ── shared OTP helpers (TenantMfaPending) ─────────────────────────────────

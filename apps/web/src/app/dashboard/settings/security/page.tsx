@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ShieldCheck, KeyRound, Copy, Mail, Download, AlertTriangle, RefreshCw } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, setSession } from '@/lib/api';
 import { copyToClipboard } from '@/lib/clipboard';
 import { Card, SectionHeader, Button, Field, inputClass, Pill } from '@/components/ui';
 
@@ -57,6 +57,8 @@ export default function SecuritySettingsPage() {
   const [recoveryCode, setRecoveryCode] = useState('');
   const [codes, setCodes] = useState<string[] | null>(null); // shown once, right after enabling
   const [saved, setSaved] = useState(false);
+  const [showDisable, setShowDisable] = useState(false); // reveals the turn-off password step-up
+  const [disablePassword, setDisablePassword] = useState('');
 
   function resetEnrollState() {
     setRecoveryEmail('');
@@ -113,11 +115,26 @@ export default function SecuritySettingsPage() {
   const enableEmail = useMutation<any, Error, void>({
     mutationFn: () => api('/me/mfa/enable', { method: 'POST', body: JSON.stringify({ method: 'EMAIL' }) }),
     onSuccess: (r: any) => {
+      // Enabling bumps the session version (ends other sessions). The server hands
+      // back a fresh session for THIS device so we don't get signed out — store it.
+      if (r?.tokens) setSession(r.tokens);
       setCodes(Array.isArray(r?.codes) ? r.codes : []);
       setSaved(false);
       resetEnrollState();
     },
     onError: (e) => toast.error(e.message),
+  });
+
+  const disableEmail = useMutation<any, Error, void>({
+    mutationFn: () => api('/me/mfa/disable', { method: 'POST', body: JSON.stringify({ password: disablePassword }) }),
+    onSuccess: (r: any) => {
+      if (r?.tokens) setSession(r.tokens); // stay signed in after turning it off
+      setShowDisable(false);
+      setDisablePassword('');
+      qc.invalidateQueries({ queryKey: ['me-mfa'] });
+      toast.success('Email verification turned off.');
+    },
+    onError: (e) => toast.error(e.message || 'Could not turn off verification.'),
   });
 
   function finishCodes() {
@@ -210,12 +227,36 @@ export default function SecuritySettingsPage() {
               </div>
             )}
 
-            {/* 2) Already on — summary */}
+            {/* 2) Already on — summary + turn-off (with password step-up) */}
             {!codes && enabled && (
-              <div className="mt-4 space-y-1.5 text-sm">
-                <p className="text-ink-700">{METHOD_LABEL[m!.mfaMethod]}</p>
-                {m?.recoveryEmail && <p className="text-ink-500">Recovery email: <span className="font-medium text-ink-700">{m.recoveryEmail}</span></p>}
-                <p className="text-ink-500">Recovery codes left: <span className="font-medium text-ink-700">{m?.backupCodesRemaining ?? 0}</span></p>
+              <div className="mt-4 space-y-3 text-sm">
+                <div className="space-y-1.5">
+                  <p className="text-ink-700">{METHOD_LABEL[m!.mfaMethod]}</p>
+                  {m?.recoveryEmail && <p className="text-ink-500">Recovery email: <span className="font-medium text-ink-700">{m.recoveryEmail}</span></p>}
+                  <p className="text-ink-500">Recovery codes left: <span className="font-medium text-ink-700">{m?.backupCodesRemaining ?? 0}</span></p>
+                </div>
+
+                {!showDisable ? (
+                  <Button variant="secondary" onClick={() => setShowDisable(true)}>Turn off email verification</Button>
+                ) : (
+                  <div className="rounded-lg border border-ink-200 bg-ink-50/60 p-3">
+                    <p className="text-ink-700">For your security, confirm your password to turn off email verification.</p>
+                    <input
+                      type="password"
+                      autoComplete="current-password"
+                      autoFocus
+                      className={inputClass + ' mt-2 max-w-xs'}
+                      placeholder="Your password"
+                      value={disablePassword}
+                      onChange={(e) => setDisablePassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && disablePassword) disableEmail.mutate(); }}
+                    />
+                    <div className="mt-3 flex gap-2">
+                      <Button variant="danger" loading={disableEmail.isPending} disabled={!disablePassword} onClick={() => disableEmail.mutate()}>Turn off</Button>
+                      <Button variant="secondary" onClick={() => { setShowDisable(false); setDisablePassword(''); }}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
