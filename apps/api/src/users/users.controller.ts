@@ -27,6 +27,11 @@ class UpdateUserDto {
   @IsOptional() @IsString() scopedDepartmentId?: string | null;
   @IsOptional() @IsString() @MinLength(8) password?: string;
 }
+class ResetUserMfaDto {
+  // The acting admin's OWN password — required only when that admin has MFA
+  // enabled (step-up). Optional in the DTO so admins without MFA can omit it.
+  @IsOptional() @IsString() password?: string;
+}
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -54,6 +59,14 @@ export class UsersController {
   @Roles('ADMIN')
   update(@Param('id') id: string, @Body() dto: UpdateUserDto, @CurrentUser() actor: any) {
     return this.svc.update(id, dto, { id: actor.sub, role: actor.role });
+  }
+
+  // Company-admin recovery: clear a user's MFA so they can re-enroll after
+  // losing their email/device. Independent of the password reset above.
+  @Post(':id/reset-mfa')
+  @Roles('ADMIN')
+  resetMfa(@Param('id') id: string, @Body() dto: ResetUserMfaDto, @CurrentUser() actor: any) {
+    return this.svc.resetUserMfa(id, { id: actor.sub, role: actor.role }, dto.password);
   }
 
   @Delete(':id')

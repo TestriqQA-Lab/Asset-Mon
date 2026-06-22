@@ -1,9 +1,10 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { BillingService } from '../billing/billing.module';
 import { writeAuditEntry } from '../common/audit-hash';
+import { clearTenantMfaUserData } from '../auth/tenant-mfa-clear';
 
 type Actor = { id: string; role: string };
 
@@ -135,6 +136,54 @@ export class UsersService {
     }).catch(() => {});
 
     return updated;
+  }
+
+  /**
+   * Company-admin "Reset this user's MFA" — the employee-recovery rung from
+   * docs/tenant-mfa-plan.md §6/§7. Clears the target's MFA so a user who lost
+   * their email and/or authenticator device can re-enroll from scratch.
+   *
+   * Distinct from PATCH /users/:id password reset, which is independent of MFA
+   * and does NOT touch the authenticator (see update()). This action uses the
+   * full clear set (clearTenantMfaUserData) — which DOES null the authenticator —
+   * because a reset that left totpEnabled=true would still wall a device-lost
+   * user at the legacy TOTP login step.
+   *
+   * Guards: ADMIN-only (defence in depth even with RolesGuard off) + step-up —
+   * if the acting admin has their OWN MFA enabled, they must re-enter their
+   * password before they can clear someone else's. Audited.
+   */
+  async resetUserMfa(targetId: string, actor: Actor, password?: string) {
+    if (actor.role !== 'ADMIN') throw new ForbiddenException('Only an admin can reset a user\'s MFA');
+
+    const db = this.ctx.prisma();
+    const target = await db.user.findUnique({ where: { id: targetId } });
+    if (!target) throw new NotFoundException('User not found');
+
+    // Step-up: only required when the acting admin actually has MFA enabled
+    // (per the tenant plan §7). Re-assert the admin's OWN password.
+    const admin = await db.user.findUnique({ where: { id: actor.id } });
+    if (admin && admin.mfaMethod && admin.mfaMethod !== 'NONE') {
+      const ok = await bcrypt.compare(password || '', admin.passwordHash);
+      if (!ok) throw new UnauthorizedException('Re-enter your password to reset a user\'s MFA.');
+    }
+
+    const hadMfa = target.mfaMethod !== 'NONE' || target.totpEnabled;
+
+    await db.$transaction(async (tx: any) => {
+      await tx.tenantBackupCode.deleteMany({ where: { userId: targetId } });
+      await tx.tenantMfaPending.deleteMany({ where: { userId: targetId } });
+      await tx.user.update({ where: { id: targetId }, data: clearTenantMfaUserData() });
+    });
+
+    await writeAuditEntry(db, {
+      action: 'user.reset_mfa',
+      performedById: actor.id,
+      detail: { userId: targetId, email: target.email, hadMfa, previousMethod: target.mfaMethod },
+      impersonatedBy: this.ctx.impersonatedBy ?? null,
+    }).catch(() => {});
+
+    return { ok: true };
   }
 
   async remove(id: string, actor: Actor) {
