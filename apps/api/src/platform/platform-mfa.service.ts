@@ -17,6 +17,7 @@ import { encryptSecret, decryptSecretStrict } from '../common/crypto';
 import { generateNumericOtp, hashCode, verifyCode } from '../common/mfa/otp.util';
 import { generateBackupCodes } from '../common/mfa/backup-codes.util';
 import { mfaSetupComplete, maskEmail, sameRegistrableDomain } from './platform-mfa.util';
+import { clearMfaUserData } from './platform-mfa-clear';
 
 const OTP_TTL_MS = 5 * 60_000;
 const PENDING_TTL_MS = 10 * 60_000;
@@ -278,5 +279,21 @@ export class PlatformMfaService {
     await this.audit.record({ id: user.id, email: user.email }, 'platform.mfa.enrolled', { type: 'platformUser', id: user.id }, {}, req);
 
     return this.auth.issueTokensForUser(updated);
+  }
+
+  /**
+   * Shared MFA reset (used by the peer-reset path). Nulls every MFA column,
+   * deletes backup codes + pending chains, bumps tokenVersion (kills sessions),
+   * and asserts the gate column ends NULL so no path can leave a half-cleared,
+   * still-usable MFA state (R8/B8). Uses the same clearMfaUserData() column set
+   * as the CLI break-glass so the two never drift.
+   */
+  async clearMfa(userId: string): Promise<void> {
+    await this.catalog.$transaction(async (tx) => {
+      await tx.platformBackupCode.deleteMany({ where: { userId } });
+      await tx.platformMfaPending.deleteMany({ where: { userId } });
+      const updated = await tx.platformUser.update({ where: { id: userId }, data: clearMfaUserData() });
+      if (updated.mfaEnrolledAt !== null) throw new Error('clearMfa post-condition failed: mfaEnrolledAt is not null');
+    });
   }
 }

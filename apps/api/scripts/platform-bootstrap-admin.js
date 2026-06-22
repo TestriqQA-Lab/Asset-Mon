@@ -60,10 +60,112 @@ function genPassword() {
   return pw;
 }
 
+function timingSafeEq(a, b) {
+  const ab = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
+/**
+ * Break-glass MFA reset (host/SSH only). Clears a locked-out operator's MFA so
+ * they re-enroll at next login. Gated by a separate BREAKGLASS_TOKEN (DB access
+ * alone is insufficient) and writes a hash-chained PlatformAuditLog row so the
+ * reset is tamper-evident (R7/S7). Uses the SAME clearMfaUserData() column set
+ * as the service-side clearMfa, so the two never drift.
+ */
+async function resetMfaFlow(args, email) {
+  const expected = process.env.BREAKGLASS_TOKEN;
+  const provided = typeof args['breakglass-token'] === 'string' ? args['breakglass-token'] : '';
+  if (!expected) {
+    console.error('Error: BREAKGLASS_TOKEN is not set in the environment. --reset-mfa is refused.');
+    process.exit(2);
+  }
+  if (!provided || !timingSafeEq(provided, expected)) {
+    console.error('Error: --breakglass-token is missing or does not match BREAKGLASS_TOKEN.');
+    process.exit(2);
+  }
+  if (!process.env.CATALOG_DATABASE_URL) {
+    console.error('Error: CATALOG_DATABASE_URL is not set. Did you create the .env file at the repo root?');
+    process.exit(1);
+  }
+  if ((process.env.NODE_ENV || '').toLowerCase() === 'production' && !args['allow-prod']) {
+    console.error('Refusing to reset MFA on a production catalog DB without --allow-prod.');
+    process.exit(2);
+  }
+
+  // Shared, compiled helpers (require the build output; this path runs in the
+  // production image or after `npm run db:setup && nest build`).
+  const { clearMfaUserData } = require('../dist/platform/platform-mfa-clear');
+  const { hashPlatformEntry } = require('../dist/platform/platform-audit-hash');
+
+  const prisma = new PrismaClient({ datasources: { db: { url: process.env.CATALOG_DATABASE_URL } } });
+  try {
+    await prisma.$connect();
+    const user = await prisma.platformUser.findUnique({ where: { email } });
+    if (!user) {
+      console.error('Error: no platform user with email ' + email);
+      process.exit(1);
+    }
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.platformBackupCode.deleteMany({ where: { userId: user.id } });
+        await tx.platformMfaPending.deleteMany({ where: { userId: user.id } });
+        const updated = await tx.platformUser.update({ where: { id: user.id }, data: clearMfaUserData() });
+        if (updated.mfaEnrolledAt !== null) throw new Error('post-condition failed: mfaEnrolledAt is not null');
+
+        const last = await tx.platformAuditLog.findFirst({ orderBy: { seq: 'desc' }, select: { entryHash: true } });
+        const createdAt = new Date();
+        const metadata = { source: 'cli', host: require('os').hostname(), incidentRef: args['incident-ref'] || null };
+        const entryHash = hashPlatformEntry({
+          prevHash: last ? last.entryHash : null,
+          actorId: 'cli-breakglass',
+          actorEmail: 'cli-breakglass',
+          action: 'platform.cli.mfa_reset',
+          targetType: 'platformUser',
+          targetId: user.id,
+          metadata,
+          ipAddress: null,
+          userAgent: null,
+          createdAt,
+        });
+        await tx.platformAuditLog.create({
+          data: {
+            actorId: 'cli-breakglass',
+            actorEmail: 'cli-breakglass',
+            action: 'platform.cli.mfa_reset',
+            targetType: 'platformUser',
+            targetId: user.id,
+            metadata,
+            ipAddress: null,
+            userAgent: null,
+            prevHash: last ? last.entryHash : null,
+            entryHash,
+            createdAt,
+          },
+        });
+      },
+      { isolationLevel: 'Serializable' },
+    );
+    console.log('');
+    console.log('✓ MFA reset for ' + email + '.');
+    console.log('  They are now password-only and will be force-gated into MFA setup at next login.');
+    console.log('');
+    process.exit(0);
+  } catch (e) {
+    console.error('Reset failed:', (e && e.message) || e);
+    process.exit(1);
+  } finally {
+    await prisma.$disconnect().catch(() => {});
+  }
+}
+
 (async () => {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
-    console.log('Usage: npm run platform:bootstrap-admin -- --email me@example.com [--password ...] [--firstName ...] [--lastName ...]');
+    console.log('Usage:');
+    console.log('  Create/reset admin : npm run platform:bootstrap-admin -- --email me@example.com [--password ...] [--firstName ...] [--lastName ...]');
+    console.log('  Break-glass MFA reset: npm run platform:bootstrap-admin -- --email me@example.com --reset-mfa --breakglass-token <BREAKGLASS_TOKEN> [--incident-ref REF] [--allow-prod]');
     process.exit(0);
   }
   const email = (args.email || '').toLowerCase().trim();
@@ -71,6 +173,14 @@ function genPassword() {
     console.error('Error: --email is required (e.g. --email you@yourcompany.com)');
     process.exit(1);
   }
+
+  // Break-glass: reset a locked-out operator's MFA (host/SSH only). Requires a
+  // separate BREAKGLASS_TOKEN so DB connectivity alone is insufficient.
+  if (args['reset-mfa']) {
+    await resetMfaFlow(args, email);
+    return;
+  }
+
   const firstName = args.firstName || 'Platform';
   const lastName = args.lastName || 'Admin';
   let password = args.password;

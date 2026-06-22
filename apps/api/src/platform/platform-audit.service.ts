@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'crypto';
 import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { hashPlatformEntry } from './platform-audit-hash';
 
 /**
  * Append-only platform audit log. We never throw out of `record` — losing one
@@ -34,20 +34,9 @@ export class PlatformAuditService {
     userAgent: string | null;
     createdAt: Date;
   }): string {
-    const stableMeta = JSON.stringify(input.metadata, Object.keys(input.metadata).sort());
-    const payload = [
-      input.prevHash ?? '',
-      input.actorId,
-      input.actorEmail,
-      input.action,
-      input.targetType ?? '',
-      input.targetId ?? '',
-      stableMeta,
-      input.ipAddress ?? '',
-      input.userAgent ?? '',
-      input.createdAt.toISOString(),
-    ].join('|');
-    return createHash('sha256').update(payload).digest('hex');
+    // Delegates to the shared module so the CLI break-glass computes an
+    // identically-formatted chain (no drift between the two writers).
+    return hashPlatformEntry(input);
   }
 
   async record(
