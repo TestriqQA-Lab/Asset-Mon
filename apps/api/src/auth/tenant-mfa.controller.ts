@@ -16,6 +16,7 @@ class CodeDto {
 }
 class EnableDto {
   @IsIn(['EMAIL', 'EMAIL_TOTP']) method: 'EMAIL' | 'EMAIL_TOTP';
+  @IsOptional() @IsString() password?: string; // required only for a level switch
 }
 class DisableDto {
   @IsString() password: string;
@@ -56,7 +57,7 @@ export class TenantMfaController {
   @Post('enable')
   @Throttle({ short: { limit: 5, ttl: 60_000 }, medium: { limit: 15, ttl: 600_000 } })
   enable(@CurrentUser('sub') uid: string, @Body() dto: EnableDto) {
-    return this.svc.enable(this.ctx.prisma(), uid, dto.method);
+    return this.svc.enable(this.ctx.prisma(), uid, dto.method, dto.password);
   }
 
   @Post('disable')

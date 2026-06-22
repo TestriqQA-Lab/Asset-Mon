@@ -72,9 +72,15 @@ export class TenantMfaService {
   }
 
   // ── enable / disable ──────────────────────────────────────────────────────
-  async enable(db: any, userId: string, method: 'EMAIL' | 'EMAIL_TOTP') {
+  async enable(db: any, userId: string, method: 'EMAIL' | 'EMAIL_TOTP', password?: string) {
     const user = await db.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException();
+    // Changing an EXISTING MFA setup (a 2FA<->3FA level switch, or re-enable)
+    // requires a step-up (re-enter the password); initial opt-in does not.
+    if (user.mfaMethod !== 'NONE') {
+      const ok = await bcrypt.compare(password || '', user.passwordHash);
+      if (!ok) throw new UnauthorizedException('Re-enter your password to change MFA settings.');
+    }
     if (!user.recoveryEmailVerifiedAt) throw new BadRequestException('Verify a recovery email first.');
     if (method === 'EMAIL_TOTP' && !user.totpEnabled) throw new BadRequestException('Enroll an authenticator app first.');
 
