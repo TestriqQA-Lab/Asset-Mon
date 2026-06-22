@@ -84,13 +84,17 @@ export class TenantMfaService {
     if (!user.recoveryEmailVerifiedAt) throw new BadRequestException('Verify a recovery email first.');
     if (method === 'EMAIL_TOTP' && !user.totpEnabled) throw new BadRequestException('Enroll an authenticator app first.');
 
+    // The authenticator exists ONLY while on EMAIL_TOTP. Choosing EMAIL (initial
+    // opt-in OR a switch down from EMAIL_TOTP) clears it, so "email only" truly
+    // means no app — re-adding it later starts from a fresh enrollment.
+    const clearTotp = method === 'EMAIL' ? { totpSecret: null, totpEnabled: false, lastTotpStep: null } : {};
     const codes = generateBackupCodes(BACKUP_CODE_COUNT);
     let tokenVersion = 0;
     await db.$transaction(async (tx: any) => {
       await tx.tenantBackupCode.deleteMany({ where: { userId } });
       await tx.tenantBackupCode.createMany({ data: codes.map((c) => ({ userId, codeHash: c.hash, pepperVersion: c.pepperVersion })) });
       await tx.tenantMfaPending.deleteMany({ where: { userId } });
-      const updated = await tx.user.update({ where: { id: userId }, data: { mfaMethod: method, mfaEnabledAt: new Date(), tokenVersion: { increment: 1 } }, select: { tokenVersion: true } });
+      const updated = await tx.user.update({ where: { id: userId }, data: { mfaMethod: method, mfaEnabledAt: new Date(), ...clearTotp, tokenVersion: { increment: 1 } }, select: { tokenVersion: true } });
       tokenVersion = updated.tokenVersion;
     });
     // tokenVersion is the POST-bump value so the controller can re-issue the
@@ -111,7 +115,11 @@ export class TenantMfaService {
       await tx.tenantMfaPending.deleteMany({ where: { userId } });
       const updated = await tx.user.update({
         where: { id: userId },
-        data: { mfaMethod: 'NONE', mfaEnabledAt: null, recoveryEmail: null, recoveryEmailVerifiedAt: null, tokenVersion: { increment: 1 } },
+        // "Off" means fully off: clear the email-MFA columns AND the authenticator
+        // (totpSecret/totpEnabled/lastTotpStep). Otherwise a user who had the
+        // authenticator step on would be left with mfaMethod=NONE + totpEnabled=true,
+        // i.e. stranded on the legacy single-call TOTP login with no UI to clear it.
+        data: { mfaMethod: 'NONE', mfaEnabledAt: null, recoveryEmail: null, recoveryEmailVerifiedAt: null, totpSecret: null, totpEnabled: false, lastTotpStep: null, tokenVersion: { increment: 1 } },
         select: { tokenVersion: true },
       });
       tokenVersion = updated.tokenVersion;
