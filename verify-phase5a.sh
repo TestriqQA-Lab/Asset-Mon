@@ -75,7 +75,8 @@ const rejects = async (p, label) => { let t = false; try { await p; } catch { t 
   const email = "p5admin@assetmon.local";
   const password = "Phase5Pass123";
   const reload = () => catalog.platformUser.findUnique({ where: { email } });
-  const resetStep = (id) => catalog.platformUser.update({ where: { id }, data: { lastTotpStep: null } });
+  const resetStep = (id) => catalog.platformUser.update({ where: { id }, data: { lastTotpStep: null, failedLoginCount: 0, lockedUntil: null } });
+  const clearLock = (id) => catalog.platformUser.update({ where: { id }, data: { failedLoginCount: 0, lockedUntil: null } });
   try {
     await catalog.platformUser.deleteMany({ where: { email } });
     const passwordHash = await bcrypt.hash(password, 12);
@@ -103,11 +104,13 @@ const rejects = async (p, label) => { let t = false; try { await p; } catch { t 
     assert.ok(a3.accessToken && a3.refreshToken, "totp ok -> tokens issued");
 
     // B) replay guard: reuse the SAME totp code in a new chain -> rejected
+    await clearLock(user.id); // counters now persist; clear lock (keep lastTotpStep for replay)
     const b1 = await auth.login({ email, password });
     const b2 = await auth.loginMfaEmail(b1.ticket, b1.devCode);
     await rejects(auth.loginMfaTotp(b2.ticket, tA), "replayed TOTP code rejected");
 
     // C) wrong email code rejected; then backup code at the TOTP step works
+    await clearLock(user.id);
     const c1 = await auth.login({ email, password });
     await rejects(auth.loginMfaEmail(c1.ticket, "000000"), "wrong email code rejected");
     const c2 = await auth.loginMfaEmail(c1.ticket, c1.devCode);
@@ -128,6 +131,15 @@ const rejects = async (p, label) => { let t = false; try { await p; } catch { t 
     const e1 = await auth.login({ email, password });
     const e2 = await auth.loginMfaEmail(e1.ticket, e1.devCode);
     await rejects(auth.loginMfaTotp(e2.ticket, backup[0]), "already-used backup code rejected");
+
+    // F) attempt counters PERSIST across wrong email codes (commit-then-throw fix)
+    await clearLock(user.id);
+    const f1 = await auth.login({ email, password });
+    let fr1, fr2;
+    try { await auth.loginMfaEmail(f1.ticket, "000000"); } catch (e) { fr1 = e.getResponse && e.getResponse().attemptsRemaining; }
+    try { await auth.loginMfaEmail(f1.ticket, "000000"); } catch (e) { fr2 = e.getResponse && e.getResponse().attemptsRemaining; }
+    assert.equal(fr1, 4, "first wrong email attempt leaves 4 remaining");
+    assert.equal(fr2, 3, "second wrong attempt leaves 3 (counter persisted across attempts)");
 
     console.log("PHASE5A_OK");
     await app.close();

@@ -260,23 +260,35 @@ export class PlatformAuthService {
     return (a ? a.getTime() : null) === (b ? b.getTime() : null);
   }
 
-  /** Load + re-validate the pending chain row for a ticket nonce (per-step, in tx). */
-  private async loadChain(tx: any, nonce: string, expectStage: 'EMAIL' | 'TOTP') {
+  // Translate a transaction fail-descriptor into the right HTTP error. Throwing
+  // happens OUTSIDE the tx so committed attempt-counter increments are NOT rolled
+  // back (otherwise burn-at-5 / chain-cap / lockout would never accumulate).
+  private throwChainFailure(o: any): never {
+    if (o.fail === 'LOCKED') throw new HttpException({ code: 'LOCKED', message: 'Account temporarily locked.' }, 423);
+    if (o.fail === 'CODE_EXPIRED') throw new BadRequestException({ code: 'CODE_EXPIRED', message: 'Code expired — restart sign-in.' });
+    if (o.fail === 'BACKUP_TWICE') throw new BadRequestException({ code: 'INVALID_CODE', message: 'A backup code cannot replace both steps.' });
+    if (o.fail === 'INVALID_CODE') throw new UnauthorizedException({ code: 'INVALID_CODE', ...(typeof o.attemptsRemaining === 'number' ? { attemptsRemaining: o.attemptsRemaining } : {}) });
+    if (o.fail === 'MFA_SETUP_REQUIRED') throw new UnauthorizedException({ code: 'MFA_SETUP_REQUIRED' });
+    throw new UnauthorizedException({ code: 'MFA_RESTART' });
+  }
+
+  /**
+   * Load + re-validate the pending chain row for a ticket nonce (per-step, in
+   * tx). Returns a { fail: ... } descriptor instead of throwing, so the caller
+   * commits any counter writes before throwing outside the tx.
+   */
+  private async loadChain(tx: any, nonce: string, expectStage: 'EMAIL' | 'TOTP'): Promise<any> {
     const row = await tx.platformMfaPending.findUnique({ where: { nonce } });
-    if (!row || row.consumedAt || row.expiresAt < new Date()) throw new UnauthorizedException({ code: 'MFA_RESTART' });
+    if (!row || row.consumedAt || row.expiresAt < new Date()) return { fail: 'MFA_RESTART' };
     const user = await tx.platformUser.findUnique({ where: { id: row.userId } });
-    if (!user || !user.active) throw new UnauthorizedException({ code: 'MFA_RESTART' });
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
-      throw new HttpException({ code: 'LOCKED', message: 'Account temporarily locked.' }, 423); // 423 Locked
-    }
-    if (row.tvSnapshot !== user.tokenVersion || !this.sameInstant(row.pwdAtSnapshot, user.passwordChangedAt)) {
-      throw new UnauthorizedException({ code: 'MFA_RESTART' });
-    }
-    if (!mfaSetupComplete(user)) throw new UnauthorizedException({ code: 'MFA_SETUP_REQUIRED' });
-    if (row.stage !== expectStage) throw new UnauthorizedException({ code: 'MFA_RESTART' });
+    if (!user || !user.active) return { fail: 'MFA_RESTART' };
+    if (user.lockedUntil && user.lockedUntil > new Date()) return { fail: 'LOCKED' };
+    if (row.tvSnapshot !== user.tokenVersion || !this.sameInstant(row.pwdAtSnapshot, user.passwordChangedAt)) return { fail: 'MFA_RESTART' };
+    if (!mfaSetupComplete(user)) return { fail: 'MFA_SETUP_REQUIRED' };
+    if (row.stage !== expectStage) return { fail: 'MFA_RESTART' };
     if ((row.chainAttempts ?? 0) >= MAX_CHAIN_ATTEMPTS) {
       await tx.platformMfaPending.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
-      throw new UnauthorizedException({ code: 'MFA_RESTART' });
+      return { fail: 'MFA_RESTART' };
     }
     return { row, user };
   }
@@ -285,81 +297,79 @@ export class PlatformAuthService {
   async loginMfaEmail(ticket: string, code: string, req?: any) {
     const claims = this.mfaTicket.verify(ticket, MFA_TICKET_PURPOSE.PENDING);
     if (claims.scope !== 'platform' || !claims.nonce) throw new UnauthorizedException({ code: 'MFA_RESTART' });
-    return this.catalog.$transaction(async (tx) => {
-      const { row, user } = await this.loadChain(tx, claims.nonce!, 'EMAIL');
+    const outcome = await this.catalog.$transaction(async (tx) => {
+      const v = await this.loadChain(tx, claims.nonce!, 'EMAIL');
+      if (v.fail) return v;
+      const { row, user } = v;
       const isNumeric = /^[0-9]{6}$/.test(normalizeCode(code));
-      let advanced = false;
       let usedBackup = false;
 
       if (isNumeric) {
         if (!row.emailOtpHash || !row.emailExpiresAt || row.emailExpiresAt < new Date() || (row.emailCodeAttempts ?? 0) >= MAX_CODE_ATTEMPTS) {
           await tx.platformMfaPending.update({ where: { id: row.id }, data: { chainAttempts: (row.chainAttempts ?? 0) + 1 } });
-          throw new BadRequestException({ code: 'CODE_EXPIRED', message: 'Code expired — restart sign-in.' });
+          return { fail: 'CODE_EXPIRED' };
         }
         if (!verifyCode(code, row.emailOtpHash)) {
           const attempts = (row.emailCodeAttempts ?? 0) + 1;
           await tx.platformMfaPending.update({ where: { id: row.id }, data: { emailCodeAttempts: attempts, chainAttempts: (row.chainAttempts ?? 0) + 1 } });
           await this.recordFailedTx(tx, user);
-          throw new UnauthorizedException({ code: 'INVALID_CODE', attemptsRemaining: Math.max(0, MAX_CODE_ATTEMPTS - attempts) });
+          return { fail: 'INVALID_CODE', attemptsRemaining: Math.max(0, MAX_CODE_ATTEMPTS - attempts) };
         }
-        advanced = true;
       } else {
-        if (row.backupCodeUsed) throw new BadRequestException({ code: 'INVALID_CODE', message: 'A backup code cannot replace both steps.' });
+        if (row.backupCodeUsed) return { fail: 'BACKUP_TWICE' };
         usedBackup = await this.redeemBackupCode(tx, user, code, 'EMAIL');
         if (!usedBackup) {
           await tx.platformMfaPending.update({ where: { id: row.id }, data: { chainAttempts: (row.chainAttempts ?? 0) + 1 } });
           await this.recordFailedTx(tx, user);
-          throw new UnauthorizedException({ code: 'INVALID_CODE' });
+          return { fail: 'INVALID_CODE' };
         }
-        advanced = true;
       }
 
-      if (!advanced) throw new UnauthorizedException({ code: 'INVALID_CODE' });
       const newNonce = crypto.randomUUID();
       await tx.platformMfaPending.update({
         where: { id: row.id },
         data: { stage: 'TOTP', nonce: newNonce, emailOtpHash: null, backupCodeUsed: row.backupCodeUsed || usedBackup },
       });
       const next = this.mfaTicket.sign(MFA_TICKET_PURPOSE.PENDING, { scope: 'platform', sub: user.id, nonce: newNonce, tv: user.tokenVersion }, 600);
-      return { code: 'TOTP_REQUIRED', ticket: next };
+      return { next };
     }, { isolationLevel: 'Serializable' });
+    if (outcome.fail) this.throwChainFailure(outcome);
+    return { code: 'TOTP_REQUIRED', ticket: outcome.next };
   }
 
   /** Step 3: verify TOTP (with replay guard) OR a backup code; issue tokens. */
   async loginMfaTotp(ticket: string, code: string, req?: any) {
     const claims = this.mfaTicket.verify(ticket, MFA_TICKET_PURPOSE.PENDING);
     if (claims.scope !== 'platform' || !claims.nonce) throw new UnauthorizedException({ code: 'MFA_RESTART' });
-    return this.catalog.$transaction(async (tx) => {
-      const { row, user } = await this.loadChain(tx, claims.nonce!, 'TOTP');
+    const outcome = await this.catalog.$transaction(async (tx) => {
+      const v = await this.loadChain(tx, claims.nonce!, 'TOTP');
+      if (v.fail) return v;
+      const { row, user } = v;
       const isNumeric = /^[0-9]{6}$/.test(normalizeCode(code));
-      let ok = false;
       let usedBackup = false;
       let acceptedStep: bigint | null = null;
 
       if (isNumeric) {
-        if (!user.totpSecret) throw new UnauthorizedException({ code: 'MFA_RESTART' });
+        if (!user.totpSecret) return { fail: 'MFA_RESTART' };
         let secret: string;
-        try { secret = decryptSecretStrict(user.totpSecret); } catch { throw new UnauthorizedException({ code: 'MFA_RESTART' }); }
+        try { secret = decryptSecretStrict(user.totpSecret); } catch { return { fail: 'MFA_RESTART' }; }
         const delta = authenticator.checkDelta(code, secret);
         if (delta !== null && delta !== undefined) {
           const step = BigInt(Math.floor(Date.now() / 1000 / 30) + delta);
-          if (user.lastTotpStep == null || step > user.lastTotpStep) {
-            ok = true;
-            acceptedStep = step;
-          }
+          if (user.lastTotpStep == null || step > user.lastTotpStep) acceptedStep = step;
         }
-        if (!ok) {
+        if (acceptedStep == null) {
           await tx.platformMfaPending.update({ where: { id: row.id }, data: { chainAttempts: (row.chainAttempts ?? 0) + 1 } });
           await this.recordFailedTx(tx, user);
-          throw new UnauthorizedException({ code: 'INVALID_CODE' });
+          return { fail: 'INVALID_CODE' };
         }
       } else {
-        if (row.backupCodeUsed) throw new BadRequestException({ code: 'INVALID_CODE', message: 'A backup code cannot replace both steps.' });
+        if (row.backupCodeUsed) return { fail: 'BACKUP_TWICE' };
         usedBackup = await this.redeemBackupCode(tx, user, code, 'TOTP');
         if (!usedBackup) {
           await tx.platformMfaPending.update({ where: { id: row.id }, data: { chainAttempts: (row.chainAttempts ?? 0) + 1 } });
           await this.recordFailedTx(tx, user);
-          throw new UnauthorizedException({ code: 'INVALID_CODE' });
+          return { fail: 'INVALID_CODE' };
         }
       }
 
@@ -371,8 +381,10 @@ export class PlatformAuthService {
       });
       await tx.platformMfaPending.deleteMany({ where: { userId: user.id, consumedAt: null } });
       await this.audit.record({ id: user.id, email: user.email }, 'platform.auth.login', { type: 'platformUser', id: user.id }, { backupCodeUsed: row.backupCodeUsed || usedBackup }, req);
-      return this.issueTokens(user, Math.floor(Date.now() / 1000));
+      return { tokens: this.issueTokens(user, Math.floor(Date.now() / 1000)) };
     }, { isolationLevel: 'Serializable' });
+    if (outcome.fail) this.throwChainFailure(outcome);
+    return outcome.tokens;
   }
 
   /** Redeem ONE unused, current-pepper backup code (guarded single-use UPDATE). */
