@@ -33,6 +33,7 @@ import { ModuleGuard } from './tenant-settings/module.guard';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SearchModule } from './search/search.module';
 import { TwoFAModule } from './auth/twofa.module';
+import { TenantMfaModule } from './auth/tenant-mfa.module';
 import { BillingModule } from './billing/billing.module';
 import { AssetStatusDefsModule } from './asset-status-defs/asset-status-defs.module';
 import { SavedViewsModule } from './saved-views/saved-views.module';
@@ -93,6 +94,7 @@ function normaliseIpKey(raw: any): string {
     NotificationsModule,
     SearchModule,
     TwoFAModule,
+    TenantMfaModule,
     AssetStatusDefsModule,
     SavedViewsModule,
     AssetAttachmentsModule,
