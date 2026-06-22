@@ -10,12 +10,25 @@ import {
   Query,
   Req,
   UseGuards,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 import { PlatformAuthGuard } from './platform-auth.guard';
 import { PlatformAuthService } from './platform-auth.service';
 import { PlatformTenantsService } from './platform-tenants.service';
 import { PLANS, type PlanKey } from '../billing/plans';
+
+// Strict allowlist for the operator-update route: only these four fields are
+// accepted. forbidNonWhitelisted (below) rejects anything else, so MFA / lock /
+// passwordHash columns can never be written through this endpoint.
+class UpdateAdminDto {
+  @IsOptional() @IsString() firstName?: string;
+  @IsOptional() @IsString() lastName?: string;
+  @IsOptional() @IsIn(['SUPER_ADMIN', 'SUPPORT']) role?: 'SUPER_ADMIN' | 'SUPPORT';
+  @IsOptional() @IsBoolean() active?: boolean;
+}
 
 @ApiTags('platform')
 @ApiBearerAuth()
@@ -131,7 +144,8 @@ export class PlatformController {
   }
 
   @Patch('admins/:id')
-  updateAdmin(@Req() req: any, @Param('id') id: string, @Body() patch: any) {
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }))
+  updateAdmin(@Req() req: any, @Param('id') id: string, @Body() patch: UpdateAdminDto) {
     return this.auth.updateAdmin(req.platformUser, id, patch, req);
   }
 

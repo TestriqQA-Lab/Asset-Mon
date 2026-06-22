@@ -15,7 +15,7 @@ import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { MailerService } from '../events/events.module';
 import { PlatformAuditService } from './platform-audit.service';
 import { MfaTicketService, MFA_TICKET_PURPOSE } from '../common/mfa/mfa-ticket.service';
-import { mfaSetupComplete, maskEmail } from './platform-mfa.util';
+import { mfaSetupComplete, maskEmail, assertSuperAdmin } from './platform-mfa.util';
 import { generateNumericOtp, hashCode, verifyCode, normalizeCode } from '../common/mfa/otp.util';
 import { currentPepperVersion } from '../common/mfa/backup-codes.util';
 import { decryptSecretStrict } from '../common/crypto';
@@ -426,7 +426,8 @@ export class PlatformAuthService {
     });
   }
 
-  async createAdmin(actor: { id: string; email: string }, dto: CreateAdminDto, req?: any) {
+  async createAdmin(actor: { id: string; email: string; role?: string }, dto: CreateAdminDto, req?: any) {
+    assertSuperAdmin(actor); // only SUPER_ADMIN may create operators (incl. SUPPORT)
     const email = dto.email.toLowerCase();
     assertOperatorPasswordPolicy(dto.password || '');
     if (await this.catalog.platformUser.findUnique({ where: { email } })) {
@@ -448,7 +449,9 @@ export class PlatformAuthService {
     return user;
   }
 
-  async updateAdmin(actor: { id: string; email: string }, id: string, patch: Partial<{ firstName: string; lastName: string; role: 'SUPER_ADMIN' | 'SUPPORT'; active: boolean }>, req?: any) {
+  async updateAdmin(actor: { id: string; email: string; role?: string }, id: string, patch: Partial<{ firstName: string; lastName: string; role: 'SUPER_ADMIN' | 'SUPPORT'; active: boolean }>, req?: any) {
+    assertSuperAdmin(actor); // SUPPORT can never manage operators or change roles
+    if (patch.role && id === actor.id) throw new ConflictException('You cannot change your own role.');
     const user = await this.catalog.platformUser.findUnique({ where: { id } });
     if (!user) throw new NotFoundException();
 
@@ -479,7 +482,8 @@ export class PlatformAuthService {
     return updated;
   }
 
-  async resetAdminPassword(actor: { id: string; email: string }, id: string, newPassword: string, req?: any) {
+  async resetAdminPassword(actor: { id: string; email: string; role?: string }, id: string, newPassword: string, req?: any) {
+    assertSuperAdmin(actor);
     assertOperatorPasswordPolicy(newPassword || '');
     const passwordHash = await bcrypt.hash(newPassword, BCRYPT_COST);
     await this.catalog.platformUser.update({
@@ -496,7 +500,8 @@ export class PlatformAuthService {
     return { ok: true };
   }
 
-  async deleteAdmin(actor: { id: string; email: string }, id: string, req?: any) {
+  async deleteAdmin(actor: { id: string; email: string; role?: string }, id: string, req?: any) {
+    assertSuperAdmin(actor);
     const user = await this.catalog.platformUser.findUnique({ where: { id } });
     if (!user) throw new NotFoundException();
     if (user.id === actor.id) throw new ConflictException('Refusing to delete yourself');

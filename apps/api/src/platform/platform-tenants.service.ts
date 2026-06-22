@@ -12,6 +12,7 @@ import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { TenantPrismaPool } from '../tenancy/tenant-prisma.pool';
 import { TenantProvisioningService } from '../tenancy/tenant-provisioning.service';
 import { PlatformAuditService } from './platform-audit.service';
+import { assertSuperAdmin } from './platform-mfa.util';
 import { PLANS, type PlanKey } from '../billing/plans';
 
 const BCRYPT_COST = Number(process.env.BCRYPT_COST || 12);
@@ -97,7 +98,8 @@ export class PlatformTenantsService {
     return { ...t, stats, admins };
   }
 
-  async setStatus(actor: { id: string; email: string }, id: string, status: 'ACTIVE' | 'SUSPENDED', req?: any) {
+  async setStatus(actor: { id: string; email: string; role?: string }, id: string, status: 'ACTIVE' | 'SUSPENDED', req?: any) {
+    assertSuperAdmin(actor);
     const t = await this.catalog.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
     if (t.status === 'DELETED') throw new ConflictException('Tenant is deleted; restore is not supported.');
@@ -107,7 +109,8 @@ export class PlatformTenantsService {
     return updated;
   }
 
-  async hardDelete(actor: { id: string; email: string }, id: string, confirmSlug: string, req?: any) {
+  async hardDelete(actor: { id: string; email: string; role?: string }, id: string, confirmSlug: string, req?: any) {
+    assertSuperAdmin(actor);
     const t = await this.catalog.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
     if (t.slug !== confirmSlug) throw new BadRequestException('Confirmation slug does not match');
@@ -125,7 +128,8 @@ export class PlatformTenantsService {
     return { ok: true };
   }
 
-  async updatePlan(actor: { id: string; email: string }, id: string, plan: PlanKey, req?: any) {
+  async updatePlan(actor: { id: string; email: string; role?: string }, id: string, plan: PlanKey, req?: any) {
+    assertSuperAdmin(actor);
     if (!PLANS[plan]) throw new BadRequestException('Unknown plan');
     const t = await this.catalog.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
@@ -138,11 +142,12 @@ export class PlatformTenantsService {
   }
 
   async updateSubscription(
-    actor: { id: string; email: string },
+    actor: { id: string; email: string; role?: string },
     id: string,
     patch: { subscriptionStatus?: string; trialEndsAt?: string | null; currentPeriodEnd?: string | null },
     req?: any,
   ) {
+    assertSuperAdmin(actor);
     const t = await this.catalog.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
     const data: any = {};
@@ -170,7 +175,8 @@ export class PlatformTenantsService {
     });
   }
 
-  async resetTenantUserPassword(actor: { id: string; email: string }, tenantId: string, userId: string, req?: any) {
+  async resetTenantUserPassword(actor: { id: string; email: string; role?: string }, tenantId: string, userId: string, req?: any) {
+    assertSuperAdmin(actor); // SUPPORT is read-only — cannot reset tenant-user passwords (Option B)
     const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
@@ -206,7 +212,8 @@ export class PlatformTenantsService {
    * Used by support staff to "view as" — the existing tenant-side audit log
    * still records every action they take, and we record an entry here too.
    */
-  async impersonate(actor: { id: string; email: string }, tenantId: string, userId: string, req?: any) {
+  async impersonate(actor: { id: string; email: string; role?: string }, tenantId: string, userId: string, req?: any) {
+    assertSuperAdmin(actor); // SUPPORT cannot impersonate tenant users
     const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');

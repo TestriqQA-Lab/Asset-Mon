@@ -1,8 +1,23 @@
+import { ForbiddenException } from '@nestjs/common';
+
 /**
  * Pure helpers for the platform MFA flows. Kept DI-free so both
  * PlatformAuthService and PlatformMfaService can use them without a circular
  * dependency.
  */
+
+/**
+ * Enforce the SUPPORT-is-read-only rule (Option B): only SUPER_ADMIN may run
+ * write / destructive / operator-management / impersonation actions. SUPPORT can
+ * view everything and manage only its own account. This is the server-side
+ * guarantee — the route guard does not gate role, so every privileged
+ * service method calls this.
+ */
+export function assertSuperAdmin(actor: { role?: string } | undefined | null): void {
+  if (!actor || actor.role !== 'SUPER_ADMIN') {
+    throw new ForbiddenException('This action requires a super-admin.');
+  }
+}
 
 /** True only when EVERY enrolment factor AND the final gate column are set. */
 export function mfaSetupComplete(u: {
