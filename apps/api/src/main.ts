@@ -12,32 +12,48 @@ import { json, urlencoded } from 'express';
 import * as crypto from 'crypto';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 
+// Make Prisma BigInt columns (e.g. PlatformUser.lastTotpStep) JSON-serializable
+// app-wide. Without this, JSON.stringify throws "Do not know how to serialize a
+// BigInt" on any non-null BigInt field that reaches a response.
+(BigInt.prototype as any).toJSON = function () { return this.toString(); };
+
 const log = new Logger('bootstrap');
 
 function assertSecretsOrWarn() {
   const env = process.env.NODE_ENV || 'development';
   const dev = ['development', 'test'].includes(env);
-  const defaults = {
+  const fail = (msg: string) => { if (dev) { log.warn(msg); } else { throw new Error(msg); } };
+
+  const knownDefaults: Record<string, string> = {
     JWT_ACCESS_SECRET: 'dev_access_secret_change_me',
     JWT_REFRESH_SECRET: 'dev_refresh_secret_change_me',
   };
-  for (const [k, defaultVal] of Object.entries(defaults)) {
+
+  // Every at-rest / auth secret is REQUIRED, must be strong (>=32 chars), and
+  // must not be a known public default. In dev these only warn (so local boot is
+  // not blocked); in production they throw (fail closed). ENCRYPTION_KEY keeps a
+  // dev fallback in crypto.ts, but production must set it explicitly.
+  // JWT_MFA_TICKET_SECRET + OTP_PEPPER are new for MFA and have NO fallback.
+  const required = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'JWT_MFA_TICKET_SECRET', 'OTP_PEPPER', 'ENCRYPTION_KEY'];
+  for (const k of required) {
     const v = process.env[k];
-    if (!v) {
-      const msg = `Missing required env var ${k}`;
-      if (dev) { log.warn(msg); } else { throw new Error(msg); }
-    } else if (v === defaultVal) {
-      const msg = `${k} is set to the public default. Rotate it.`;
-      if (dev) { log.warn(msg); } else { throw new Error(msg); }
-    } else if (v.length < 32) {
-      const msg = `${k} is shorter than 32 chars; use a stronger secret.`;
-      if (dev) { log.warn(msg); } else { throw new Error(msg); }
-    }
+    if (!v) { fail(`Missing required env var ${k}`); continue; }
+    if (knownDefaults[k] && v === knownDefaults[k]) fail(`${k} is set to the public default. Rotate it.`);
+    else if (v.length < 32) fail(`${k} is shorter than 32 chars; use a stronger secret.`);
   }
-  if (!process.env.ENCRYPTION_KEY) {
-    const msg = 'ENCRYPTION_KEY not set — falling back to JWT_ACCESS_SECRET for at-rest crypto. Set ENCRYPTION_KEY (64-hex-char random) before production.';
-    if (dev) log.warn(msg); else throw new Error(msg);
+
+  // All auth secrets must be pairwise DISTINCT. Sharing one (e.g. reusing the
+  // access secret for MFA tickets, or the OTP pepper for the encryption key)
+  // collapses the separation those secrets exist to provide.
+  const seen = new Map<string, string>();
+  for (const k of required) {
+    const v = process.env[k];
+    if (!v) continue;
+    const prior = seen.get(v);
+    if (prior) fail(`${k} must be a distinct secret (it currently equals ${prior}).`);
+    else seen.set(v, k);
   }
+
   if (!process.env.RAZORPAY_WEBHOOK_SECRET && process.env.RAZORPAY_KEY_ID) {
     log.warn('RAZORPAY_KEY_ID is set but RAZORPAY_WEBHOOK_SECRET is not. Webhook delivery will be refused.');
   }
