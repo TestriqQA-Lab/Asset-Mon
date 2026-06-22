@@ -5,10 +5,22 @@ import { PlatformAuthGuard } from './platform-auth.guard';
 import { PlatformAuditService } from './platform-audit.service';
 import { PlatformTenantsService } from './platform-tenants.service';
 import { PlatformController } from './platform.controller';
+import { MfaTicketService } from '../common/mfa/mfa-ticket.service';
+import { PlatformMfaService } from './platform-mfa.service';
+import { PlatformSetupTicketGuard } from './platform-setup-ticket.guard';
+import { PlatformMfaSetupController } from './platform-mfa-setup.controller';
 
 @Module({
-  controllers: [PlatformAuthController, PlatformController],
-  providers: [PlatformAuthService, PlatformAuthGuard, PlatformAuditService, PlatformTenantsService],
+  controllers: [PlatformAuthController, PlatformController, PlatformMfaSetupController],
+  providers: [
+    PlatformAuthService,
+    PlatformAuthGuard,
+    PlatformAuditService,
+    PlatformTenantsService,
+    MfaTicketService,
+    PlatformMfaService,
+    PlatformSetupTicketGuard,
+  ],
   exports: [PlatformAuthGuard],
 })
 export class PlatformModule {}

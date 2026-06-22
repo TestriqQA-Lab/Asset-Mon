@@ -11,6 +11,8 @@ import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { PlatformAuditService } from './platform-audit.service';
+import { MfaTicketService, MFA_TICKET_PURPOSE } from '../common/mfa/mfa-ticket.service';
+import { mfaSetupComplete } from './platform-mfa.util';
 
 const DUMMY_HASH = '$2a$12$abcdefghijklmnopqrstuuC1jXrwzgQp1/Eu0XPLDC9D7K0qJ7lI2';
 const BCRYPT_COST = Number(process.env.BCRYPT_COST || 12);
@@ -58,6 +60,7 @@ export class PlatformAuthService {
     private readonly catalog: CatalogPrismaService,
     private readonly jwt: JwtService,
     private readonly audit: PlatformAuditService,
+    private readonly mfaTicket: MfaTicketService,
   ) {}
 
   // Provisioning of the very first platform admin (and any later one) is
@@ -91,6 +94,19 @@ export class PlatformAuthService {
       where: { id: user.id },
       data: { failedLoginCount: 0, lockedUntil: null },
     });
+
+    // Operators must be fully MFA-enrolled. If not, force the setup wizard by
+    // handing back a short-lived setup ticket instead of access tokens. (The
+    // full email+TOTP login chain for ENROLLED operators lands in Phase 5.)
+    if ((user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT') && !mfaSetupComplete(user)) {
+      const setupTicket = this.mfaTicket.sign(
+        MFA_TICKET_PURPOSE.SETUP,
+        { scope: 'platform', sub: user.id, tv: user.tokenVersion },
+        600,
+      );
+      return { code: 'MFA_SETUP_REQUIRED', setupTicket };
+    }
+
     return this.issueTokens(user);
   }
 
@@ -311,6 +327,11 @@ export class PlatformAuthService {
         lockedUntil: shouldLock ? new Date(Date.now() + LOCK_DURATION_MS) : user.lockedUntil,
       },
     }).catch(() => {});
+  }
+
+  /** Public token issuance for the MFA setup `complete` step (PlatformMfaService). */
+  issueTokensForUser(user: { id: string; email: string; role: string; tokenVersion: number; firstName: string; lastName: string }) {
+    return this.issueTokens(user);
   }
 
   private issueTokens(user: { id: string; email: string; role: string; tokenVersion: number; firstName: string; lastName: string }) {

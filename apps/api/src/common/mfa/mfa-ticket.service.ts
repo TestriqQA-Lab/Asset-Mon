@@ -21,8 +21,11 @@ export const MFA_TICKET_PURPOSE = {
 
 export interface MfaTicketClaims {
   scope: 'platform' | 'tenant';
-  /** Locates (and is rotated with) the *MfaPending row. */
-  nonce: string;
+  /**
+   * Locates (and is rotated with) the *MfaPending row. Present for the login
+   * chain; omitted for setup / step-up tickets, which carry no rotating nonce.
+   */
+  nonce?: string;
   /** userId — convenience only; the DB row is authoritative. */
   sub?: string;
   /** Tenant id (tenant scope only). */
