@@ -14,9 +14,10 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, Length } from 'class-validator';
 import { PlatformAuthGuard } from './platform-auth.guard';
 import { PlatformAuthService } from './platform-auth.service';
+import { PlatformMfaService } from './platform-mfa.service';
 import { PlatformTenantsService } from './platform-tenants.service';
 import { PLANS, type PlanKey } from '../billing/plans';
 
@@ -29,6 +30,12 @@ class UpdateAdminDto {
   @IsOptional() @IsIn(['SUPER_ADMIN', 'SUPPORT']) role?: 'SUPER_ADMIN' | 'SUPPORT';
   @IsOptional() @IsBoolean() active?: boolean;
 }
+class PeerResetRequestDto {
+  @IsString() @Length(1, 200) incidentRef: string;
+}
+class PeerResetApproveDto {
+  @IsString() @Length(6, 6) totpCode: string;
+}
 
 @ApiTags('platform')
 @ApiBearerAuth()
@@ -38,6 +45,7 @@ export class PlatformController {
   constructor(
     private readonly tenants: PlatformTenantsService,
     private readonly auth: PlatformAuthService,
+    private readonly mfa: PlatformMfaService,
   ) {}
 
   // ── Dashboard ────────────────────────────────────────────────────────────
@@ -157,6 +165,19 @@ export class PlatformController {
   @Delete('admins/:id')
   deleteAdmin(@Req() req: any, @Param('id') id: string) {
     return this.auth.deleteAdmin(req.platformUser, id, req);
+  }
+
+  // Governed 4-eyes peer MFA reset — a super-admin opens a request to reset
+  // another operator's MFA (needs >=3 super-admins; otherwise use the CLI).
+  @Post('admins/:id/reset-mfa')
+  requestPeerReset(@Req() req: any, @Param('id') id: string, @Body() dto: PeerResetRequestDto) {
+    return this.mfa.requestPeerReset(req.platformUser, id, dto.incidentRef, req);
+  }
+
+  // ...and a NEUTRAL second super-admin approves it with a step-up code.
+  @Post('admins/reset-mfa/:requestId/approve')
+  approvePeerReset(@Req() req: any, @Param('requestId') requestId: string, @Body() dto: PeerResetApproveDto) {
+    return this.mfa.approvePeerReset(req.platformUser, requestId, dto.totpCode, req);
   }
 
   // ── Account self-service ────────────────────────────────────────────────

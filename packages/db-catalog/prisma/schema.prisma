@@ -188,3 +188,23 @@ model PlatformOperatorEmailLog {
   @@index([createdAt])
   @@index([userId])
 }
+
+// Governed 4-eyes peer MFA reset. A super-admin REQUESTS a reset of another
+// operator's MFA; a NEUTRAL second super-admin (!= requester, != target)
+// APPROVES with a step-up. Short-lived (~15m). FK-less indexed ids, matching the
+// PlatformAuditLog convention.
+model PlatformMfaResetRequest {
+  id          String    @id @default(uuid())
+  requesterId String
+  targetId    String
+  approverId  String?
+  status      String    @default("PENDING") // PENDING | APPROVED | EXPIRED
+  incidentRef String
+  expiresAt   DateTime
+  approvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([targetId])
+  @@index([status])
+  @@index([expiresAt])
+}

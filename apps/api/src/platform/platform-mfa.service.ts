@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -16,8 +18,9 @@ import { PlatformAuthService } from './platform-auth.service';
 import { encryptSecret, decryptSecretStrict } from '../common/crypto';
 import { generateNumericOtp, hashCode, verifyCode } from '../common/mfa/otp.util';
 import { generateBackupCodes } from '../common/mfa/backup-codes.util';
-import { mfaSetupComplete, maskEmail, sameRegistrableDomain } from './platform-mfa.util';
+import { mfaSetupComplete, maskEmail, sameRegistrableDomain, assertSuperAdmin } from './platform-mfa.util';
 import { clearMfaUserData } from './platform-mfa-clear';
+import { hashPlatformEntry } from './platform-audit-hash';
 
 const OTP_TTL_MS = 5 * 60_000;
 const PENDING_TTL_MS = 10 * 60_000;
@@ -295,5 +298,127 @@ export class PlatformMfaService {
       const updated = await tx.platformUser.update({ where: { id: userId }, data: clearMfaUserData() });
       if (updated.mfaEnrolledAt !== null) throw new Error('clearMfa post-condition failed: mfaEnrolledAt is not null');
     });
+  }
+
+  // ── Governed 4-eyes peer reset (Phase 6b) ────────────────────────────────
+  private async mfaCompleteSuperAdmins() {
+    const admins = await this.catalog.platformUser.findMany({ where: { role: 'SUPER_ADMIN', active: true } });
+    return admins.filter((a) => mfaSetupComplete(a));
+  }
+
+  /** A super-admin requests a peer reset of another operator's MFA. */
+  async requestPeerReset(actor: { id: string; email: string; role?: string }, targetId: string, incidentRef: string, req?: any) {
+    assertSuperAdmin(actor);
+    if (!incidentRef || !incidentRef.trim()) throw new BadRequestException('An incidentRef (ticket/incident id) is required.');
+    if (targetId === actor.id) throw new BadRequestException('Use self-service recovery or the CLI for your own account, not peer reset.');
+    const target = await this.catalog.platformUser.findUnique({ where: { id: targetId } });
+    if (!target || (target.role !== 'SUPER_ADMIN' && target.role !== 'SUPPORT')) throw new NotFoundException('Operator not found');
+
+    const activeSuperAdmins = await this.catalog.platformUser.count({ where: { role: 'SUPER_ADMIN', active: true } });
+    if (activeSuperAdmins < 3) {
+      throw new ConflictException('Online peer reset needs >=3 active super-admins (a neutral approver). With fewer, use the CLI break-glass.');
+    }
+    const complete = await this.mfaCompleteSuperAdmins();
+    const completeAfter = complete.length - (complete.some((a) => a.id === targetId) ? 1 : 0);
+    if (completeAfter < 2) throw new ConflictException('Refusing: this reset would leave fewer than 2 MFA-complete super-admins.');
+
+    const reqRow = await this.catalog.platformMfaResetRequest.create({
+      data: { requesterId: actor.id, targetId, status: 'PENDING', incidentRef: incidentRef.trim(), expiresAt: new Date(Date.now() + 15 * 60_000) },
+    });
+    await this.audit.record(actor, 'platform.mfa.reset_requested', { type: 'platformUser', id: targetId }, { requestId: reqRow.id, incidentRef: incidentRef.trim() }, req);
+    return { requestId: reqRow.id, expiresAt: reqRow.expiresAt };
+  }
+
+  /** A NEUTRAL second super-admin approves + executes the reset, with a step-up. */
+  async approvePeerReset(approver: { id: string; email: string; role?: string }, requestId: string, totpCode: string, req?: any) {
+    assertSuperAdmin(approver);
+    // Fast-fail + 4-eyes on the request's IMMUTABLE fields (requester/target).
+    const reqPre = await this.catalog.platformMfaResetRequest.findUnique({ where: { id: requestId } });
+    if (!reqPre || reqPre.status !== 'PENDING') throw new NotFoundException('No pending reset request');
+    if (approver.id === reqPre.requesterId) throw new ForbiddenException('The approver must be different from the requester (4-eyes).');
+    if (approver.id === reqPre.targetId) throw new ForbiddenException('You cannot approve a reset of your own MFA.');
+    const approverPre = await this.catalog.platformUser.findUnique({ where: { id: approver.id } });
+    if (!approverPre || !mfaSetupComplete(approverPre) || !approverPre.totpSecret) throw new ForbiddenException('Approver is not MFA-enrolled.');
+    let secret: string;
+    try { secret = decryptSecretStrict(approverPre.totpSecret); } catch { throw new UnauthorizedException('Step-up unavailable.'); }
+
+    const ip = (req?.headers?.['x-forwarded-for'] as string | undefined)?.split(',')[0].trim() || req?.ip || null;
+    const ua = (req?.headers?.['user-agent'] as string | undefined) || null;
+
+    // EVERYTHING that must be atomic lives in ONE serializable tx. A Postgres
+    // advisory xact lock serializes all peer-reset executions against each other
+    // so two concurrent resets (even on different targets) can't both pass the
+    // availability floor. The guarded single-use claim, the step-up replay
+    // check+set, the availability re-check, the target clear, and the blocking
+    // chained audit are then all consistent and all-or-nothing.
+    await this.catalog.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(742042042042)');
+
+      // Single-use claim: only the FIRST approval (and only before expiry) flips
+      // PENDING -> APPROVED. 0 rows => already consumed or expired => abort.
+      const claim = await tx.platformMfaResetRequest.updateMany({
+        where: { id: requestId, status: 'PENDING', expiresAt: { gt: new Date() } },
+        data: { status: 'APPROVED', approverId: approver.id, approvedAt: new Date() },
+      });
+      if (claim.count !== 1) throw new ConflictException('Reset request is no longer pending (consumed or expired).');
+
+      // Step-up replay guard — load + compare + set atomically inside the tx, so
+      // a step-up code is truly single-use and rolls back with the reset.
+      const approverNow = await tx.platformUser.findUnique({ where: { id: approver.id } });
+      const delta = authenticator.checkDelta(totpCode || '', secret);
+      if (delta === null || delta === undefined) throw new UnauthorizedException({ code: 'INVALID_CODE', message: 'Invalid step-up code.' });
+      const step = BigInt(Math.floor(Date.now() / 1000 / 30) + delta);
+      if (approverNow?.lastTotpStep != null && step <= approverNow.lastTotpStep) throw new UnauthorizedException({ code: 'INVALID_CODE', message: 'Step-up code already used.' });
+      await tx.platformUser.update({ where: { id: approver.id }, data: { lastTotpStep: step } });
+
+      // Availability floor, re-evaluated inside the locked tx against fresh state
+      // (reading the super-admin set also lets SSI catch a racing demotion).
+      const activeSuperAdmins = await tx.platformUser.count({ where: { role: 'SUPER_ADMIN', active: true } });
+      if (activeSuperAdmins < 3) throw new ConflictException('Online peer reset needs >=3 active super-admins.');
+      const admins = await tx.platformUser.findMany({ where: { role: 'SUPER_ADMIN', active: true } });
+      const complete = admins.filter((a) => mfaSetupComplete(a));
+      const completeAfter = complete.length - (complete.some((a) => a.id === reqPre.targetId) ? 1 : 0);
+      if (completeAfter < 2) throw new ConflictException('Refusing: this reset would leave fewer than 2 MFA-complete super-admins.');
+
+      // Clear the target's MFA.
+      await tx.platformBackupCode.deleteMany({ where: { userId: reqPre.targetId } });
+      await tx.platformMfaPending.deleteMany({ where: { userId: reqPre.targetId } });
+      const updated = await tx.platformUser.update({ where: { id: reqPre.targetId }, data: clearMfaUserData() });
+      if (updated.mfaEnrolledAt !== null) throw new Error('post-condition failed: mfaEnrolledAt is not null');
+
+      // Blocking chained audit (a failed write rolls the whole reset back).
+      const last = await tx.platformAuditLog.findFirst({ orderBy: { seq: 'desc' }, select: { entryHash: true } });
+      const createdAt = new Date();
+      const metadata = { requestId, requesterId: reqPre.requesterId, approverId: approver.id, incidentRef: reqPre.incidentRef };
+      const entryHash = hashPlatformEntry({
+        prevHash: last?.entryHash ?? null,
+        actorId: approver.id, actorEmail: approver.email,
+        action: 'platform.mfa.admin_reset', targetType: 'platformUser', targetId: reqPre.targetId,
+        metadata, ipAddress: ip, userAgent: ua, createdAt,
+      });
+      await tx.platformAuditLog.create({
+        data: { actorId: approver.id, actorEmail: approver.email, action: 'platform.mfa.admin_reset', targetType: 'platformUser', targetId: reqPre.targetId, metadata, ipAddress: ip, userAgent: ua, prevHash: last?.entryHash ?? null, entryHash, createdAt },
+      });
+    }, { isolationLevel: 'Serializable' });
+
+    // Notify ALL active super-admins + the target (primary + recovery) — the
+    // target's mailbox may be compromised, so we never rely on it alone.
+    await this.notifyPeerReset(reqPre.targetId, reqPre.incidentRef).catch(() => {});
+    return { ok: true };
+  }
+
+  private async notifyPeerReset(targetId: string, incidentRef: string) {
+    const superAdmins = await this.catalog.platformUser.findMany({ where: { role: 'SUPER_ADMIN', active: true }, select: { email: true } });
+    const target = await this.catalog.platformUser.findUnique({ where: { id: targetId }, select: { email: true, recoveryEmail: true } });
+    const recipients = new Set<string>();
+    superAdmins.forEach((a) => recipients.add(a.email));
+    if (target?.email) recipients.add(target.email);
+    if (target?.recoveryEmail) recipients.add(target.recoveryEmail);
+    const subject = 'AssetMon security notice: an operator MFA was reset';
+    const body = `An operator's MFA was reset via governed peer reset (incident ${incidentRef}). If this was unexpected, investigate immediately.`;
+    for (const to of recipients) {
+      const res = await this.mailer.send(to, subject, body);
+      await this.catalog.platformOperatorEmailLog.create({ data: { userId: targetId, toEmail: to, purpose: 'PEER_RESET_NOTICE', subject, sent: res.ok, error: res.ok ? null : (res as any).error || 'send failed' } }).catch(() => {});
+    }
   }
 }
