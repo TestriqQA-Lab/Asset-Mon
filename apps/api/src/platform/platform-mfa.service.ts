@@ -270,7 +270,9 @@ export class PlatformMfaService {
     // setup ticket and any pre-enrolment sessions. Atomic gate flip.
     const updated = await this.catalog.platformUser.update({
       where: { id: user.id },
-      data: { mfaEnrolledAt: new Date(), tokenVersion: { increment: 1 } },
+      // Clear any lockout here too: login no longer resets it on a correct
+      // password alone (it clears only on a successful full login / complete).
+      data: { mfaEnrolledAt: new Date(), tokenVersion: { increment: 1 }, failedLoginCount: 0, lockedUntil: null },
     });
     await this.catalog.platformMfaPending.deleteMany({ where: { userId: user.id } }).catch(() => {});
     await this.audit.record({ id: user.id, email: user.email }, 'platform.mfa.enrolled', { type: 'platformUser', id: user.id }, {}, req);
