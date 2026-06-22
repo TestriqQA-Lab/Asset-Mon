@@ -23,6 +23,7 @@ export class UsersService {
         id: true, email: true, firstName: true, lastName: true, role: true, active: true,
         departmentId: true, department: { select: { id: true, name: true } },
         scopedDepartmentId: true, scopedDepartment: { select: { id: true, name: true } },
+        mfaMethod: true, // lets the admin UI show who has sign-in verification + a reset control
         createdAt: true,
       },
     });
