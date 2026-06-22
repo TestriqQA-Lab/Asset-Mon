@@ -130,7 +130,7 @@ export class PlatformAuthService {
   async refresh(refreshToken: string) {
     let payload: any;
     try {
-      payload = this.jwt.verify(refreshToken, { secret: process.env.JWT_REFRESH_SECRET });
+      payload = this.jwt.verify(refreshToken, { secret: process.env.JWT_REFRESH_SECRET, algorithms: ['HS256'] });
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
     }
@@ -151,6 +151,21 @@ export class PlatformAuthService {
     const user = await this.catalog.platformUser.findUnique({ where: { id: payload.sub } });
     if (!user || !user.active) throw new UnauthorizedException();
 
+    // A tokenVersion bump (enrolment complete, password change, logout-all,
+    // reuse detection) invalidates outstanding refresh tokens.
+    if (typeof payload.tv === 'number' && user.tokenVersion !== payload.tv) {
+      throw new UnauthorizedException('Session expired');
+    }
+    // Refresh is NOT a 1FA backdoor: operators must be fully enrolled, and a
+    // refresh older than the 24h mfaAt ceiling forces a fresh full MFA login.
+    if ((user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT') && !mfaSetupComplete(user)) {
+      throw new UnauthorizedException({ code: 'MFA_SETUP_REQUIRED' });
+    }
+    const now = Math.floor(Date.now() / 1000);
+    if (typeof payload.mfaAt !== 'number' || now - payload.mfaAt > MFA_AT_MAX_AGE_S) {
+      throw new UnauthorizedException({ code: 'MFA_REQUIRED', message: 'Re-authenticate with MFA.' });
+    }
+
     await this.catalog.platformRefreshTokenJti.create({
       data: {
         jti: payload.jti,
@@ -160,7 +175,7 @@ export class PlatformAuthService {
       },
     }).catch(() => {});
 
-    return this.issueTokens(user);
+    return this.issueTokens(user, payload.mfaAt); // carry mfaAt from the real MFA
   }
 
   async logout(refreshToken: string | undefined) {
