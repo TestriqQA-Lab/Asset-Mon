@@ -10,6 +10,11 @@ import { SignupDto, LoginDto, AcceptInviteDto } from './dto';
 import { decryptSecret } from '../common/crypto';
 import { WorkspaceInviteService } from '../workspace-invite/workspace-invite.service';
 import { PLANS, type PlanKey } from '../billing/plans';
+import { MailerService } from '../events/events.module';
+import { MfaTicketService, MFA_TICKET_PURPOSE } from '../common/mfa/mfa-ticket.service';
+import { generateNumericOtp, hashCode, verifyCode, normalizeCode } from '../common/mfa/otp.util';
+import { currentPepperVersion } from '../common/mfa/backup-codes.util';
+import { maskEmail } from '../platform/platform-mfa.util';
 
 // Pre-computed bcrypt hash for a value no real user can have — used as a
 // constant-time dummy when the supplied email does not exist in the catalog.
@@ -20,6 +25,10 @@ const BCRYPT_COST = Number(process.env.BCRYPT_COST || 12);
 const LOCK_THRESHOLD = Number(process.env.LOGIN_LOCK_THRESHOLD || 5);
 const LOCK_WINDOW_MS = Number(process.env.LOGIN_LOCK_WINDOW_MS || 15 * 60_000);
 const LOCK_DURATION_MS = Number(process.env.LOGIN_LOCK_DURATION_MS || 15 * 60_000);
+const OTP_TTL_MS = 5 * 60_000;
+const CHAIN_TTL_MS = 10 * 60_000;
+const MAX_CODE_ATTEMPTS = 5; // per emailed code, then it is burned
+const MAX_CHAIN_ATTEMPTS = 5; // per login chain, then it restarts
 
 @Injectable()
 export class AuthService {
@@ -31,6 +40,8 @@ export class AuthService {
     private readonly pool: TenantPrismaPool,
     private readonly jwt: JwtService,
     private readonly invites: WorkspaceInviteService,
+    private readonly mfaTicket: MfaTicketService,
+    private readonly mailer: MailerService,
   ) {}
 
   async inspectInvite(token: string) {
@@ -239,6 +250,15 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    // Opt-in email-based MFA. When the user enabled it, start the multi-step
+    // chain (email, then TOTP for EMAIL_TOTP) instead of issuing tokens here.
+    // The legacy single-call TOTP path below is preserved for mfaMethod === NONE
+    // so existing authenticator-only users are unaffected. Lockout is NOT cleared
+    // yet — it clears only on a successful FULL login (end of the chain).
+    if (user.mfaMethod === 'EMAIL' || user.mfaMethod === 'EMAIL_TOTP') {
+      return this.beginTenantLoginChain(tenantDb, chosen.tenant, user);
+    }
+
     if (user.totpEnabled) {
       if (!dto.totp) throw new UnauthorizedException('TOTP_REQUIRED');
       let secret: string;
@@ -271,7 +291,9 @@ export class AuthService {
     await db.user.update({
       where: { id: user.id },
       data: {
-        failedLoginCount: shouldLock ? 0 : newCount,
+        // BF-1: keep accumulating (do NOT zero on lock); cleared only on a
+        // successful full login.
+        failedLoginCount: newCount,
         lockedUntil: shouldLock ? new Date(now.getTime() + LOCK_DURATION_MS) : user.lockedUntil,
       },
     }).catch(() => {});
@@ -377,6 +399,177 @@ export class AuthService {
     const db = this.pool.get(tenant.dbName);
     await db.user.update({ where: { id: sub }, data: { tokenVersion: { increment: 1 } } }).catch(() => {});
     return { ok: true };
+  }
+
+  // ── Tenant MFA login chain (opt-in; only when mfaMethod != NONE) ───────────
+  // Mirrors the platform chain but in the tenant DB, carrying tenant context in
+  // the ticket. IMPORTANT: each step's transaction RETURNS a fail descriptor
+  // instead of throwing inside the tx, so the committed attempt-counter
+  // increments are not rolled back (burn-at-5 / chain-cap / lockout accumulate);
+  // the actual HTTP error is thrown OUTSIDE the tx via throwChainFailure.
+  private async beginTenantLoginChain(tenantDb: any, tenant: any, user: any) {
+    const code = generateNumericOtp(6);
+    const nonce = crypto.randomUUID();
+    await tenantDb.tenantMfaPending.create({
+      data: {
+        userId: user.id, nonce, stage: 'EMAIL',
+        tvSnapshot: user.tokenVersion, pwdAtSnapshot: user.passwordChangedAt ?? null,
+        emailOtpHash: hashCode(code), emailTarget: user.email,
+        emailExpiresAt: new Date(Date.now() + OTP_TTL_MS), emailLastSentAt: new Date(),
+        emailSendCount: 1, emailCodeAttempts: 0, chainAttempts: 0,
+        expiresAt: new Date(Date.now() + CHAIN_TTL_MS),
+      },
+    });
+    const ticket = this.mfaTicket.sign(
+      MFA_TICKET_PURPOSE.PENDING,
+      { scope: 'tenant', sub: user.id, tid: tenant.id, db: tenant.dbName, nonce, tv: user.tokenVersion },
+      600,
+    );
+    void this.sendTenantLoginEmail(tenantDb, user.email, code); // fire-and-forget
+    const dev = (process.env.NODE_ENV || 'development') !== 'production';
+    return { code: 'EMAIL_OTP_REQUIRED', ticket, resendIn: 60, maskedEmail: maskEmail(user.email), ...(dev ? { devCode: code } : {}) };
+  }
+
+  private async sendTenantLoginEmail(tenantDb: any, to: string, code: string) {
+    const subject = 'Your AssetMon sign-in code';
+    const body = `Your AssetMon sign-in code is ${code}\n\nIt expires in 5 minutes. If this was not you, change your password.`;
+    const res = await this.mailer.send(to, subject, body);
+    // Reuse the tenant EmailLog, but NEVER store the code in the body.
+    await tenantDb.emailLog.create({ data: { toEmail: to, subject, body: '[sign-in code omitted]', sent: res.ok, error: res.ok ? null : (res as any).error || 'send failed' } }).catch(() => {});
+  }
+
+  private sameInstant(a: Date | null, b: Date | null): boolean {
+    return (a ? a.getTime() : null) === (b ? b.getTime() : null);
+  }
+
+  private throwChainFailure(o: any): never {
+    if (o.fail === 'LOCKED') throw new HttpException({ statusCode: 423, code: 'LOCKED', message: 'Account temporarily locked. Try again later.' }, 423);
+    if (o.fail === 'CODE_EXPIRED') throw new BadRequestException({ code: 'CODE_EXPIRED', message: 'Code expired — restart sign-in.' });
+    if (o.fail === 'BACKUP_TWICE') throw new BadRequestException({ code: 'INVALID_CODE', message: 'A backup code cannot replace both steps.' });
+    if (o.fail === 'INVALID_CODE') throw new UnauthorizedException({ code: 'INVALID_CODE', ...(typeof o.attemptsRemaining === 'number' ? { attemptsRemaining: o.attemptsRemaining } : {}) });
+    throw new UnauthorizedException({ code: 'MFA_RESTART' });
+  }
+
+  private async loadTenantChainTx(tx: any, nonce: string, expectStage: 'EMAIL' | 'TOTP'): Promise<any> {
+    const row = await tx.tenantMfaPending.findUnique({ where: { nonce } });
+    if (!row || row.consumedAt || row.expiresAt < new Date()) return { fail: 'MFA_RESTART' };
+    const user = await tx.user.findUnique({ where: { id: row.userId } });
+    if (!user || !user.active) return { fail: 'MFA_RESTART' };
+    if (user.lockedUntil && user.lockedUntil > new Date()) return { fail: 'LOCKED' };
+    if (row.tvSnapshot !== user.tokenVersion || !this.sameInstant(row.pwdAtSnapshot, user.passwordChangedAt)) return { fail: 'MFA_RESTART' };
+    if (user.mfaMethod === 'NONE') return { fail: 'MFA_RESTART' };
+    if (row.stage !== expectStage) return { fail: 'MFA_RESTART' };
+    if ((row.chainAttempts ?? 0) >= MAX_CHAIN_ATTEMPTS) {
+      await tx.tenantMfaPending.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
+      return { fail: 'MFA_RESTART' };
+    }
+    return { row, user };
+  }
+
+  private async redeemTenantBackupCode(tx: any, userId: string, code: string, usedFor: 'EMAIL' | 'TOTP'): Promise<boolean> {
+    const candidates = await tx.tenantBackupCode.findMany({ where: { userId, usedAt: null, pepperVersion: currentPepperVersion() } });
+    for (const c of candidates) {
+      if (verifyCode(code, c.codeHash)) {
+        const res = await tx.tenantBackupCode.updateMany({ where: { id: c.id, usedAt: null }, data: { usedAt: new Date(), usedFor } });
+        if (res.count === 1) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Step 2 of the tenant login chain: emailed code OR a backup code. */
+  async loginMfaEmail(ticket: string, code: string) {
+    const claims = this.mfaTicket.verify(ticket, MFA_TICKET_PURPOSE.PENDING);
+    if (claims.scope !== 'tenant' || !claims.nonce || !claims.tid) throw new UnauthorizedException({ code: 'MFA_RESTART' });
+    const tenant = await this.catalog.tenant.findUnique({ where: { id: claims.tid } });
+    if (!tenant || tenant.status !== 'ACTIVE') throw new UnauthorizedException({ code: 'MFA_RESTART' });
+    const db = this.pool.get(tenant.dbName);
+    const outcome = await db.$transaction(async (tx: any) => {
+      const v = await this.loadTenantChainTx(tx, claims.nonce!, 'EMAIL');
+      if (v.fail) return v;
+      const { row, user } = v;
+      const isNumeric = /^[0-9]{6}$/.test(normalizeCode(code));
+      let usedBackup = false;
+      if (isNumeric) {
+        if (!row.emailOtpHash || !row.emailExpiresAt || row.emailExpiresAt < new Date() || (row.emailCodeAttempts ?? 0) >= MAX_CODE_ATTEMPTS) {
+          await tx.tenantMfaPending.update({ where: { id: row.id }, data: { chainAttempts: (row.chainAttempts ?? 0) + 1 } });
+          return { fail: 'CODE_EXPIRED' };
+        }
+        if (!verifyCode(code, row.emailOtpHash)) {
+          const attempts = (row.emailCodeAttempts ?? 0) + 1;
+          await tx.tenantMfaPending.update({ where: { id: row.id }, data: { emailCodeAttempts: attempts, chainAttempts: (row.chainAttempts ?? 0) + 1 } });
+          await this.recordFailedLogin(tx, user);
+          return { fail: 'INVALID_CODE', attemptsRemaining: Math.max(0, MAX_CODE_ATTEMPTS - attempts) };
+        }
+      } else {
+        if (row.backupCodeUsed) return { fail: 'BACKUP_TWICE' };
+        usedBackup = await this.redeemTenantBackupCode(tx, user.id, code, 'EMAIL');
+        if (!usedBackup) {
+          await tx.tenantMfaPending.update({ where: { id: row.id }, data: { chainAttempts: (row.chainAttempts ?? 0) + 1 } });
+          await this.recordFailedLogin(tx, user);
+          return { fail: 'INVALID_CODE' };
+        }
+      }
+      if (user.mfaMethod === 'EMAIL') {
+        await tx.tenantMfaPending.update({ where: { id: row.id }, data: { consumedAt: new Date(), backupCodeUsed: row.backupCodeUsed || usedBackup } });
+        await tx.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } });
+        await tx.tenantMfaPending.deleteMany({ where: { userId: user.id, consumedAt: null } });
+        return { tokens: this.issueTokens(tenant.id, tenant.slug, tenant.dbName, user.id, user.role, user.email, user.tokenVersion) };
+      }
+      const newNonce = crypto.randomUUID();
+      await tx.tenantMfaPending.update({ where: { id: row.id }, data: { stage: 'TOTP', nonce: newNonce, emailOtpHash: null, backupCodeUsed: row.backupCodeUsed || usedBackup } });
+      const next = this.mfaTicket.sign(MFA_TICKET_PURPOSE.PENDING, { scope: 'tenant', sub: user.id, tid: tenant.id, db: tenant.dbName, nonce: newNonce, tv: user.tokenVersion }, 600);
+      return { next };
+    }, { isolationLevel: 'Serializable' });
+    if (outcome.fail) this.throwChainFailure(outcome);
+    if (outcome.tokens) return outcome.tokens;
+    return { code: 'TOTP_REQUIRED', ticket: outcome.next };
+  }
+
+  /** Step 3 of the tenant login chain (EMAIL_TOTP only): authenticator OR backup code. */
+  async loginMfaTotp(ticket: string, code: string) {
+    const claims = this.mfaTicket.verify(ticket, MFA_TICKET_PURPOSE.PENDING);
+    if (claims.scope !== 'tenant' || !claims.nonce || !claims.tid) throw new UnauthorizedException({ code: 'MFA_RESTART' });
+    const tenant = await this.catalog.tenant.findUnique({ where: { id: claims.tid } });
+    if (!tenant || tenant.status !== 'ACTIVE') throw new UnauthorizedException({ code: 'MFA_RESTART' });
+    const db = this.pool.get(tenant.dbName);
+    const outcome = await db.$transaction(async (tx: any) => {
+      const v = await this.loadTenantChainTx(tx, claims.nonce!, 'TOTP');
+      if (v.fail) return v;
+      const { row, user } = v;
+      const isNumeric = /^[0-9]{6}$/.test(normalizeCode(code));
+      let usedBackup = false;
+      let acceptedStep: bigint | null = null;
+      if (isNumeric) {
+        if (!user.totpSecret) return { fail: 'MFA_RESTART' };
+        let secret: string;
+        try { secret = decryptSecret(user.totpSecret); } catch { return { fail: 'MFA_RESTART' }; }
+        const delta = authenticator.checkDelta(code, secret);
+        if (delta !== null && delta !== undefined) {
+          const step = BigInt(Math.floor(Date.now() / 1000 / 30) + delta);
+          if (user.lastTotpStep == null || step > user.lastTotpStep) acceptedStep = step;
+        }
+        if (acceptedStep == null) {
+          await tx.tenantMfaPending.update({ where: { id: row.id }, data: { chainAttempts: (row.chainAttempts ?? 0) + 1 } });
+          await this.recordFailedLogin(tx, user);
+          return { fail: 'INVALID_CODE' };
+        }
+      } else {
+        if (row.backupCodeUsed) return { fail: 'BACKUP_TWICE' };
+        usedBackup = await this.redeemTenantBackupCode(tx, user.id, code, 'TOTP');
+        if (!usedBackup) {
+          await tx.tenantMfaPending.update({ where: { id: row.id }, data: { chainAttempts: (row.chainAttempts ?? 0) + 1 } });
+          await this.recordFailedLogin(tx, user);
+          return { fail: 'INVALID_CODE' };
+        }
+      }
+      await tx.tenantMfaPending.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
+      await tx.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null, ...(acceptedStep != null ? { lastTotpStep: acceptedStep } : {}) } });
+      await tx.tenantMfaPending.deleteMany({ where: { userId: user.id, consumedAt: null } });
+      return { tokens: this.issueTokens(tenant.id, tenant.slug, tenant.dbName, user.id, user.role, user.email, user.tokenVersion) };
+    }, { isolationLevel: 'Serializable' });
+    if (outcome.fail) this.throwChainFailure(outcome);
+    return outcome.tokens;
   }
 
   private async seedDefaults(db: any) {

@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { MfaTicketService } from '../common/mfa/mfa-ticket.service';
 
 @Global()
 @Module({
@@ -12,7 +13,7 @@ import { AuthService } from './auth.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService],
+  providers: [AuthService, MfaTicketService],
   exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

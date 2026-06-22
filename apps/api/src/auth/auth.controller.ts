@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { SignupDto, LoginDto, RefreshDto, AcceptInviteDto, LogoutDto } from './dto';
+import { SignupDto, LoginDto, RefreshDto, AcceptInviteDto, LogoutDto, MfaStepDto } from './dto';
 import { ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
@@ -22,6 +22,20 @@ export class AuthController {
   @Throttle({ short: { limit: 5, ttl: 1000 }, medium: { limit: 30, ttl: 60_000 } })
   login(@Body() dto: LoginDto) {
     return this.auth.login(dto);
+  }
+
+  // Step 2 of the tenant login chain (when the user has email MFA enabled).
+  @Post('mfa/email')
+  @Throttle({ short: { limit: 6, ttl: 60_000 }, medium: { limit: 20, ttl: 600_000 } })
+  mfaEmail(@Body() dto: MfaStepDto) {
+    return this.auth.loginMfaEmail(dto.ticket, dto.code);
+  }
+
+  // Step 3 of the tenant login chain (EMAIL_TOTP users only).
+  @Post('mfa/totp')
+  @Throttle({ short: { limit: 6, ttl: 60_000 }, medium: { limit: 20, ttl: 600_000 } })
+  mfaTotp(@Body() dto: MfaStepDto) {
+    return this.auth.loginMfaTotp(dto.ticket, dto.code);
   }
 
   @Post('refresh')

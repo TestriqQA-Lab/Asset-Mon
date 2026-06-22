@@ -25,6 +25,11 @@ export class LogoutDto {
   @IsOptional() @IsString() refreshToken?: string;
 }
 
+export class MfaStepDto {
+  @IsString() ticket: string;
+  @IsString() code: string;
+}
+
 export class AcceptInviteDto {
   @IsEmail() email: string;
   @IsString() @MinLength(8) password: string;
