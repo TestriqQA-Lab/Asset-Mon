@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ShieldCheck, KeyRound, Copy, Mail, Download, AlertTriangle, RefreshCw } from 'lucide-react';
@@ -44,6 +44,22 @@ const METHOD_LABEL: Record<MfaStatus['mfaMethod'], string> = {
   EMAIL_TOTP: "You'll be asked for an email code and an authenticator-app code when you sign in.",
 };
 
+// Turn known HTTP errors into plain-language copy so we never surface raw server
+// text (e.g. the rate-limiter's "ThrottlerException: Too Many Requests").
+// Returns null for anything we don't specifically recognise.
+function friendlyError(e: any): string | null {
+  // App-level "wait before resending" cooldown — carries the seconds left.
+  if (e?.payload?.code === 'EMAIL_RATELIMIT') {
+    const s = e?.payload?.resendIn;
+    return typeof s === 'number'
+      ? `Please wait ${s}s before requesting another code.`
+      : 'Please wait a moment before requesting another code.';
+  }
+  // Hard rate limiter (too many attempts in a short window).
+  if (e?.status === 429) return 'Too many attempts — please wait a minute and try again.';
+  return null;
+}
+
 export default function SecuritySettingsPage() {
   const qc = useQueryClient();
 
@@ -54,6 +70,7 @@ export default function SecuritySettingsPage() {
   const [warnMsg, setWarnMsg] = useState<string | null>(null); // same-provider nudge
   const [sentTo, setSentTo] = useState<string | null>(null); // masked email a code was sent to
   const [devHint, setDevHint] = useState<string | null>(null); // dev/staging convenience only
+  const [resendIn, setResendIn] = useState(0); // seconds until another code can be sent
   const [recoveryCode, setRecoveryCode] = useState('');
   const [codes, setCodes] = useState<string[] | null>(null); // shown once, right after enabling
   const [saved, setSaved] = useState(false);
@@ -72,6 +89,13 @@ export default function SecuritySettingsPage() {
     setRecoveryCode('');
   }
 
+  // Tick the resend cooldown down to zero (drives the "Resend in Ns" label).
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setTimeout(() => setResendIn((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
+
   const sendRecovery = useMutation<any, Error, { ack: boolean }>({
     mutationFn: ({ ack }) =>
       api('/me/mfa/recovery/send', {
@@ -88,9 +112,18 @@ export default function SecuritySettingsPage() {
       setWarnMsg(null);
       setSentTo(r?.maskedEmail || null);
       setDevHint(r?.devCode || null);
+      setResendIn(typeof r?.resendIn === 'number' ? r.resendIn : 60);
       toast.success('We sent a code to your recovery email.');
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e: any) => {
+      // Start (or sync) the visible cooldown so the button reflects the wait.
+      if (e?.payload?.code === 'EMAIL_RATELIMIT' && typeof e?.payload?.resendIn === 'number') {
+        setResendIn(e.payload.resendIn);
+      } else if (e?.status === 429) {
+        setResendIn((s) => (s > 0 ? s : 60));
+      }
+      toast.error(friendlyError(e) || e.message || 'Could not send the code.');
+    },
   });
 
   const verifyRecovery = useMutation<any, Error, void>({
@@ -100,6 +133,7 @@ export default function SecuritySettingsPage() {
       setSentTo(null);
       setDevHint(null);
       setRecoveryCode('');
+      setResendIn(0);
       qc.invalidateQueries({ queryKey: ['me-mfa'] });
     },
     onError: (e: any) => {
@@ -111,7 +145,7 @@ export default function SecuritySettingsPage() {
         toast.error('That code expired — send a new one.');
         setSentTo(null); setDevHint(null); setRecoveryCode('');
       } else {
-        toast.error(e.message || 'Could not verify the code.');
+        toast.error(friendlyError(e) || e.message || 'Could not verify the code.');
       }
     },
   });
@@ -126,7 +160,7 @@ export default function SecuritySettingsPage() {
       setSaved(false);
       resetEnrollState();
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlyError(e) || e.message || 'Could not turn on verification.'),
   });
 
   const disableEmail = useMutation<any, Error, void>({
@@ -138,7 +172,7 @@ export default function SecuritySettingsPage() {
       qc.invalidateQueries({ queryKey: ['me-mfa'] });
       toast.success('Email verification turned off.');
     },
-    onError: (e) => toast.error(e.message || 'Could not turn off verification.'),
+    onError: (e: any) => toast.error(friendlyError(e) || e.message || 'Could not turn off verification.'),
   });
 
   // ── level switch: email-only (EMAIL) <-> email + authenticator app (EMAIL_TOTP) ──
@@ -154,7 +188,7 @@ export default function SecuritySettingsPage() {
   const startEnrollForSwitch = useMutation<any, Error, void>({
     mutationFn: () => api('/me/2fa/enroll', { method: 'POST' }),
     onSuccess: (r: any) => setTotpEnroll(r),
-    onError: (e) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlyError(e) || e.message),
   });
   const confirmEnrollForSwitch = useMutation<any, Error, void>({
     mutationFn: () => api('/me/2fa/verify', { method: 'POST', body: JSON.stringify({ token: enrollCode }) }),
@@ -165,7 +199,7 @@ export default function SecuritySettingsPage() {
       setEnrollCode('');
       qc.invalidateQueries({ queryKey: ['me-mfa'] }); // totpEnabled flips true -> the password step shows
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e: any) => toast.error(friendlyError(e) || e.message),
   });
   const switchLevel = useMutation<any, Error, 'EMAIL' | 'EMAIL_TOTP'>({
     mutationFn: (method) => api('/me/mfa/enable', { method: 'POST', body: JSON.stringify({ method, password: switchPassword }) }),
@@ -175,7 +209,7 @@ export default function SecuritySettingsPage() {
       setCodes(Array.isArray(r?.codes) ? r.codes : []); // changing level re-issues recovery codes — show them
       setSaved(false);
     },
-    onError: (e: any) => toast.error(/password/i.test(e?.message || '') ? 'Incorrect password.' : (e.message || 'Could not change the level.')),
+    onError: (e: any) => toast.error(friendlyError(e) || (/password/i.test(e?.message || '') ? 'Incorrect password.' : (e.message || 'Could not change the level.'))),
   });
 
   function finishCodes() {
@@ -372,7 +406,7 @@ export default function SecuritySettingsPage() {
                         <div>
                           <p>{warnMsg}</p>
                           <div className="mt-2 flex gap-2">
-                            <Button size="sm" loading={sendRecovery.isPending} onClick={() => sendRecovery.mutate({ ack: true })}>Send anyway</Button>
+                            <Button size="sm" loading={sendRecovery.isPending} disabled={resendIn > 0} onClick={() => sendRecovery.mutate({ ack: true })}>{resendIn > 0 ? `Resend in ${resendIn}s` : 'Send anyway'}</Button>
                             <Button size="sm" variant="secondary" onClick={() => setWarnMsg(null)}>Use a different email</Button>
                           </div>
                         </div>
@@ -380,9 +414,9 @@ export default function SecuritySettingsPage() {
                     )}
                     {!warnMsg && (
                       <Button className="mt-3" loading={sendRecovery.isPending}
-                        disabled={!/.+@.+\..+/.test(recoveryEmail)}
+                        disabled={!/.+@.+\..+/.test(recoveryEmail) || resendIn > 0}
                         onClick={() => sendRecovery.mutate({ ack: false })}>
-                        Send verification code
+                        {resendIn > 0 ? `Resend in ${resendIn}s` : 'Send verification code'}
                       </Button>
                     )}
                   </div>
@@ -399,7 +433,7 @@ export default function SecuritySettingsPage() {
                     </Field>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button loading={verifyRecovery.isPending} disabled={recoveryCode.length !== 6} onClick={() => verifyRecovery.mutate()}>Verify</Button>
-                      <Button variant="secondary" icon={<RefreshCw className="h-3.5 w-3.5" />} loading={sendRecovery.isPending} onClick={() => sendRecovery.mutate({ ack: true })}>Resend</Button>
+                      <Button variant="secondary" icon={<RefreshCw className="h-3.5 w-3.5" />} loading={sendRecovery.isPending} disabled={resendIn > 0} onClick={() => sendRecovery.mutate({ ack: true })}>{resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend'}</Button>
                       <Button variant="ghost" onClick={resetEnrollState}>Use a different email</Button>
                     </div>
                   </div>
