@@ -55,6 +55,9 @@ TENANT_DB_URL_TEMPLATE=postgresql://postgres:$PW@postgres:5432/{db}?schema=publi
 JWT_ACCESS_SECRET=$(openssl rand -hex 32)
 JWT_REFRESH_SECRET=$(openssl rand -hex 32)
 ENCRYPTION_KEY=$(openssl rand -hex 32)
+JWT_MFA_TICKET_SECRET=$(openssl rand -hex 32)
+OTP_PEPPER=$(openssl rand -hex 32)
+OTP_PEPPER_VERSION=1
 JWT_ACCESS_TTL=900
 JWT_REFRESH_TTL=2592000
 WEB_ORIGIN=http://localhost:4001
@@ -98,6 +101,19 @@ EX=$($COMPOSE exec -T postgres psql -U postgres -tAc "SELECT 1 FROM pg_database 
 [ "$EX" = "1" ] && ok "tenant database $DBN created" || bad "tenant DB not created"
 TB=$($COMPOSE exec -T postgres psql -U postgres -d "$DBN" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null | tr -d '[:space:]')
 if [ -n "$TB" ] && [ "$TB" -ge 25 ] 2>/dev/null; then ok "tenant schema migrated ($TB tables)"; else bad "tenant tables: ${TB:-0}"; fi
+
+echo ""; echo "6) MFA wired (production secrets boot the app + endpoints + schema)"
+# Reaching here at all means the API booted in PRODUCTION mode WITH the MFA
+# secrets present — i.e. the boot-time secret assertions (fail-closed in prod) passed.
+TOK=$(grep -oP '"accessToken":"\K[^"]+' /tmp/am_signup.json 2>/dev/null)
+ST=$(curl -s http://127.0.0.1:4000/api/me/mfa -H "Authorization: Bearer $TOK" 2>/dev/null)
+echo "$ST" | grep -q '"mfaMethod":"NONE"' && ok "MFA status endpoint live (off by default)" || bad "MFA status endpoint failed ($ST)"
+RS=$(curl -s -X POST http://127.0.0.1:4000/api/me/mfa/recovery/send -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"email":"recovery@othermail.test","acknowledgeRisk":true}' 2>/dev/null)
+echo "$RS" | grep -q 'maskedEmail' && ok "email-code machinery works (OTP_PEPPER + email-log OK)" || bad "recovery/send failed ($RS)"
+MT=$($COMPOSE exec -T postgres psql -U postgres -d "$DBN" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('TenantMfaPending','TenantBackupCode');" 2>/dev/null | tr -d '[:space:]')
+[ "$MT" = "2" ] && ok "tenant MFA tables present (TenantMfaPending + TenantBackupCode)" || bad "tenant MFA tables: ${MT:-0}/2"
+PMR=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/api/platform/mfa/setup/state 2>/dev/null)
+[ "$PMR" = "401" ] && ok "platform MFA setup route registered (401 unauthenticated)" || bad "platform MFA route HTTP $PMR (expected 401)"
 
 echo ""
 echo "============================================================"
