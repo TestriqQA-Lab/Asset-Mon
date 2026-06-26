@@ -544,6 +544,7 @@ model ApiKey {
   hash        String   @unique
   prefix      String
   scope       String   @default("read_write")
+  role        String   @default("ADMIN") // tenant role this key acts as (least-privilege); legacy keys = ADMIN
   createdById String?
   createdBy   User?    @relation("ApiKeyCreator", fields: [createdById], references: [id])
   lastUsedAt  DateTime?

@@ -17,6 +17,7 @@ import { RequireNav } from '../tenant-settings/require-nav.decorator';
 import { assertSafeOutboundUrl } from '../common/url-safety';
 
 const SCOPES = ['read_only', 'read_write'] as const;
+const KEY_ROLES = ['ADMIN', 'ASSET_MANAGER'] as const; // a key acts as full ADMIN or limited ASSET_MANAGER
 
 function genToken(): { token: string; prefix: string; hash: string } {
   const raw = crypto.randomBytes(24).toString('hex'); // 48 chars
@@ -33,22 +34,22 @@ class ApiKeysService {
     return this.ctx.prisma().apiKey.findMany({
       orderBy: { createdAt: 'desc' },
       select: {
-        id: true, name: true, prefix: true, scope: true,
+        id: true, name: true, prefix: true, scope: true, role: true,
         lastUsedAt: true, expiresAt: true, revokedAt: true, createdAt: true,
         createdBy: { select: { firstName: true, lastName: true } },
       },
     });
   }
 
-  async create(name: string, scope: string, expiresAt: string | null, creatorId: string) {
+  async create(name: string, scope: string, role: string, expiresAt: string | null, creatorId: string) {
     const { token, prefix, hash } = genToken();
     const key = await this.ctx.prisma().apiKey.create({
       data: {
-        name, scope, prefix, hash,
+        name, scope, role, prefix, hash,
         createdById: creatorId,
         expiresAt: expiresAt ? new Date(expiresAt) : null,
       },
-      select: { id: true, name: true, prefix: true, scope: true, expiresAt: true, createdAt: true },
+      select: { id: true, name: true, prefix: true, scope: true, role: true, expiresAt: true, createdAt: true },
     });
     return { ...key, token }; // return token only at creation time
   }
@@ -103,6 +104,7 @@ class WebhooksService {
 class CreateApiKeyDto {
   @IsString() @MinLength(2) name: string;
   @IsOptional() @IsIn(SCOPES as any) scope?: typeof SCOPES[number];
+  @IsOptional() @IsIn(KEY_ROLES as any) role?: typeof KEY_ROLES[number];
   @IsOptional() @IsISO8601() expiresAt?: string;
 }
 class CreateWebhookDto {
@@ -129,7 +131,7 @@ class ApiKeysController {
   @Get() @Roles('ADMIN') list() { return this.svc.list(); }
   @Post() @Roles('ADMIN')
   create(@Body() d: CreateApiKeyDto, @CurrentUser('sub') uid: string) {
-    return this.svc.create(d.name, d.scope || 'read_write', d.expiresAt || null, uid);
+    return this.svc.create(d.name, d.scope || 'read_write', d.role || 'ADMIN', d.expiresAt || null, uid);
   }
   @Post(':id/revoke') @Roles('ADMIN') revoke(@Param('id') id: string) { return this.svc.revoke(id); }
   @Delete(':id') @Roles('ADMIN') remove(@Param('id') id: string) { return this.svc.remove(id); }
