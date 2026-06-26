@@ -69,7 +69,6 @@ export const DEFAULT_ASSET_MANAGER_NAV: NavMap = navOnly([
   'purchase-requests', 'purchase-orders', 'depreciation',
   'software', 'licenses',
   'users',
-  'audit-log',
   'settings:security', 'settings:statuses',
 ]);
 

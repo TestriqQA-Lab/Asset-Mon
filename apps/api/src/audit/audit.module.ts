@@ -104,6 +104,7 @@ class AuditService {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, NavPermissionsGuard)
 @RequireNav('audit-log')
+@Roles('ADMIN') // full audit-log read is ADMIN-only (hard gate, not just the nav matrix)
 @Controller('audit')
 class AuditController {
   constructor(private readonly svc: AuditService) {}
