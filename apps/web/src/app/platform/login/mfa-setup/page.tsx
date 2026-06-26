@@ -6,6 +6,7 @@ import { papi, setPlatformSession, type PlatformSession } from '@/lib/platform-a
 import { copyToClipboard } from '@/lib/clipboard';
 import { Field, inputClass, Button } from '@/components/ui';
 import { Mail, ShieldCheck, KeyRound, Copy, Download, LifeBuoy, Check, AlertTriangle, RefreshCw } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 
 // Strict no-leak policy (same as the platform login): generic, public-safe copy.
 const SETUP_TICKET_KEY = 'am.platform.setupTicket';
@@ -213,7 +214,7 @@ export default function PlatformMfaSetupPage() {
                     <p className="text-sm text-ink-500">Scan this with Google Authenticator, 1Password, Authy, etc., then enter the 6-digit code.</p>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
-                        <img alt="Authenticator QR code" className="h-40 w-40 rounded-md border border-ink-200 bg-white" src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(totp.otpauth)}`} />
+                        <QRCodeSVG value={totp.otpauth} size={160} className="rounded-md border border-ink-200 bg-white p-2" />
                         <div className="mt-2 flex items-center gap-2">
                           <code className="block flex-1 break-all rounded-md border border-ink-200 bg-ink-50 px-2 py-1 font-mono text-[10px] text-ink-700">{totp.secret}</code>
                           <Button size="sm" variant="secondary" icon={<Copy className="h-3.5 w-3.5" />} onClick={async () => { (await copyToClipboard(totp.secret)) ? toast.success('Secret copied') : toast.error('Could not copy'); }}>Copy</Button>

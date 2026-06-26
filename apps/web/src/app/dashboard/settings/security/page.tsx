@@ -6,6 +6,7 @@ import { ShieldCheck, KeyRound, Copy, Mail, Download, AlertTriangle, RefreshCw }
 import { api, setSession } from '@/lib/api';
 import { copyToClipboard } from '@/lib/clipboard';
 import { Card, SectionHeader, Button, Field, inputClass, Pill } from '@/components/ui';
+import { QRCodeSVG } from 'qrcode.react';
 
 type MfaStatus = {
   mfaMethod: 'NONE' | 'EMAIL' | 'EMAIL_TOTP';
@@ -309,7 +310,7 @@ export default function SecuritySettingsPage() {
                         {totpEnroll ? (
                           <div className="mt-2 grid gap-3 sm:grid-cols-2">
                             <div>
-                              <img alt="Authenticator QR code" className="h-40 w-40 rounded-md border border-ink-200 bg-white" src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(totpEnroll.otpauth)}`} />
+                              <QRCodeSVG value={totpEnroll.otpauth} size={160} className="rounded-md border border-ink-200 bg-white p-2" />
                               <div className="mt-2 flex items-center gap-2">
                                 <code className="block flex-1 break-all rounded-md border border-ink-200 bg-white px-2 py-1 font-mono text-[10px] text-ink-700">{totpEnroll.secret}</code>
                                 <Button size="sm" variant="secondary" icon={<Copy className="h-3.5 w-3.5" />} onClick={async () => { const ok = await copyToClipboard(totpEnroll.secret); ok ? toast.success('Secret copied') : toast.error('Could not copy — select the text and press Ctrl+C / ⌘C'); }}>Copy</Button>
