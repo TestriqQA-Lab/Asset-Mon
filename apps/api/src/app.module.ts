@@ -40,6 +40,7 @@ import { SavedViewsModule } from './saved-views/saved-views.module';
 import { AssetAttachmentsModule } from './asset-attachments/asset-attachments.module';
 import { WorkspaceInviteModule } from './workspace-invite/workspace-invite.module';
 import { PlatformModule } from './platform/platform.module';
+import { SupportModule } from './support/support.module';
 
 function normaliseIpKey(raw: any): string {
   const first = typeof raw === 'string' ? raw.split(',')[0].trim() : '';
@@ -99,6 +100,7 @@ function normaliseIpKey(raw: any): string {
     SavedViewsModule,
     AssetAttachmentsModule,
     PlatformModule,
+    SupportModule,
   ],
   controllers: [HealthController, MeController],
   providers: [

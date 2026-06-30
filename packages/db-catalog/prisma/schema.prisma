@@ -30,6 +30,7 @@ model Tenant {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   tenantUsers TenantUser[]
+  supportRequests SupportRequest[]
 }
 
 enum TenantStatus {
@@ -210,4 +211,53 @@ model PlatformMfaResetRequest {
   @@index([targetId])
   @@index([status])
   @@index([expiresAt])
+}
+
+// ── Support channel (Slice 4) ──────────────────────────────────────────────
+// Company admins open requests; platform operators reply. Stored in the CATALOG
+// DB so operators read across all tenants without fanning out into tenant DBs.
+enum SupportRequestStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum SupportAuthorType {
+  TENANT
+  PLATFORM
+}
+
+model SupportRequest {
+  id               String               @id @default(uuid())
+  tenantId         String
+  tenant           Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdByEmail   String
+  createdByUserId  String?
+  subject          String
+  status           SupportRequestStatus @default(OPEN)
+  lastMessageAt    DateTime             @default(now())
+  // *UnreadAt: set when the OTHER side posts a message; cleared to null when THIS
+  // side opens the thread. Badge counts = rows where my side's *UnreadAt != null.
+  platformUnreadAt DateTime?            @default(now())
+  tenantUnreadAt   DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  messages         SupportMessage[]
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([lastMessageAt])
+  @@index([platformUnreadAt])
+}
+
+model SupportMessage {
+  id          String            @id @default(uuid())
+  requestId   String
+  request     SupportRequest    @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  authorType  SupportAuthorType
+  authorEmail String
+  body        String
+  createdAt   DateTime          @default(now())
+
+  @@index([requestId])
 }

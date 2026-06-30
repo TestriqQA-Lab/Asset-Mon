@@ -9,9 +9,11 @@ import { MfaTicketService } from '../common/mfa/mfa-ticket.service';
 import { PlatformMfaService } from './platform-mfa.service';
 import { PlatformSetupTicketGuard } from './platform-setup-ticket.guard';
 import { PlatformMfaSetupController } from './platform-mfa-setup.controller';
+import { PlatformSupportController } from './platform-support.controller';
+import { PlatformSupportService } from './platform-support.service';
 
 @Module({
-  controllers: [PlatformAuthController, PlatformController, PlatformMfaSetupController],
+  controllers: [PlatformAuthController, PlatformController, PlatformMfaSetupController, PlatformSupportController],
   providers: [
     PlatformAuthService,
     PlatformAuthGuard,
@@ -20,6 +22,7 @@ import { PlatformMfaSetupController } from './platform-mfa-setup.controller';
     MfaTicketService,
     PlatformMfaService,
     PlatformSetupTicketGuard,
+    PlatformSupportService,
   ],
   exports: [PlatformAuthGuard],
 })
