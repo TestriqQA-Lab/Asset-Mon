@@ -63,6 +63,8 @@ export const NAV_KEYS = [
   'api-keys',
   'webhooks',
   'audit-log',
+  // Support
+  'get-help',
   // Settings sub-pages
   'settings:branding',
   'settings:modules',

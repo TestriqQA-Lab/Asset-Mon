@@ -13,7 +13,7 @@ import {
   Wrench, CalendarClock, ShoppingCart, FileText, TrendingDown,
   AppWindow, KeyRound, ClipboardCheck, BarChart3,
   Users, Webhook, ScrollText, Settings, LogOut, ChevronDown, Search,
-  Sliders, Palette, ShieldCheck, CreditCard, Circle, Menu, X, Lock,
+  Sliders, Palette, ShieldCheck, CreditCard, Circle, Menu, X, Lock, LifeBuoy,
 } from 'lucide-react';
 
 type NavItem = { href: string; label: string; icon: React.ReactNode; navKey: NavKey; module?: ModuleKey };
@@ -57,6 +57,13 @@ const NAV: NavGroup[] = [
       { href: '/dashboard/purchase-requests', label: 'Purchase requests', icon: <FileText className="h-4 w-4" />, navKey: 'purchase-requests', module: 'procurement' },
       { href: '/dashboard/purchase-orders', label: 'Purchase orders', icon: <ShoppingCart className="h-4 w-4" />, navKey: 'purchase-orders', module: 'procurement' },
       { href: '/dashboard/depreciation', label: 'Depreciation', icon: <TrendingDown className="h-4 w-4" />, navKey: 'depreciation', module: 'depreciation' },
+    ],
+  },
+  {
+    label: 'Support',
+    icon: <LifeBuoy className="h-3.5 w-3.5" />,
+    items: [
+      { href: '/dashboard/get-help', label: 'Get help', icon: <LifeBuoy className="h-4 w-4" />, navKey: 'get-help' },
     ],
   },
   {
@@ -137,6 +144,12 @@ function Shell({ children }: { children: React.ReactNode }) {
 
   const initials = ((session?.user.email || '?').charAt(0)).toUpperCase();
   const isAdmin = session?.user.role === 'ADMIN';
+  const supportUnread = useQuery({
+    queryKey: ['support-unread'],
+    queryFn: () => api<{ count: number }>('/support/unread-count'),
+    enabled: isAdmin,
+    refetchInterval: 30_000,
+  }).data?.count || 0;
   const logoUrl = settings.branding.logoUrl
     ? `${process.env.NEXT_PUBLIC_API_URL}${settings.branding.logoUrl}`
     : null;
@@ -202,7 +215,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
           <nav className="ml-2 hidden flex-1 items-center gap-0.5 lg:flex" aria-label="Primary">
             {visibleNav.map((group) => (
-              <NavMenu key={group.label} group={group} currentPath={path || ''} />
+              <NavMenu key={group.label} group={group} currentPath={path || ''} badge={group.label === 'Support' ? supportUnread : 0} />
             ))}
           </nav>
 
@@ -334,6 +347,9 @@ function Shell({ children }: { children: React.ReactNode }) {
                       >
                         {item.icon}
                         {item.label}
+                        {item.navKey === 'get-help' && supportUnread > 0 && (
+                          <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">{supportUnread > 9 ? '9+' : supportUnread}</span>
+                        )}
                       </a>
                     );
                   })}
@@ -353,7 +369,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function NavMenu({ group, currentPath }: { group: NavGroup; currentPath: string }) {
+function NavMenu({ group, currentPath, badge = 0 }: { group: NavGroup; currentPath: string; badge?: number }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<number | null>(null);
@@ -392,6 +408,7 @@ function NavMenu({ group, currentPath }: { group: NavGroup; currentPath: string 
       >
         <span className={groupActive ? 'text-ink-700' : 'text-ink-400'}>{group.icon}</span>
         {group.label}
+        {badge > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">{badge > 9 ? '9+' : badge}</span>}
         <ChevronDown className={'h-3.5 w-3.5 text-ink-400 transition-transform ' + (open ? 'rotate-180' : '')} />
       </button>
       {open && (

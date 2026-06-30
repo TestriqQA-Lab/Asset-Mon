@@ -3,10 +3,10 @@
 // is being handled in a separate worker pass — leave that file alone.
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { getPlatformSession, platformLogout } from '@/lib/platform-api';
+import { getPlatformSession, platformLogout, papi } from '@/lib/platform-api';
 import {
   ShieldCheck, LayoutDashboard, Building2, Users, ScrollText, ChevronDown, LogOut, KeyRound,
-  Menu, X,
+  Menu, X, LifeBuoy,
 } from 'lucide-react';
 import { THEME_PRESETS, themeToRootCss } from '@/lib/themes';
 import { applyThemeTokens, resetThemeTokens } from '@/lib/theme';
@@ -15,6 +15,7 @@ const NAV = [
   { href: '/platform', label: 'Overview', icon: <LayoutDashboard className="h-4 w-4" /> },
   { href: '/platform/tenants', label: 'Tenants', icon: <Building2 className="h-4 w-4" /> },
   { href: '/platform/admins', label: 'Platform team', icon: <Users className="h-4 w-4" /> },
+  { href: '/platform/support', label: 'Support', icon: <LifeBuoy className="h-4 w-4" /> },
   { href: '/platform/audit-log', label: 'Audit log', icon: <ScrollText className="h-4 w-4" /> },
 ];
 
@@ -30,6 +31,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
   const [ready, setReady] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [supportUnread, setSupportUnread] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -37,6 +39,18 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
     if (!getPlatformSession()) { r.replace('/platform/login'); return; }
     setReady(true);
   }, [path, r]);
+
+  // Poll the operator support-inbox unread count for the nav badge.
+  useEffect(() => {
+    if (path.startsWith('/platform/login') || !getPlatformSession()) return;
+    let alive = true;
+    const load = () => papi<{ count: number }>('/platform/support/unread-count')
+      .then((d) => { if (alive) setSupportUnread(d.count || 0); })
+      .catch(() => {});
+    load();
+    const t = setInterval(load, 30_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [path]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -116,6 +130,9 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                   >
                     {item.icon}
                     {item.label}
+                    {item.href === '/platform/support' && supportUnread > 0 && (
+                      <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">{supportUnread > 9 ? '9+' : supportUnread}</span>
+                    )}
                   </a>
                 );
               })}
@@ -229,6 +246,9 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                   >
                     {item.icon}
                     {item.label}
+                    {item.href === '/platform/support' && supportUnread > 0 && (
+                      <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">{supportUnread > 9 ? '9+' : supportUnread}</span>
+                    )}
                   </a>
                 );
               })}
