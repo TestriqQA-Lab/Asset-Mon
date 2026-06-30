@@ -14,6 +14,7 @@ import { TenantProvisioningService } from '../tenancy/tenant-provisioning.servic
 import { PlatformAuditService } from './platform-audit.service';
 import { assertSuperAdmin } from './platform-mfa.util';
 import { PLANS, type PlanKey } from '../billing/plans';
+import { mergeSettings, MODULE_KEYS } from '../tenant-settings/tenant-settings.types';
 
 const BCRYPT_COST = Number(process.env.BCRYPT_COST || 12);
 
@@ -157,6 +158,43 @@ export class PlatformTenantsService {
     const updated = await this.catalog.tenant.update({ where: { id }, data });
     await this.audit.record(actor, 'tenant.updateSubscription', { type: 'tenant', id }, patch, req);
     return updated;
+  }
+
+  // ── Feature modules (operator-side; same switch the tenant Settings → Modules page uses) ──
+  // Readable by SUPER_ADMIN and SUPPORT (no assertSuperAdmin); returns ONLY the
+  // merged module map — no plan-tier comparison (the old "beyond plan" idea was a bug).
+  async getModules(id: string) {
+    const t = await this.catalog.tenant.findUnique({ where: { id }, select: { settings: true } });
+    if (!t) throw new NotFoundException();
+    return { modules: mergeSettings(t.settings).modules };
+  }
+
+  async updateModules(
+    actor: { id: string; email: string; role?: string },
+    id: string,
+    modules: Record<string, boolean>,
+    req?: any,
+  ) {
+    assertSuperAdmin(actor);
+    const t = await this.catalog.tenant.findUnique({ where: { id } });
+    if (!t) throw new NotFoundException();
+    if (t.status === 'DELETED') throw new ConflictException('Tenant is deleted.');
+    const current = mergeSettings(t.settings);
+    // Accept only known module keys, only boolean values; merge onto current.
+    const accepted: Record<string, boolean> = {};
+    for (const k of MODULE_KEYS) {
+      if (typeof modules?.[k] === 'boolean') accepted[k] = modules[k];
+    }
+    const nextModules = { ...current.modules, ...accepted };
+    const changed = MODULE_KEYS
+      .filter((k) => current.modules[k] !== nextModules[k])
+      .map((k) => ({ key: k, from: current.modules[k], to: nextModules[k] }));
+    await this.catalog.tenant.update({
+      where: { id },
+      data: { settings: { ...current, modules: nextModules } as any },
+    });
+    await this.audit.record(actor, 'tenant.updateModules', { type: 'tenant', id }, { changed }, req);
+    return { modules: nextModules };
   }
 
   async listTenantUsers(id: string) {

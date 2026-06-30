@@ -6,12 +6,18 @@ import { Paperclip, Trash2, Upload, FileText, ImageIcon, Link2 } from 'lucide-re
 import { toast } from 'sonner';
 import { api, getSession } from '@/lib/api';
 import { btnDanger, btnPrimary, btnSecondary, inputClass } from '@/components/Field';
+import { useModuleEnabled } from '@/lib/settings';
 
 export default function AssetDetailPage() {
   const params = useParams() as { id: string };
   const router = useRouter();
   const qc = useQueryClient();
   const id = params.id;
+  // Feature gating: skip (and hide) panels for modules this workspace has turned off,
+  // so the page doesn't fire requests that the server now 403s once enforcement is on.
+  const ticketsOn = useModuleEnabled('tickets');
+  const maintenanceOn = useModuleEnabled('maintenance');
+  const depreciationOn = useModuleEnabled('depreciation');
   const asset = useQuery({ queryKey: ['asset', id], queryFn: () => api(`/assets/${id}`) });
   const photoUrl = useQuery({
     queryKey: ['asset-photo-url', id],
@@ -20,9 +26,9 @@ export default function AssetDetailPage() {
     refetchInterval: 50 * 60 * 1000,
   });
   const audit = useQuery({ queryKey: ['asset-audit', id], queryFn: () => api(`/assets/${id}/audit`) });
-  const tickets = useQuery({ queryKey: ['asset-tickets', id], queryFn: () => api(`/tickets?assetId=${id}`) });
-  const schedules = useQuery({ queryKey: ['asset-maint', id], queryFn: () => api(`/maintenance?assetId=${id}`) });
-  const depreciation = useQuery({ queryKey: ['asset-dep', id], queryFn: () => api(`/depreciation/${id}`) });
+  const tickets = useQuery({ queryKey: ['asset-tickets', id], queryFn: () => api(`/tickets?assetId=${id}`), enabled: ticketsOn });
+  const schedules = useQuery({ queryKey: ['asset-maint', id], queryFn: () => api(`/maintenance?assetId=${id}`), enabled: maintenanceOn });
+  const depreciation = useQuery({ queryKey: ['asset-dep', id], queryFn: () => api(`/depreciation/${id}`), enabled: depreciationOn });
   const users = useQuery({ queryKey: ['users'], queryFn: () => api('/users') });
   const categories = useQuery({ queryKey: ['categories'], queryFn: () => api('/categories') });
   const locations = useQuery({ queryKey: ['locations'], queryFn: () => api('/locations') });
@@ -281,6 +287,7 @@ export default function AssetDetailPage() {
             )}
           </div>
 
+          {ticketsOn && (
           <div className="rounded-lg border bg-white p-4">
             <div className="mb-2 flex items-center justify-between text-sm font-medium">
               <span>Service tickets</span>
@@ -297,7 +304,9 @@ export default function AssetDetailPage() {
               {tickets.data?.length === 0 && <li className="text-gray-500">No tickets.</li>}
             </ul>
           </div>
+          )}
 
+          {depreciationOn && (
           <div className="rounded-lg border bg-white p-4">
             <div className="mb-2 text-sm font-medium">Depreciation</div>
             {depreciation.data?.method === 'NONE' || !depreciation.data?.usefulLifeMonths ? (
@@ -312,7 +321,9 @@ export default function AssetDetailPage() {
               </div>
             )}
           </div>
+          )}
 
+          {maintenanceOn && (
           <div className="rounded-lg border bg-white p-4">
             <div className="mb-2 text-sm font-medium">Maintenance</div>
             <ul className="space-y-1 text-sm">
@@ -325,6 +336,7 @@ export default function AssetDetailPage() {
               {schedules.data?.length === 0 && <li className="text-gray-500">No schedules.</li>}
             </ul>
           </div>
+          )}
 
           <div className="rounded-lg border bg-white p-4">
             <div className="mb-2 text-sm font-medium">Audit log</div>

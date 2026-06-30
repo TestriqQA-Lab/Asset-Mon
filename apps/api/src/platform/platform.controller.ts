@@ -14,8 +14,10 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsOptional, IsString, Length } from 'class-validator';
+import { IsBoolean, IsIn, IsObject, IsOptional, IsString, Length } from 'class-validator';
 import { PlatformAuthGuard } from './platform-auth.guard';
+import { SuperAdminOnly } from './super-admin-only.decorator';
+import { SuperAdminOnlyGuard } from './super-admin-only.guard';
 import { PlatformAuthService } from './platform-auth.service';
 import { PlatformMfaService } from './platform-mfa.service';
 import { PlatformTenantsService } from './platform-tenants.service';
@@ -36,10 +38,13 @@ class PeerResetRequestDto {
 class PeerResetApproveDto {
   @IsString() @Length(6, 6) totpCode: string;
 }
+class UpdateTenantModulesDto {
+  @IsObject() modules: Record<string, boolean>;
+}
 
 @ApiTags('platform')
 @ApiBearerAuth()
-@UseGuards(PlatformAuthGuard)
+@UseGuards(PlatformAuthGuard, SuperAdminOnlyGuard)
 @Controller('platform')
 export class PlatformController {
   constructor(
@@ -102,6 +107,17 @@ export class PlatformController {
   @Patch('tenants/:id/subscription')
   setSub(@Req() req: any, @Param('id') id: string, @Body() dto: any) {
     return this.tenants.updateSubscription(req.platformUser, id, dto, req);
+  }
+
+  // Feature switches for a company (the same toggles as the tenant Settings →
+  // Modules page). GET is readable by SUPPORT; PATCH is SUPER_ADMIN-only.
+  @Get('tenants/:id/modules')
+  getModules(@Param('id') id: string) { return this.tenants.getModules(id); }
+
+  @Patch('tenants/:id/modules')
+  @SuperAdminOnly()
+  setModules(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateTenantModulesDto) {
+    return this.tenants.updateModules(req.platformUser, id, dto.modules, req);
   }
 
   @Get('tenants/:id/users')
