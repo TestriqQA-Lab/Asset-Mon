@@ -27,7 +27,9 @@ class TwoFAService {
   constructor(private readonly ctx: TenantContextService) {}
 
   async startEnroll(userId: string, email: string, tenantSlug: string) {
-    const secret = authenticator.generateSecret();
+    // 20 bytes -> 160-bit / 32-char base32 (RFC 4226 recommended length). The otplib
+    // default (10 bytes / 80-bit) is rejected as "too short" by some authenticator apps.
+    const secret = authenticator.generateSecret(20);
     const otpauth = authenticator.keyuri(email, `${SITE_NAME} (${tenantSlug})`, secret);
     pendingSecrets.set(userId, { secret, expiresAt: Date.now() + PENDING_TTL_MS });
     return { secret, otpauth };

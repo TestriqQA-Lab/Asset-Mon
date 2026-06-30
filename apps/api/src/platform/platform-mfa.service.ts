@@ -183,7 +183,9 @@ export class PlatformMfaService {
 
   // ── Step: TOTP ───────────────────────────────────────────────────────────
   async startTotp(user: PlatformUserRow) {
-    const secret = authenticator.generateSecret();
+    // 20 bytes -> 160-bit / 32-char base32 (RFC 4226 recommended length). The otplib
+    // default (10 bytes / 80-bit) is rejected as "too short" by some authenticator apps.
+    const secret = authenticator.generateSecret(20);
     const otpauth = authenticator.keyuri(user.email, TOTP_ISSUER, secret);
     // Persist the pending secret AES-encrypted with totpEnabled=false so it is
     // not yet an active factor (mfaSetupComplete requires totpEnabled).
