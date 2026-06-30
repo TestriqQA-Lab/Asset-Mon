@@ -24,6 +24,9 @@ model Tenant {
   razorpaySubscriptionId String?
   razorpayPlanId         String?
   inviteToken String?      @unique
+  // Sticky disable: true means the invite link was deliberately turned off and must
+  // NOT be auto-re-minted on a passive read; cleared only by an explicit rotate().
+  inviteDisabled Boolean   @default(false)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   tenantUsers TenantUser[]

@@ -128,6 +128,34 @@ export class PlatformController {
     return this.tenants.resetTenantUserPassword(req.platformUser, id, userId, req);
   }
 
+  // ── Login & access help (Slice 2) ──
+  @Post('tenants/:id/users/:userId/reset-mfa')
+  @SuperAdminOnly()
+  resetTenantUserMfa(@Req() req: any, @Param('id') id: string, @Param('userId') userId: string) {
+    return this.tenants.resetTenantUserMfa(req.platformUser, id, userId, req);
+  }
+
+  @Post('tenants/:id/users/:userId/unlock')
+  @SuperAdminOnly()
+  unlockTenantUser(@Req() req: any, @Param('id') id: string, @Param('userId') userId: string) {
+    return this.tenants.unlockTenantUser(req.platformUser, id, userId, req);
+  }
+
+  @Get('tenants/:id/invite')
+  getInvite(@Param('id') id: string) { return this.tenants.getTenantInvite(id); }
+
+  @Post('tenants/:id/invite/regenerate')
+  @SuperAdminOnly()
+  regenerateInvite(@Req() req: any, @Param('id') id: string) {
+    return this.tenants.regenerateTenantInvite(req.platformUser, id, req);
+  }
+
+  @Post('tenants/:id/invite/disable')
+  @SuperAdminOnly()
+  disableInvite(@Req() req: any, @Param('id') id: string) {
+    return this.tenants.disableTenantInvite(req.platformUser, id, req);
+  }
+
   @Post('tenants/:id/users/:userId/impersonate')
   impersonate(@Req() req: any, @Param('id') id: string, @Param('userId') userId: string) {
     return this.tenants.impersonate(req.platformUser, id, userId, req);

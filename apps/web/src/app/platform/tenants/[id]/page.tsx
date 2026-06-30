@@ -9,6 +9,7 @@ import { Modal } from '@/components/Modal';
 import { MODULE_KEYS, type ModuleKey } from '@/lib/settings';
 import {
   ArrowLeft, Pause, Play, Trash2, KeyRound, UserCog, ExternalLink, Copy, Check,
+  ShieldOff, LockOpen, Link2, RotateCw, Ban,
 } from 'lucide-react';
 
 const STATUS_TONES: Record<string, 'green' | 'amber' | 'red' | 'gray'> = {
@@ -93,6 +94,26 @@ export default function TenantDetailPage() {
       // any 3rd-party script the tenant dashboard might load.
       window.open('/dashboard', '_blank', 'noopener,noreferrer');
     },
+  });
+
+  const [actionUserId, setActionUserId] = useState<string | null>(null);
+  const [mfaConfirmUser, setMfaConfirmUser] = useState<any | null>(null);
+  const resetMfa = useMutation({
+    mutationFn: (userId: string) => papi<any>(`/platform/tenants/${id}/users/${userId}/reset-mfa`, { method: 'POST' }),
+    onSuccess: (d) => {
+      setMfaConfirmUser(null);
+      toast.success(`MFA reset for ${d.email} — they can set it up again next sign-in.`);
+      qc.invalidateQueries({ queryKey: ['platform-tenant-users', id] });
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+  const unlock = useMutation({
+    mutationFn: (userId: string) => papi<any>(`/platform/tenants/${id}/users/${userId}/unlock`, { method: 'POST' }),
+    onSuccess: (d) => {
+      toast.success(`Account unlocked for ${d.email}.`);
+      qc.invalidateQueries({ queryKey: ['platform-tenant-users', id] });
+    },
+    onError: (e: any) => toast.error(e.message),
   });
 
   const [copied, setCopied] = useState(false);
@@ -203,6 +224,8 @@ export default function TenantDetailPage() {
 
             <FeaturesCard id={id} />
 
+            <InviteCard id={id} />
+
             <Card padded={false}>
               <div className="flex items-center justify-between border-b border-ink-100 px-5 py-3">
                 <h3 className="text-sm font-semibold uppercase tracking-wider text-ink-500">All tenant users</h3>
@@ -250,6 +273,25 @@ export default function TenantDetailPage() {
                                   <Button
                                     variant="secondary"
                                     size="sm"
+                                    icon={<ShieldOff className="h-3.5 w-3.5" />}
+                                    onClick={() => setMfaConfirmUser(u)}
+                                    disabled={!u.totpEnabled && (u.mfaMethod ?? 'NONE') === 'NONE'}
+                                  >
+                                    Reset MFA
+                                  </Button>
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    icon={<LockOpen className="h-3.5 w-3.5" />}
+                                    onClick={() => { setActionUserId(u.id); unlock.mutate(u.id); }}
+                                    loading={unlock.isPending && actionUserId === u.id}
+                                    disabled={!u.lockedUntil}
+                                  >
+                                    Unlock
+                                  </Button>
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
                                     icon={<UserCog className="h-3.5 w-3.5" />}
                                     onClick={() => impersonate.mutate(u.id)}
                                     loading={impersonate.isPending}
@@ -288,6 +330,25 @@ export default function TenantDetailPage() {
                                 loading={resetUser.isPending && resetUserId === u.id}
                               >
                                 Reset password
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={<ShieldOff className="h-3.5 w-3.5" />}
+                                onClick={() => setMfaConfirmUser(u)}
+                                disabled={!u.totpEnabled && (u.mfaMethod ?? 'NONE') === 'NONE'}
+                              >
+                                Reset MFA
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={<LockOpen className="h-3.5 w-3.5" />}
+                                onClick={() => { setActionUserId(u.id); unlock.mutate(u.id); }}
+                                loading={unlock.isPending && actionUserId === u.id}
+                                disabled={!u.lockedUntil}
+                              >
+                                Unlock
                               </Button>
                               <Button
                                 variant="secondary"
@@ -357,6 +418,24 @@ export default function TenantDetailPage() {
                   </button>
                 </div>
                 <p className="text-xs text-ink-500">All of this user's existing sessions have been invalidated.</p>
+              </div>
+            </Modal>
+
+            {/* Reset-MFA confirmation */}
+            <Modal
+              open={!!mfaConfirmUser}
+              onClose={() => setMfaConfirmUser(null)}
+              title="Reset this user's MFA?"
+              footer={
+                <>
+                  <Button variant="secondary" onClick={() => setMfaConfirmUser(null)}>Cancel</Button>
+                  <Button variant="danger" loading={resetMfa.isPending} onClick={() => mfaConfirmUser && resetMfa.mutate(mfaConfirmUser.id)}>Reset MFA</Button>
+                </>
+              }
+            >
+              <div className="space-y-2 text-sm text-ink-700">
+                <p>This wipes <strong>{mfaConfirmUser?.email}</strong>'s two-factor sign-in — authenticator, email codes and backup codes. They'll sign in with just their password and can set MFA up again.</p>
+                <p className="text-xs text-ink-500">Their active sessions end immediately. This is recorded in the audit log.</p>
               </div>
             </Modal>
           </>
@@ -515,5 +594,95 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
     >
       <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : 'translate-x-0.5'}`} />
     </button>
+  );
+}
+
+// ── Workspace invite (operator-side) ────────────────────────────────────────
+function InviteCard({ id }: { id: string }) {
+  const qc = useQueryClient();
+  const canEdit = getPlatformSession()?.user.role === 'SUPER_ADMIN';
+  const invite = useQuery({
+    queryKey: ['platform-tenant-invite', id],
+    queryFn: () => papi<{ enabled: boolean; disabled: boolean; token: string | null; needsRotation?: boolean }>(`/platform/tenants/${id}/invite`),
+    enabled: !!id,
+  });
+  const [link, setLink] = useState<string | null>(null);
+  const [confirmDisable, setConfirmDisable] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copy = async (s: string) => { try { await navigator.clipboard.writeText(s); } catch {} setCopied(true); setTimeout(() => setCopied(false), 1500); };
+  const urlFor = (token: string) => `${typeof window !== 'undefined' ? window.location.origin : ''}/invite/${token}`;
+
+  const regenerate = useMutation({
+    mutationFn: () => papi<{ token: string }>(`/platform/tenants/${id}/invite/regenerate`, { method: 'POST' }),
+    onSuccess: (d) => { setLink(urlFor(d.token)); toast.success('Invite link generated'); qc.invalidateQueries({ queryKey: ['platform-tenant-invite', id] }); },
+    onError: (e: any) => toast.error(e.message),
+  });
+  const disable = useMutation({
+    mutationFn: () => papi(`/platform/tenants/${id}/invite/disable`, { method: 'POST' }),
+    onSuccess: () => { setConfirmDisable(false); setLink(null); toast.success('Invite link disabled'); qc.invalidateQueries({ queryKey: ['platform-tenant-invite', id] }); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const s = invite.data;
+  return (
+    <Card padded={false}>
+      <div className="flex flex-col gap-2 border-b border-ink-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-ink-500">Workspace invite</h3>
+          <p className="mt-0.5 text-xs text-ink-500">The company's shared join link. <strong>Disabling is sticky</strong> — it stays off until you regenerate it.</p>
+        </div>
+        {s && (s.disabled ? <Pill tone="red" dot>Disabled</Pill> : s.enabled ? <Pill tone="green" dot>Enabled</Pill> : <Pill tone="gray" dot>No link</Pill>)}
+      </div>
+      <QueryState query={invite}>
+        {(st: any) => (
+          <div className="space-y-3 p-4">
+            {!canEdit && (
+              <div className="rounded-lg bg-ink-50 px-3 py-2 text-xs text-ink-500">Read-only — managing the invite link requires a super-admin operator.</div>
+            )}
+            {(link || st.token) ? (
+              <div className="flex items-center gap-2 rounded-lg border border-ink-200 bg-ink-50 px-3 py-2 font-mono text-xs">
+                <span className="flex-1 break-all">{link || urlFor(st.token)}</span>
+                <button onClick={() => copy(link || urlFor(st.token))} className="rounded p-1 hover:bg-white">
+                  {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4 text-ink-500" />}
+                </button>
+              </div>
+            ) : st.enabled && st.needsRotation ? (
+              <p className="text-xs text-ink-500">A link exists but can't be shown (it isn't stored in plain text). Regenerate to get a fresh shareable link.</p>
+            ) : st.disabled ? (
+              <p className="text-xs text-ink-500">The invite link is disabled. Regenerate to create a new one and re-enable joining.</p>
+            ) : (
+              <p className="text-xs text-ink-500">No invite link yet. Generate one to let new employees join.</p>
+            )}
+            {canEdit && (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" size="sm" icon={<RotateCw className="h-3.5 w-3.5" />} loading={regenerate.isPending} onClick={() => regenerate.mutate()}>
+                  {st.enabled ? 'Regenerate link' : 'Generate link'}
+                </Button>
+                {st.enabled && (
+                  <Button variant="secondary" size="sm" icon={<Ban className="h-3.5 w-3.5" />} onClick={() => setConfirmDisable(true)}>Disable link</Button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </QueryState>
+
+      <Modal
+        open={confirmDisable}
+        onClose={() => setConfirmDisable(false)}
+        title="Disable the invite link?"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmDisable(false)}>Cancel</Button>
+            <Button variant="danger" loading={disable.isPending} onClick={() => disable.mutate()}>Disable link</Button>
+          </>
+        }
+      >
+        <div className="space-y-2 text-sm text-ink-700">
+          <p>Anyone holding the current link will no longer be able to join. It stays <strong>disabled</strong> until you regenerate it — it won't be silently re-created.</p>
+          <p className="text-xs text-ink-500">Recorded in the audit log.</p>
+        </div>
+      </Modal>
+    </Card>
   );
 }

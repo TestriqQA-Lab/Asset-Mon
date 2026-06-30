@@ -15,6 +15,8 @@ import { PlatformAuditService } from './platform-audit.service';
 import { assertSuperAdmin } from './platform-mfa.util';
 import { PLANS, type PlanKey } from '../billing/plans';
 import { mergeSettings, MODULE_KEYS } from '../tenant-settings/tenant-settings.types';
+import { clearTenantMfaUserData } from '../auth/tenant-mfa-clear';
+import { WorkspaceInviteService } from '../workspace-invite/workspace-invite.service';
 
 const BCRYPT_COST = Number(process.env.BCRYPT_COST || 12);
 
@@ -28,6 +30,7 @@ export class PlatformTenantsService {
     private readonly provisioning: TenantProvisioningService,
     private readonly jwt: JwtService,
     private readonly audit: PlatformAuditService,
+    private readonly invites: WorkspaceInviteService,
   ) {}
 
   async list(filter: { search?: string; status?: string; plan?: string }) {
@@ -208,7 +211,7 @@ export class PlatformTenantsService {
       orderBy: { createdAt: 'desc' },
       select: {
         id: true, email: true, firstName: true, lastName: true, role: true,
-        active: true, totpEnabled: true, lockedUntil: true, createdAt: true,
+        active: true, totpEnabled: true, mfaMethod: true, lockedUntil: true, createdAt: true,
       },
     });
   }
@@ -243,6 +246,76 @@ export class PlatformTenantsService {
     // Returning the temp password is safe here: the platform user is operating
     // with explicit support intent, and the channel is HTTPS to their browser.
     return { tempPassword, email: u.email };
+  }
+
+  // ── Login & access help (Slice 2) — operator rescues a stuck tenant user ──
+
+  // Wipe a tenant user's MFA so they can re-enroll (lost device/email). Mirrors the
+  // tenant-side admin reset (users.service.ts) but WITHOUT the step-up: the operator
+  // is already 3FA-gated and super-admin-only.
+  async resetTenantUserMfa(actor: { id: string; email: string; role?: string }, tenantId: string, userId: string, req?: any) {
+    assertSuperAdmin(actor);
+    const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
+    if (!t) throw new NotFoundException('Tenant not found');
+    if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
+    const db = this.pool.get(t.dbName);
+    const u = await db.user.findUnique({ where: { id: userId } });
+    if (!u) throw new NotFoundException('User not found');
+    await db.$transaction(async (tx: any) => {
+      await tx.tenantBackupCode.deleteMany({ where: { userId } });
+      await tx.tenantMfaPending.deleteMany({ where: { userId } });
+      await tx.user.update({ where: { id: userId }, data: clearTenantMfaUserData() });
+    });
+    await this.audit.record(actor, 'tenant.resetUserMfa',
+      { type: 'tenantUser', id: userId },
+      { tenantId, tenantSlug: t.slug, email: u.email },
+      req);
+    return { ok: true, email: u.email };
+  }
+
+  // Clear the failed-login lock so the user can try signing in again. Does NOT bump
+  // tokenVersion — unlocking is "let them retry", not a compromise reset.
+  async unlockTenantUser(actor: { id: string; email: string; role?: string }, tenantId: string, userId: string, req?: any) {
+    assertSuperAdmin(actor);
+    const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
+    if (!t) throw new NotFoundException('Tenant not found');
+    if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
+    const db = this.pool.get(t.dbName);
+    const u = await db.user.findUnique({ where: { id: userId } });
+    if (!u) throw new NotFoundException('User not found');
+    await db.user.update({ where: { id: userId }, data: { failedLoginCount: 0, lockedUntil: null } });
+    await this.audit.record(actor, 'tenant.unlockUser',
+      { type: 'tenantUser', id: userId },
+      { tenantId, tenantSlug: t.slug, email: u.email },
+      req);
+    return { ok: true, email: u.email };
+  }
+
+  // ── Workspace invite link (operator side) ──
+  // Read-only status (SUPPORT may view). Non-minting — looking never creates a link.
+  async getTenantInvite(tenantId: string) {
+    const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
+    if (!t) throw new NotFoundException('Tenant not found');
+    return this.invites.status(tenantId);
+  }
+
+  async regenerateTenantInvite(actor: { id: string; email: string; role?: string }, tenantId: string, req?: any) {
+    assertSuperAdmin(actor);
+    const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
+    if (!t) throw new NotFoundException('Tenant not found');
+    if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
+    const r = await this.invites.rotate(tenantId);
+    await this.audit.record(actor, 'tenant.inviteRotate', { type: 'tenant', id: tenantId }, { tenantSlug: t.slug }, req);
+    return r;
+  }
+
+  async disableTenantInvite(actor: { id: string; email: string; role?: string }, tenantId: string, req?: any) {
+    assertSuperAdmin(actor);
+    const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
+    if (!t) throw new NotFoundException('Tenant not found');
+    const r = await this.invites.disable(tenantId);
+    await this.audit.record(actor, 'tenant.inviteDisable', { type: 'tenant', id: tenantId }, { tenantSlug: t.slug }, req);
+    return r;
   }
 
   /**
