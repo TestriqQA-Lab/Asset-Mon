@@ -649,14 +649,14 @@ function InviteCard({ id }: { id: string }) {
             ) : st.enabled && st.needsRotation ? (
               <p className="text-xs text-ink-500">A link exists but can't be shown (it isn't stored in plain text). Regenerate to get a fresh shareable link.</p>
             ) : st.disabled ? (
-              <p className="text-xs text-ink-500">The invite link is disabled. Regenerate to create a new one and re-enable joining.</p>
+              <p className="text-xs text-ink-500">The invite link is disabled. Re-enable to create a fresh link and turn joining back on.</p>
             ) : (
               <p className="text-xs text-ink-500">No invite link yet. Generate one to let new employees join.</p>
             )}
             {canEdit && (
               <div className="flex flex-wrap gap-2">
                 <Button variant="secondary" size="sm" icon={<RotateCw className="h-3.5 w-3.5" />} loading={regenerate.isPending} onClick={() => regenerate.mutate()}>
-                  {st.enabled ? 'Regenerate link' : 'Generate link'}
+                  {st.disabled ? 'Re-enable link' : st.enabled ? 'Regenerate link' : 'Generate link'}
                 </Button>
                 {st.enabled && (
                   <Button variant="secondary" size="sm" icon={<Ban className="h-3.5 w-3.5" />} onClick={() => setConfirmDisable(true)}>Disable link</Button>
