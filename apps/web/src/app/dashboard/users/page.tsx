@@ -38,6 +38,37 @@ export default function UsersPage() {
   });
   const canReset = (u: any) => isAdmin && u.id !== myId && u.mfaMethod && u.mfaMethod !== 'NONE';
 
+  // ── Offboard: deactivate + release everything a user holds (Slice 6a) ──────
+  const [offboardTarget, setOffboardTarget] = useState<any>(null);
+  const [offboardPassword, setOffboardPassword] = useState('');
+  const [offboardDeactivate, setOffboardDeactivate] = useState(true);
+  const closeOffboard = () => { setOffboardTarget(null); setOffboardPassword(''); setOffboardDeactivate(true); };
+  const openOffboard = (u: any) => { setOffboardTarget(u); setOffboardPassword(''); setOffboardDeactivate(true); };
+  const offboardPreview = useQuery({
+    queryKey: ['offboard-preview', offboardTarget?.id],
+    queryFn: () => api<any>(`/users/${offboardTarget.id}/offboarding-preview`),
+    enabled: !!offboardTarget,
+  });
+  const isLastAdmin = !!offboardPreview.data?.isLastAdmin;
+  const offboard = useMutation({
+    mutationFn: () => api<any>(`/users/${offboardTarget.id}/offboard`, {
+      method: 'POST',
+      body: JSON.stringify({ deactivate: isLastAdmin ? false : offboardDeactivate, password: adminHasMfa ? offboardPassword : undefined }),
+    }),
+    onSuccess: (res: any) => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      const parts: string[] = [];
+      if (res.assetsReleased) parts.push(`${res.assetsReleased} asset${res.assetsReleased === 1 ? '' : 's'}`);
+      if (res.ticketsUnassigned) parts.push(`${res.ticketsUnassigned} ticket${res.ticketsUnassigned === 1 ? '' : 's'}`);
+      if (res.reservationsCancelled) parts.push(`${res.reservationsCancelled} booking${res.reservationsCancelled === 1 ? '' : 's'}`);
+      if (res.seatsReleased) parts.push(`${res.seatsReleased} seat${res.seatsReleased === 1 ? '' : 's'}`);
+      const released = parts.length ? `Released ${parts.join(', ')}.` : 'Nothing was held.';
+      toast.success(res.deactivated ? `User deactivated. ${released}` : released);
+      closeOffboard();
+    },
+  });
+  const canOffboard = (u: any) => isAdmin && u.active && u.id !== myId;
+
   const save = useMutation({
     mutationFn: () => {
       const body: any = { ...form, departmentId: form.departmentId || null, scopedDepartmentId: form.scopedDepartmentId || null };
@@ -98,6 +129,7 @@ export default function UsersPage() {
               <td className="px-4 py-2 text-right whitespace-nowrap">
                 {canReset(u) && <button className={btnSecondary + ' mr-2'} onClick={() => { setResetTarget(u); setResetPassword(''); }}>Reset verification</button>}
                 <button className={btnSecondary + ' mr-2'} onClick={() => editUser(u)}>Edit</button>
+                {canOffboard(u) && <button className={btnSecondary + ' mr-2'} onClick={() => openOffboard(u)}>Offboard</button>}
                 <button className={btnDanger} onClick={() => confirm('Delete user?') && del.mutate(u.id)}>Delete</button>
               </td>
             </tr>
@@ -125,6 +157,7 @@ export default function UsersPage() {
               <div className="mt-2 flex flex-wrap gap-2">
                 {canReset(u) && <button className={btnSecondary} onClick={() => { setResetTarget(u); setResetPassword(''); }}>Reset verification</button>}
                 <button className={btnSecondary} onClick={() => editUser(u)}>Edit</button>
+                {canOffboard(u) && <button className={btnSecondary} onClick={() => openOffboard(u)}>Offboard</button>}
                 <button className={btnDanger} onClick={() => confirm('Delete user?') && del.mutate(u.id)}>Delete</button>
               </div>
             </MobileCard>
@@ -227,6 +260,96 @@ export default function UsersPage() {
           )}
         </div>
       </Modal>
+
+      <Modal
+        open={!!offboardTarget}
+        onClose={closeOffboard}
+        size="lg"
+        title="Offboard user"
+        footer={
+          <>
+            <button className={btnSecondary} onClick={closeOffboard}>Cancel</button>
+            <button
+              className={btnDanger}
+              disabled={offboard.isPending || offboardPreview.isLoading || (adminHasMfa && !offboardPassword)}
+              onClick={() => offboard.mutate()}
+            >
+              {isLastAdmin ? 'Release holdings' : 'Deactivate & release'}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p className="text-ink-700">
+            This releases everything <b>{offboardTarget?.firstName} {offboardTarget?.lastName}</b> is holding back to the pool
+            {isLastAdmin ? '.' : ' and deactivates their account.'}
+          </p>
+
+          {offboardPreview.isLoading && <p className="text-ink-500">Loading what they hold…</p>}
+          {offboardPreview.data && (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <OffboardCount label="assets → to stock" n={offboardPreview.data.counts.assets} />
+                <OffboardCount label="tickets → unassigned" n={offboardPreview.data.counts.tickets} />
+                <OffboardCount label="bookings → cancelled" n={offboardPreview.data.counts.reservations} />
+                <OffboardCount label="seats → freed" n={offboardPreview.data.counts.seats} />
+              </div>
+              {offboardPreview.data.assets.length > 0 && <OffboardList title="Assets" items={offboardPreview.data.assets.map((a: any) => `${a.asset.assetTag} · ${a.asset.name}`)} />}
+              {offboardPreview.data.tickets.length > 0 && <OffboardList title="Tickets" items={offboardPreview.data.tickets.map((t: any) => `${t.ticketNumber} · ${t.title}`)} />}
+              {offboardPreview.data.reservations.length > 0 && <OffboardList title="Bookings" items={offboardPreview.data.reservations.map((r: any) => `${r.asset.assetTag} · ${r.asset.name}`)} />}
+              {offboardPreview.data.seats.length > 0 && <OffboardList title="Software seats" items={offboardPreview.data.seats.map((s: any) => s.license.software.name)} />}
+            </>
+          )}
+
+          {isLastAdmin ? (
+            <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
+              This is the last active admin, so the account stays active — but their holdings will still be released.
+            </p>
+          ) : (
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={offboardDeactivate} onChange={(e) => setOffboardDeactivate(e.target.checked)} />
+              Deactivate the account (signs them out everywhere)
+            </label>
+          )}
+
+          {adminHasMfa && (
+            <Field label="Confirm your password">
+              <input
+                className={inputClass}
+                type="password"
+                autoComplete="current-password"
+                value={offboardPassword}
+                onChange={(e) => setOffboardPassword(e.target.value)}
+              />
+            </Field>
+          )}
+          {offboard.error && (
+            <p className="text-red-600">
+              {/password/i.test((offboard.error as Error).message) ? 'Incorrect password.' : (offboard.error as Error).message}
+            </p>
+          )}
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+function OffboardCount({ label, n }: { label: string; n: number }) {
+  return (
+    <span className={'rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ' + (n > 0 ? 'bg-brand-50 text-brand-700 ring-brand-200' : 'bg-ink-50 text-ink-400 ring-ink-200')}>
+      {n} {label}
+    </span>
+  );
+}
+
+function OffboardList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-ink-600">{title}</p>
+      <ul className="mt-0.5 space-y-0.5 text-xs text-ink-500">
+        {items.slice(0, 8).map((it, i) => <li key={i} className="truncate">• {it}</li>)}
+        {items.length > 8 && <li className="text-ink-400">…and {items.length - 8} more</li>}
+      </ul>
     </div>
   );
 }
