@@ -32,6 +32,12 @@ class ResetUserMfaDto {
   // enabled (step-up). Optional in the DTO so admins without MFA can omit it.
   @IsOptional() @IsString() password?: string;
 }
+class OffboardUserDto {
+  // Release-only (Slice 6a). deactivate defaults true; password is the acting
+  // admin's step-up (only checked when that admin has MFA enabled).
+  @IsOptional() @IsBoolean() deactivate?: boolean;
+  @IsOptional() @IsString() password?: string;
+}
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -67,6 +73,20 @@ export class UsersController {
   @Roles('ADMIN')
   resetMfa(@Param('id') id: string, @Body() dto: ResetUserMfaDto, @CurrentUser() actor: any) {
     return this.svc.resetUserMfa(id, { id: actor.sub, role: actor.role }, dto.password);
+  }
+
+  // Offboarding (Slice 6a): preview what a user still holds, then deactivate +
+  // release it all back to the pool in one audited transaction.
+  @Get(':id/offboarding-preview')
+  @Roles('ADMIN')
+  offboardingPreview(@Param('id') id: string, @CurrentUser() actor: any) {
+    return this.svc.getOffboardingPreview(id, { id: actor.sub, role: actor.role });
+  }
+
+  @Post(':id/offboard')
+  @Roles('ADMIN')
+  offboard(@Param('id') id: string, @Body() dto: OffboardUserDto, @CurrentUser() actor: any) {
+    return this.svc.offboardUser(id, dto, { id: actor.sub, role: actor.role });
   }
 
   @Delete(':id')
