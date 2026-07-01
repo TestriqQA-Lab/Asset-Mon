@@ -11,9 +11,11 @@ import { PlatformSetupTicketGuard } from './platform-setup-ticket.guard';
 import { PlatformMfaSetupController } from './platform-mfa-setup.controller';
 import { PlatformSupportController } from './platform-support.controller';
 import { PlatformSupportService } from './platform-support.service';
+import { PlatformAnnouncementsController } from './platform-announcements.controller';
+import { PlatformAnnouncementsService } from './platform-announcements.service';
 
 @Module({
-  controllers: [PlatformAuthController, PlatformController, PlatformMfaSetupController, PlatformSupportController],
+  controllers: [PlatformAuthController, PlatformController, PlatformMfaSetupController, PlatformSupportController, PlatformAnnouncementsController],
   providers: [
     PlatformAuthService,
     PlatformAuthGuard,
@@ -23,7 +25,10 @@ import { PlatformSupportService } from './platform-support.service';
     PlatformMfaService,
     PlatformSetupTicketGuard,
     PlatformSupportService,
+    PlatformAnnouncementsService,
   ],
-  exports: [PlatformAuthGuard],
+  // PlatformAnnouncementsService is exported so the tenant AnnouncementsModule can
+  // reuse the one audience-matching read path.
+  exports: [PlatformAuthGuard, PlatformAnnouncementsService],
 })
 export class PlatformModule {}

@@ -41,6 +41,7 @@ import { AssetAttachmentsModule } from './asset-attachments/asset-attachments.mo
 import { WorkspaceInviteModule } from './workspace-invite/workspace-invite.module';
 import { PlatformModule } from './platform/platform.module';
 import { SupportModule } from './support/support.module';
+import { AnnouncementsModule } from './announcements/announcements.module';
 
 function normaliseIpKey(raw: any): string {
   const first = typeof raw === 'string' ? raw.split(',')[0].trim() : '';
@@ -101,6 +102,7 @@ function normaliseIpKey(raw: any): string {
     AssetAttachmentsModule,
     PlatformModule,
     SupportModule,
+    AnnouncementsModule,
   ],
   controllers: [HealthController, MeController],
   providers: [

@@ -261,3 +261,30 @@ model SupportMessage {
 
   @@index([requestId])
 }
+
+// ── Broadcast announcements (Slice 5) ──────────────────────────────────────
+// Operator-authored notices rendered to targeted tenants as a dismissible
+// dashboard banner. Audience is stored as JSON arrays (FK-less, matching the
+// PlatformAuditLog convention) so a deleted tenant/plan simply stops matching.
+// Dismissal is client-side (localStorage), so there is no per-user table here.
+model Announcement {
+  id                String    @id @default(uuid())
+  title             String
+  body              String                        // plain text (rendered as text, never HTML)
+  severity          String    @default("info")    // info | warning | critical
+  audienceType      String    @default("ALL")     // ALL | PLAN | TENANTS
+  audiencePlans     Json      @default("[]")       // string[] of plan keys, used when audienceType=PLAN
+  audienceTenantIds Json      @default("[]")       // string[] of Tenant.id, used when audienceType=TENANTS
+  startsAt          DateTime?
+  endsAt            DateTime?
+  active            Boolean   @default(true)
+  version           Int       @default(1)          // bumped on material edits so a dismissed banner re-appears
+  createdById       String
+  createdByEmail    String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([active])
+  @@index([startsAt])
+  @@index([endsAt])
+}
