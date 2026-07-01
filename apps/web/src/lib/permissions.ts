@@ -42,6 +42,7 @@ export const NAV_KEYS = [
   'webhooks',
   'audit-log',
   'get-help',
+  'data-quality',
   'settings:branding',
   'settings:modules',
   'settings:statuses',
@@ -70,6 +71,7 @@ export const DEFAULT_ASSET_MANAGER_NAV: NavMap = navOnly([
   'purchase-requests', 'purchase-orders', 'depreciation',
   'software', 'licenses',
   'users',
+  'data-quality',
   'settings:security', 'settings:statuses',
 ]);
 
@@ -140,6 +142,7 @@ export const NAV_LABELS: Record<NavKey, string> = {
   'webhooks':             'Webhooks',
   'audit-log':            'Audit log',
   'get-help':             'Get help',
+  'data-quality':         'Data quality',
   'settings:branding':    'Branding',
   'settings:modules':     'Modules',
   'settings:statuses':    'Asset statuses',
@@ -150,7 +153,7 @@ export const NAV_LABELS: Record<NavKey, string> = {
 
 /** Grouping used in both the dashboard nav and the permissions matrix. */
 export const NAV_GROUPS: Array<{ label: string; keys: NavKey[] }> = [
-  { label: 'Overview',  keys: ['dashboard', 'reports'] },
+  { label: 'Overview',  keys: ['dashboard', 'reports', 'data-quality'] },
   { label: 'Inventory', keys: ['assets', 'categories', 'locations', 'departments', 'software', 'licenses'] },
   { label: 'Lifecycle', keys: ['tickets', 'maintenance', 'reservations', 'audit-sessions'] },
   { label: 'Finance',   keys: ['purchase-requests', 'purchase-orders', 'depreciation'] },

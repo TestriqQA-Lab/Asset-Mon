@@ -65,6 +65,8 @@ export const NAV_KEYS = [
   'audit-log',
   // Support
   'get-help',
+  // Governance
+  'data-quality',
   // Settings sub-pages
   'settings:branding',
   'settings:modules',
@@ -99,6 +101,7 @@ export const DEFAULT_ASSET_MANAGER_NAV: NavMap = navOnly([
   'purchase-requests', 'purchase-orders', 'depreciation',
   'software', 'licenses',
   'users',
+  'data-quality',
   'settings:security', 'settings:statuses',
 ]);
 

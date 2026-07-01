@@ -12,7 +12,7 @@ import type { NavKey } from '@/lib/permissions';
 import {
   LayoutDashboard, Package, Tag, MapPin, Building2,
   Wrench, CalendarClock, ShoppingCart, FileText, TrendingDown,
-  AppWindow, KeyRound, ClipboardCheck, BarChart3,
+  AppWindow, KeyRound, ClipboardCheck, BarChart3, ListChecks,
   Users, Webhook, ScrollText, Settings, LogOut, ChevronDown, Search,
   Sliders, Palette, ShieldCheck, CreditCard, Circle, Menu, X, Lock, LifeBuoy,
 } from 'lucide-react';
@@ -27,6 +27,7 @@ const NAV: NavGroup[] = [
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" />, navKey: 'dashboard' },
       { href: '/dashboard/reports', label: 'Reports', icon: <BarChart3 className="h-4 w-4" />, navKey: 'reports', module: 'reports' },
+      { href: '/dashboard/data-quality', label: 'Data quality', icon: <ListChecks className="h-4 w-4" />, navKey: 'data-quality' },
     ],
   },
   {

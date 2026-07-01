@@ -42,6 +42,7 @@ import { WorkspaceInviteModule } from './workspace-invite/workspace-invite.modul
 import { PlatformModule } from './platform/platform.module';
 import { SupportModule } from './support/support.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
+import { DataQualityModule } from './data-quality/data-quality.module';
 
 function normaliseIpKey(raw: any): string {
   const first = typeof raw === 'string' ? raw.split(',')[0].trim() : '';
@@ -103,6 +104,7 @@ function normaliseIpKey(raw: any): string {
     PlatformModule,
     SupportModule,
     AnnouncementsModule,
+    DataQualityModule,
   ],
   controllers: [HealthController, MeController],
   providers: [
