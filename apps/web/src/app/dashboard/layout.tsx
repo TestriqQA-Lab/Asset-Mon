@@ -6,6 +6,7 @@ import { api, getSession, logout } from '@/lib/api';
 import { SettingsProvider, useSettings, usePermissions, type ModuleKey } from '@/lib/settings';
 import { CommandPalette } from '@/components/CommandPalette';
 import { NotificationsBell } from '@/components/NotificationsBell';
+import { AnnouncementBanner } from '@/components/AnnouncementBanner';
 import { THEME_PRESETS, tokensToCss } from '@/lib/themes';
 import type { NavKey } from '@/lib/permissions';
 import {
@@ -363,6 +364,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         </aside>
       </div>
 
+      <AnnouncementBanner />
       <TrialBanner isAdmin={isAdmin} />
       <main id="main-content" className="relative z-10 flex-1 px-4 py-5 sm:py-6 lg:px-6">{children}</main>
     </div>

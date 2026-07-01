@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { getPlatformSession, platformLogout, papi } from '@/lib/platform-api';
 import {
   ShieldCheck, LayoutDashboard, Building2, Users, ScrollText, ChevronDown, LogOut, KeyRound,
-  Menu, X, LifeBuoy,
+  Menu, X, LifeBuoy, Megaphone,
 } from 'lucide-react';
 import { THEME_PRESETS, themeToRootCss } from '@/lib/themes';
 import { applyThemeTokens, resetThemeTokens } from '@/lib/theme';
@@ -16,6 +16,7 @@ const NAV = [
   { href: '/platform/tenants', label: 'Tenants', icon: <Building2 className="h-4 w-4" /> },
   { href: '/platform/admins', label: 'Platform team', icon: <Users className="h-4 w-4" /> },
   { href: '/platform/support', label: 'Support', icon: <LifeBuoy className="h-4 w-4" /> },
+  { href: '/platform/announcements', label: 'Announcements', icon: <Megaphone className="h-4 w-4" /> },
   { href: '/platform/audit-log', label: 'Audit log', icon: <ScrollText className="h-4 w-4" /> },
 ];
 
