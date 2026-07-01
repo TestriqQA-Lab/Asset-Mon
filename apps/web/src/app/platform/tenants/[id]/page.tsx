@@ -52,6 +52,11 @@ export default function TenantDetailPage() {
     mutationFn: (plan: string) => papi(`/platform/tenants/${id}/plan`, { method: 'PATCH', body: JSON.stringify({ plan }) }),
     onSuccess: () => { toast.success('Plan updated'); refresh(); },
   });
+  const extendTrial = useMutation({
+    mutationFn: (days: number) => papi(`/platform/tenants/${id}/extend-trial`, { method: 'POST', body: JSON.stringify({ days }) }),
+    onSuccess: () => { toast.success('Trial extended'); refresh(); },
+    onError: (e: any) => toast.error(e?.message || 'Could not extend trial'),
+  });
 
   const [delConfirm, setDelConfirm] = useState(false);
   const [delSlug, setDelSlug] = useState('');
@@ -197,6 +202,16 @@ export default function TenantDetailPage() {
                     Current period ends: <span className="font-medium text-ink-700">{new Date(t.currentPeriodEnd).toLocaleDateString()}</span>
                   </div>
                 )}
+                <div className="mt-3">
+                  <div className="text-[11px] font-medium uppercase tracking-wider text-ink-400">Extend trial</div>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {[7, 14, 30].map((d) => (
+                      <Button key={d} variant="secondary" size="sm" loading={extendTrial.isPending} onClick={() => extendTrial.mutate(d)}>
+                        +{d} days
+                      </Button>
+                    ))}
+                  </div>
+                </div>
               </Card>
 
               <Card>

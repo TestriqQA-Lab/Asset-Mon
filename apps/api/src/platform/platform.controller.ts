@@ -14,7 +14,7 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsObject, IsOptional, IsString, Length } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 import { PlatformAuthGuard } from './platform-auth.guard';
 import { SuperAdminOnly } from './super-admin-only.decorator';
 import { SuperAdminOnlyGuard } from './super-admin-only.guard';
@@ -40,6 +40,9 @@ class PeerResetApproveDto {
 }
 class UpdateTenantModulesDto {
   @IsObject() modules: Record<string, boolean>;
+}
+class ExtendTrialDto {
+  @IsInt() @Min(1) @Max(365) days: number;
 }
 
 @ApiTags('platform')
@@ -107,6 +110,13 @@ export class PlatformController {
   @Patch('tenants/:id/subscription')
   setSub(@Req() req: any, @Param('id') id: string, @Body() dto: any) {
     return this.tenants.updateSubscription(req.platformUser, id, dto, req);
+  }
+
+  // Slice 7a: one-click trial extension (+N days). Super-admin-only + audited.
+  @Post('tenants/:id/extend-trial')
+  @SuperAdminOnly()
+  extendTrial(@Req() req: any, @Param('id') id: string, @Body() dto: ExtendTrialDto) {
+    return this.tenants.extendTrial(req.platformUser, id, dto.days, req);
   }
 
   // Feature switches for a company (the same toggles as the tenant Settings →

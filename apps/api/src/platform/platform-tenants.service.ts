@@ -163,6 +163,33 @@ export class PlatformTenantsService {
     return updated;
   }
 
+  // One-click trial / grace-period extension (Slice 7a). Pushes trialEndsAt forward
+  // by N days and marks the tenant trialing — the safe version of hand-editing the
+  // raw subscription date. Audited.
+  async extendTrial(
+    actor: { id: string; email: string; role?: string },
+    id: string,
+    days: number,
+    req?: any,
+  ) {
+    assertSuperAdmin(actor);
+    if (!Number.isInteger(days) || days < 1 || days > 365) throw new BadRequestException('days must be an integer 1–365');
+    const t = await this.catalog.tenant.findUnique({ where: { id } });
+    if (!t) throw new NotFoundException();
+    // Extend from the later of "now" and the current trial end, so a future trial is
+    // pushed forward (never shortened) and a null/expired one is based off now.
+    const now = new Date();
+    const base = t.trialEndsAt && t.trialEndsAt > now ? t.trialEndsAt : now;
+    const trialEndsAt = new Date(base.getTime() + days * 86_400_000);
+    const updated = await this.catalog.tenant.update({
+      where: { id },
+      data: { trialEndsAt, subscriptionStatus: 'trialing' },
+    });
+    await this.audit.record(actor, 'tenant.extendTrial', { type: 'tenant', id },
+      { days, previousTrialEndsAt: t.trialEndsAt, trialEndsAt, previousStatus: t.subscriptionStatus }, req);
+    return updated;
+  }
+
   // ── Feature modules (operator-side; same switch the tenant Settings → Modules page uses) ──
   // Readable by SUPER_ADMIN and SUPPORT (no assertSuperAdmin); returns ONLY the
   // merged module map — no plan-tier comparison (the old "beyond plan" idea was a bug).
