@@ -224,9 +224,9 @@ export class UsersService {
     }).catch(() => {});
   }
 
-  // ── Offboarding (Slice 6a) ────────────────────────────────────────────────
-  // Read-only preview of everything a user is still holding, so the admin sees
-  // exactly what an offboard will release. ADMIN-only.
+  // ── Offboarding (Slice 6a + 6b reassign) ──────────────────────────────────
+  // Read-only preview of everything a user is still holding, plus the list of
+  // active teammates a reassign could hand it to. ADMIN-only.
   async getOffboardingPreview(id: string, actor: Actor) {
     if (actor.role !== 'ADMIN') throw new ForbiddenException('Only an admin can offboard users');
     const db = this.ctx.prisma();
@@ -236,7 +236,7 @@ export class UsersService {
     });
     if (!target) throw new NotFoundException('User not found');
 
-    const [assets, tickets, reservations, seats] = await Promise.all([
+    const [assets, tickets, reservations, seats, eligibleTargets] = await Promise.all([
       db.assignment.findMany({
         where: { userId: id, returnedAt: null },
         select: { id: true, asset: { select: { id: true, assetTag: true, name: true, status: true } } },
@@ -253,6 +253,12 @@ export class UsersService {
         where: { userId: id, returnedAt: null },
         select: { id: true, license: { select: { id: true, software: { select: { name: true } } } } },
       }),
+      // Active teammates a reassign can hand the holdings to (exclude the leaver).
+      db.user.findMany({
+        where: { active: true, id: { not: id } },
+        select: { id: true, firstName: true, lastName: true, email: true, role: true },
+        orderBy: { firstName: 'asc' },
+      }),
     ]);
 
     const isLastAdmin =
@@ -264,14 +270,20 @@ export class UsersService {
       user: target,
       counts: { assets: assets.length, tickets: tickets.length, reservations: reservations.length, seats: seats.length },
       assets, tickets, reservations, seats,
+      eligibleTargets,
       isLastAdmin,
     };
   }
 
-  // Deactivate a user AND release everything they hold, in one atomic (serialization-
-  // retried) transaction, writing a single summary audit entry. Release-only (Slice
-  // 6a); reassign-to-another-user is deferred to 6b.
-  async offboardUser(id: string, dto: { deactivate?: boolean; password?: string }, actor: Actor) {
+  // Offboard a user in one atomic (serialization-retried) transaction: either RELEASE
+  // everything they hold back to the pool (default) or REASSIGN it to a chosen target
+  // user (Slice 6b, single-target). Bookings are always cancelled in both modes. Writes
+  // one summary audit entry.
+  async offboardUser(
+    id: string,
+    dto: { deactivate?: boolean; password?: string; targetUserId?: string },
+    actor: Actor,
+  ) {
     if (actor.role !== 'ADMIN') throw new ForbiddenException('Only an admin can offboard users');
     if (id === actor.id) throw new BadRequestException('You cannot offboard yourself');
 
@@ -280,6 +292,15 @@ export class UsersService {
     if (!target) throw new NotFoundException('User not found');
 
     const deactivate = dto.deactivate !== false;
+    const targetUserId = dto.targetUserId || null;
+    const mode: 'release' | 'reassign' = targetUserId ? 'reassign' : 'release';
+
+    // Reassign target must be a different, active user.
+    if (targetUserId) {
+      if (targetUserId === id) throw new BadRequestException('Reassign target must be a different user');
+      const to = await db.user.findUnique({ where: { id: targetUserId }, select: { active: true } });
+      if (!to || !to.active) throw new BadRequestException('Reassign target is no longer an active user');
+    }
 
     // Last-admin guard (mirror update()): never deactivate the last active admin.
     if (deactivate && target.role === 'ADMIN' && target.active) {
@@ -299,45 +320,74 @@ export class UsersService {
     const runTx = () =>
       db.$transaction(
         async (tx: any) => {
-          // Assets: close the leaver's open assignments, then free each asset if
-          // nothing else holds it (skipping terminal RETIRED/LOST states).
+          let assets = 0;
+          let seats = 0;
+          let seatsSkipped = 0;
+
+          // Assets: close the leaver's open assignments. RELEASE → free each asset to
+          // the pool (if nothing else holds it, not RETIRED/LOST). REASSIGN → create a
+          // new assignment to the target (asset stays ASSIGNED); skip if the target
+          // already holds that asset.
           const open = await tx.assignment.findMany({ where: { userId: id, returnedAt: null }, select: { id: true, assetId: true } });
           for (const a of open) await tx.assignment.update({ where: { id: a.id }, data: { returnedAt: now } });
-          const assetIds: string[] = Array.from(new Set(open.map((a: any) => a.assetId)));
-          for (const assetId of assetIds) {
-            const remaining = await tx.assignment.count({ where: { assetId, returnedAt: null } });
-            if (remaining === 0) {
-              const asset = await tx.asset.findUnique({ where: { id: assetId }, select: { status: true } });
-              if (asset && asset.status !== 'RETIRED' && asset.status !== 'LOST') {
-                await tx.asset.update({ where: { id: assetId }, data: { status: 'IN_STOCK' } });
+          if (mode === 'reassign') {
+            for (const a of open) {
+              const dup = await tx.assignment.count({ where: { assetId: a.assetId, userId: targetUserId, returnedAt: null } });
+              if (dup === 0) { await tx.assignment.create({ data: { assetId: a.assetId, userId: targetUserId } }); assets++; }
+            }
+          } else {
+            for (const assetId of Array.from(new Set(open.map((a: any) => a.assetId)))) {
+              const remaining = await tx.assignment.count({ where: { assetId, returnedAt: null } });
+              if (remaining === 0) {
+                const asset = await tx.asset.findUnique({ where: { id: assetId }, select: { status: true } });
+                if (asset && asset.status !== 'RETIRED' && asset.status !== 'LOST') {
+                  await tx.asset.update({ where: { id: assetId }, data: { status: 'IN_STOCK' } });
+                }
               }
             }
+            assets = open.length;
           }
-          // Tickets: unassign (return to the queue) — keep the ticket, don't cancel.
+
+          // Tickets: RELEASE → unassign (back to the queue); REASSIGN → hand to target.
           const t = await tx.serviceTicket.updateMany({
             where: { assignedToId: id, status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING_VENDOR'] } },
-            data: { assignedToId: null },
+            data: { assignedToId: mode === 'reassign' ? targetUserId : null },
           });
-          // Reservations: cancel active bookings (a CHECKED_OUT one's asset is already
-          // freed by the assignment step above).
+
+          // Reservations: always cancelled (bookings don't transfer; a CHECKED_OUT
+          // one's asset custody already moved via the Assets step above).
           const r = await tx.reservation.updateMany({
             where: { userId: id, status: { in: ['REQUESTED', 'CONFIRMED', 'CHECKED_OUT'] } },
             data: { status: 'CANCELLED' },
           });
-          // Software seats: return open seats (frees the paid licence).
-          const s = await tx.softwareAssignment.updateMany({ where: { userId: id, returnedAt: null }, data: { returnedAt: now } });
+
+          // Software seats: RELEASE → return every open seat. REASSIGN → move to the
+          // target, but if the target already holds that licence, return the leaver's
+          // seat instead (free it) and count it as skipped.
+          if (mode === 'reassign') {
+            const openSeats = await tx.softwareAssignment.findMany({ where: { userId: id, returnedAt: null }, select: { id: true, licenseId: true } });
+            for (const seat of openSeats) {
+              const held = await tx.softwareAssignment.findFirst({ where: { licenseId: seat.licenseId, userId: targetUserId, returnedAt: null }, select: { id: true } });
+              if (held) { await tx.softwareAssignment.update({ where: { id: seat.id }, data: { returnedAt: now } }); seatsSkipped++; }
+              else { await tx.softwareAssignment.update({ where: { id: seat.id }, data: { userId: targetUserId } }); seats++; }
+            }
+          } else {
+            const s = await tx.softwareAssignment.updateMany({ where: { userId: id, returnedAt: null }, data: { returnedAt: now } });
+            seats = s.count;
+          }
+
           // Deactivate + invalidate the leaver's outstanding access tokens.
           if (deactivate) await tx.user.update({ where: { id }, data: { active: false, tokenVersion: { increment: 1 } } });
-          return { assetsReleased: open.length, ticketsUnassigned: t.count, reservationsCancelled: r.count, seatsReleased: s.count };
+          return { assets, tickets: t.count, reservations: r.count, seats, seatsSkipped };
         },
         { isolationLevel: 'Serializable' },
       );
 
     // Serialization-failure retry (codebase pattern, common/audit-hash.ts): retry the
     // whole transaction on P2034 / Postgres 40001, up to 3 attempts.
-    let summary: { assetsReleased: number; ticketsUnassigned: number; reservationsCancelled: number; seatsReleased: number };
+    let counts: { assets: number; tickets: number; reservations: number; seats: number; seatsSkipped: number };
     for (let attempt = 1; ; attempt++) {
-      try { summary = await runTx(); break; }
+      try { counts = await runTx(); break; }
       catch (e: any) {
         const serialization = e?.code === 'P2034' || /serial/i.test(e?.message || '');
         if (serialization && attempt < 3) continue;
@@ -345,17 +395,18 @@ export class UsersService {
       }
     }
 
-    const changed = summary.assetsReleased + summary.ticketsUnassigned + summary.reservationsCancelled + summary.seatsReleased;
+    const summary = { mode, targetUserId, deactivated: deactivate, ...counts };
+    const changed = counts.assets + counts.tickets + counts.reservations + counts.seats + counts.seatsSkipped;
     // ONE summary audit entry (amendment #5: not one per asset). Skip on a pure no-op.
     if (deactivate || changed > 0) {
       await writeAuditEntry(db, {
         action: 'user.offboard',
         performedById: actor.id,
-        detail: { userId: id, email: target.email, deactivated: deactivate, ...summary },
+        detail: { userId: id, email: target.email, ...summary },
         impersonatedBy: this.ctx.impersonatedBy ?? null,
       }).catch(() => {});
     }
 
-    return { deactivated: deactivate, ...summary };
+    return summary;
   }
 }

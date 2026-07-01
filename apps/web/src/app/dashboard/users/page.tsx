@@ -38,32 +38,37 @@ export default function UsersPage() {
   });
   const canReset = (u: any) => isAdmin && u.id !== myId && u.mfaMethod && u.mfaMethod !== 'NONE';
 
-  // ── Offboard: deactivate + release everything a user holds (Slice 6a) ──────
+  // ── Offboard: deactivate + release OR reassign everything a user holds (Slice 6a/6b) ──
   const [offboardTarget, setOffboardTarget] = useState<any>(null);
   const [offboardPassword, setOffboardPassword] = useState('');
   const [offboardDeactivate, setOffboardDeactivate] = useState(true);
-  const closeOffboard = () => { setOffboardTarget(null); setOffboardPassword(''); setOffboardDeactivate(true); };
-  const openOffboard = (u: any) => { setOffboardTarget(u); setOffboardPassword(''); setOffboardDeactivate(true); };
+  const [offboardTargetUserId, setOffboardTargetUserId] = useState('');
+  const closeOffboard = () => { setOffboardTarget(null); setOffboardPassword(''); setOffboardDeactivate(true); setOffboardTargetUserId(''); };
+  const openOffboard = (u: any) => { setOffboardTarget(u); setOffboardPassword(''); setOffboardDeactivate(true); setOffboardTargetUserId(''); };
   const offboardPreview = useQuery({
     queryKey: ['offboard-preview', offboardTarget?.id],
     queryFn: () => api<any>(`/users/${offboardTarget.id}/offboarding-preview`),
     enabled: !!offboardTarget,
   });
   const isLastAdmin = !!offboardPreview.data?.isLastAdmin;
+  const reassigning = !!offboardTargetUserId;
   const offboard = useMutation({
     mutationFn: () => api<any>(`/users/${offboardTarget.id}/offboard`, {
       method: 'POST',
-      body: JSON.stringify({ deactivate: isLastAdmin ? false : offboardDeactivate, password: adminHasMfa ? offboardPassword : undefined }),
+      body: JSON.stringify({ deactivate: isLastAdmin ? false : offboardDeactivate, password: adminHasMfa ? offboardPassword : undefined, targetUserId: offboardTargetUserId || undefined }),
     }),
     onSuccess: (res: any) => {
       qc.invalidateQueries({ queryKey: ['users'] });
+      const verb = res.mode === 'reassign' ? 'Reassigned' : 'Released';
       const parts: string[] = [];
-      if (res.assetsReleased) parts.push(`${res.assetsReleased} asset${res.assetsReleased === 1 ? '' : 's'}`);
-      if (res.ticketsUnassigned) parts.push(`${res.ticketsUnassigned} ticket${res.ticketsUnassigned === 1 ? '' : 's'}`);
-      if (res.reservationsCancelled) parts.push(`${res.reservationsCancelled} booking${res.reservationsCancelled === 1 ? '' : 's'}`);
-      if (res.seatsReleased) parts.push(`${res.seatsReleased} seat${res.seatsReleased === 1 ? '' : 's'}`);
-      const released = parts.length ? `Released ${parts.join(', ')}.` : 'Nothing was held.';
-      toast.success(res.deactivated ? `User deactivated. ${released}` : released);
+      if (res.assets) parts.push(`${res.assets} asset${res.assets === 1 ? '' : 's'}`);
+      if (res.tickets) parts.push(`${res.tickets} ticket${res.tickets === 1 ? '' : 's'}`);
+      if (res.seats) parts.push(`${res.seats} seat${res.seats === 1 ? '' : 's'}`);
+      let msg = parts.length ? `${verb} ${parts.join(', ')}.` : 'Nothing was held.';
+      if (res.seatsSkipped) msg += ` ${res.seatsSkipped} seat${res.seatsSkipped === 1 ? '' : 's'} already held (freed).`;
+      if (res.reservations) msg += ` ${res.reservations} booking${res.reservations === 1 ? '' : 's'} cancelled.`;
+      if (res.deactivated) msg += ' Account deactivated.';
+      toast.success(msg);
       closeOffboard();
     },
   });
@@ -274,25 +279,37 @@ export default function UsersPage() {
               disabled={offboard.isPending || offboardPreview.isLoading || (adminHasMfa && !offboardPassword)}
               onClick={() => offboard.mutate()}
             >
-              {isLastAdmin ? 'Release holdings' : 'Deactivate & release'}
+              {isLastAdmin ? (reassigning ? 'Reassign holdings' : 'Release holdings') : (reassigning ? 'Reassign & deactivate' : 'Deactivate & release')}
             </button>
           </>
         }
       >
         <div className="space-y-3 text-sm">
           <p className="text-ink-700">
-            This releases everything <b>{offboardTarget?.firstName} {offboardTarget?.lastName}</b> is holding back to the pool
+            This {reassigning ? 'reassigns' : 'releases'} everything <b>{offboardTarget?.firstName} {offboardTarget?.lastName}</b> is holding{' '}
+            {reassigning ? 'to the chosen teammate' : 'back to the pool'}
             {isLastAdmin ? '.' : ' and deactivates their account.'}
           </p>
+
+          {offboardPreview.data?.eligibleTargets && (
+            <Field label="Reassign everything to (optional)" hint="Leave as “release to the pool” to return everything, or pick a teammate to take it all over.">
+              <select className={inputClass} value={offboardTargetUserId} onChange={(e) => setOffboardTargetUserId(e.target.value)}>
+                <option value="">— Release to the pool —</option>
+                {offboardPreview.data.eligibleTargets.map((u: any) => (
+                  <option key={u.id} value={u.id}>{u.firstName} {u.lastName} · {u.email}</option>
+                ))}
+              </select>
+            </Field>
+          )}
 
           {offboardPreview.isLoading && <p className="text-ink-500">Loading what they hold…</p>}
           {offboardPreview.data && (
             <>
               <div className="flex flex-wrap gap-2">
-                <OffboardCount label="assets → to stock" n={offboardPreview.data.counts.assets} />
-                <OffboardCount label="tickets → unassigned" n={offboardPreview.data.counts.tickets} />
+                <OffboardCount label={reassigning ? 'assets → reassigned' : 'assets → to stock'} n={offboardPreview.data.counts.assets} />
+                <OffboardCount label={reassigning ? 'tickets → reassigned' : 'tickets → unassigned'} n={offboardPreview.data.counts.tickets} />
                 <OffboardCount label="bookings → cancelled" n={offboardPreview.data.counts.reservations} />
-                <OffboardCount label="seats → freed" n={offboardPreview.data.counts.seats} />
+                <OffboardCount label={reassigning ? 'seats → reassigned' : 'seats → freed'} n={offboardPreview.data.counts.seats} />
               </div>
               {offboardPreview.data.assets.length > 0 && <OffboardList title="Assets" items={offboardPreview.data.assets.map((a: any) => `${a.asset.assetTag} · ${a.asset.name}`)} />}
               {offboardPreview.data.tickets.length > 0 && <OffboardList title="Tickets" items={offboardPreview.data.tickets.map((t: any) => `${t.ticketNumber} · ${t.title}`)} />}
@@ -303,7 +320,7 @@ export default function UsersPage() {
 
           {isLastAdmin ? (
             <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
-              This is the last active admin, so the account stays active — but their holdings will still be released.
+              This is the last active admin, so the account stays active — but their holdings will still be {reassigning ? 'reassigned' : 'released'}.
             </p>
           ) : (
             <label className="flex items-center gap-2">

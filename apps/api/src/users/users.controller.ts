@@ -33,10 +33,12 @@ class ResetUserMfaDto {
   @IsOptional() @IsString() password?: string;
 }
 class OffboardUserDto {
-  // Release-only (Slice 6a). deactivate defaults true; password is the acting
-  // admin's step-up (only checked when that admin has MFA enabled).
+  // deactivate defaults true; password is the acting admin's step-up (only checked
+  // when that admin has MFA enabled). targetUserId (Slice 6b) reassigns all holdings
+  // to that user instead of releasing them to the pool; omit it to release.
   @IsOptional() @IsBoolean() deactivate?: boolean;
   @IsOptional() @IsString() password?: string;
+  @IsOptional() @IsString() targetUserId?: string;
 }
 
 @ApiTags('users')
