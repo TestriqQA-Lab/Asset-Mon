@@ -67,6 +67,9 @@ export const NAV_KEYS = [
   'get-help',
   // Governance
   'data-quality',
+  // Admin home (ADMIN-only page; never granted to other roles, so not in any
+  // DEFAULT_*_NAV — ADMIN sees everything via ALL_NAV)
+  'admin-home',
   // Settings sub-pages
   'settings:branding',
   'settings:modules',

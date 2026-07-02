@@ -14,7 +14,7 @@ import {
   Wrench, CalendarClock, ShoppingCart, FileText, TrendingDown,
   AppWindow, KeyRound, ClipboardCheck, BarChart3, ListChecks,
   Users, Webhook, ScrollText, Settings, LogOut, ChevronDown, Search,
-  Sliders, Palette, ShieldCheck, CreditCard, Circle, Menu, X, Lock, LifeBuoy,
+  Sliders, Palette, Shield, ShieldCheck, CreditCard, Circle, Menu, X, Lock, LifeBuoy,
 } from 'lucide-react';
 
 type NavItem = { href: string; label: string; icon: React.ReactNode; navKey: NavKey; module?: ModuleKey };
@@ -66,6 +66,13 @@ const NAV: NavGroup[] = [
     icon: <LifeBuoy className="h-3.5 w-3.5" />,
     items: [
       { href: '/dashboard/get-help', label: 'Get help', icon: <LifeBuoy className="h-4 w-4" />, navKey: 'get-help' },
+    ],
+  },
+  {
+    label: 'Admin',
+    icon: <Shield className="h-3.5 w-3.5" />,
+    items: [
+      { href: '/dashboard/admin', label: 'Admin home', icon: <Shield className="h-4 w-4" />, navKey: 'admin-home' },
     ],
   },
   {
