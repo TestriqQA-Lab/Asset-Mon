@@ -108,10 +108,10 @@ export default function UsersPage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-semibold sm:text-2xl">Users</h1>
-        <button className={btnPrimary + ' sm:self-start'} onClick={() => { setEditing(null); setForm({ email: '', firstName: '', lastName: '', role: 'EMPLOYEE', password: '', departmentId: '', scopedDepartmentId: '', active: true }); setOpen(true); }}>New user</button>
+        {isAdmin && <button className={btnPrimary + ' sm:self-start'} onClick={() => { setEditing(null); setForm({ email: '', firstName: '', lastName: '', role: 'EMPLOYEE', password: '', departmentId: '', scopedDepartmentId: '', active: true }); setOpen(true); }}>New user</button>}
       </div>
 
-      <InviteLinkCard />
+      {isAdmin && <InviteLinkCard />}
 
       {/* Desktop table */}
       <div className="hidden md:block overflow-x-auto rounded-lg border bg-white"><table className="w-full text-sm">
@@ -133,9 +133,10 @@ export default function UsersPage() {
               <td className="px-4 py-2">{u.active ? '✓' : '—'}</td>
               <td className="px-4 py-2 text-right whitespace-nowrap">
                 {canReset(u) && <button className={btnSecondary + ' mr-2'} onClick={() => { setResetTarget(u); setResetPassword(''); }}>Reset verification</button>}
-                <button className={btnSecondary + ' mr-2'} onClick={() => editUser(u)}>Edit</button>
+                {isAdmin && <button className={btnSecondary + ' mr-2'} onClick={() => editUser(u)}>Edit</button>}
                 {canOffboard(u) && <button className={btnSecondary + ' mr-2'} onClick={() => openOffboard(u)}>Offboard</button>}
-                <button className={btnDanger} onClick={() => confirm('Delete user?') && del.mutate(u.id)}>Delete</button>
+                {isAdmin && <button className={btnDanger} onClick={() => confirm('Delete user?') && del.mutate(u.id)}>Delete</button>}
+                {!isAdmin && <span className="text-xs text-gray-400">Read-only</span>}
               </td>
             </tr>
           ))}
@@ -161,9 +162,10 @@ export default function UsersPage() {
               <MobileCardRow label="Active" value={u.active ? '✓' : '—'} />
               <div className="mt-2 flex flex-wrap gap-2">
                 {canReset(u) && <button className={btnSecondary} onClick={() => { setResetTarget(u); setResetPassword(''); }}>Reset verification</button>}
-                <button className={btnSecondary} onClick={() => editUser(u)}>Edit</button>
+                {isAdmin && <button className={btnSecondary} onClick={() => editUser(u)}>Edit</button>}
                 {canOffboard(u) && <button className={btnSecondary} onClick={() => openOffboard(u)}>Offboard</button>}
-                <button className={btnDanger} onClick={() => confirm('Delete user?') && del.mutate(u.id)}>Delete</button>
+                {isAdmin && <button className={btnDanger} onClick={() => confirm('Delete user?') && del.mutate(u.id)}>Delete</button>}
+                {!isAdmin && <span className="text-xs text-gray-400">Read-only</span>}
               </div>
             </MobileCard>
           </li>

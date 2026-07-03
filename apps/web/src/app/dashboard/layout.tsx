@@ -9,6 +9,7 @@ import { NotificationsBell } from '@/components/NotificationsBell';
 import { AnnouncementBanner } from '@/components/AnnouncementBanner';
 import { THEME_PRESETS, tokensToCss } from '@/lib/themes';
 import type { NavKey } from '@/lib/permissions';
+import { EmptyState } from '@/components/ui';
 import {
   LayoutDashboard, Package, Tag, MapPin, Building2,
   Wrench, CalendarClock, ShoppingCart, FileText, TrendingDown,
@@ -86,8 +87,7 @@ const NAV: NavGroup[] = [
       { href: '/dashboard/settings/modules', label: 'Modules', icon: <Sliders className="h-4 w-4" />, navKey: 'settings:modules' },
       { href: '/dashboard/settings/statuses', label: 'Asset statuses', icon: <Circle className="h-4 w-4" />, navKey: 'settings:statuses' },
       { href: '/dashboard/settings/permissions', label: 'Permissions', icon: <Lock className="h-4 w-4" />, navKey: 'settings:permissions' },
-      // Account & billing
-      { href: '/dashboard/settings/security', label: 'Security (2FA)', icon: <ShieldCheck className="h-4 w-4" />, navKey: 'settings:security' },
+      // Account & billing (Security/2FA lives in the top-right account menu now — every role manages their own)
       { href: '/dashboard/settings/billing', label: 'Billing', icon: <CreditCard className="h-4 w-4" />, navKey: 'settings:billing' },
       // Integrations
       { href: '/dashboard/api-keys', label: 'API keys', icon: <KeyRound className="h-4 w-4" />, navKey: 'api-keys', module: 'integrations' },
@@ -179,6 +179,24 @@ function Shell({ children }: { children: React.ReactNode }) {
       }))
       .filter((group) => group.items.length > 0);
   }, [perms, settings.modules]);
+
+  // Page-level gate: block direct-URL access to any page the role can't see.
+  // Match the current path to its nav item (longest href prefix wins) and, if the
+  // role's permission for that key is off, render "Not available" instead of the page.
+  // Server endpoints enforce this too (Phase 1A) — this is the UI half.
+  const activeNavKey = useMemo<NavKey | undefined>(() => {
+    const p = path || '';
+    let best: { href: string; navKey: NavKey } | undefined;
+    for (const group of NAV) {
+      for (const item of group.items) {
+        if (p === item.href || p.startsWith(item.href + '/')) {
+          if (!best || item.href.length > best.href.length) best = item;
+        }
+      }
+    }
+    return best?.navKey;
+  }, [path]);
+  const pageBlocked = !!activeNavKey && !perms.canSee(activeNavKey);
 
   return (
     <div data-themed data-app-shell="dashboard" className="relative flex min-h-screen flex-col bg-ink-50">
@@ -374,7 +392,17 @@ function Shell({ children }: { children: React.ReactNode }) {
 
       <AnnouncementBanner />
       <TrialBanner isAdmin={isAdmin} />
-      <main id="main-content" className="relative z-10 flex-1 px-4 py-5 sm:py-6 lg:px-6">{children}</main>
+      <main id="main-content" className="relative z-10 flex-1 px-4 py-5 sm:py-6 lg:px-6">
+        {pageBlocked ? (
+          <div className="mx-auto max-w-md pt-6">
+            <EmptyState
+              icon={<Lock className="h-5 w-5" />}
+              title="Not available"
+              description="Your role doesn't have access to this page. Ask a workspace admin if you need it."
+            />
+          </div>
+        ) : children}
+      </main>
     </div>
   );
 }

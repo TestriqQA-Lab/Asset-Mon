@@ -6,7 +6,8 @@ import { ShieldCheck, RotateCcw, Lock } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, SectionHeader, Button, Pill } from '@/components/ui';
 import {
-  CUSTOMISABLE_ROLES, NAV_KEYS, NAV_LABELS, NAV_GROUPS, LOCKED_NAV_KEYS,
+  CUSTOMISABLE_ROLES, NAV_KEYS, NAV_LABELS, NAV_GROUPS,
+  GRANTABLE_NAV_KEYS, ALWAYS_ON_NAV_KEYS,
   DEFAULT_PERMISSIONS, mergePermissions,
   type CustomisableRole, type NavKey, type TenantPermissions,
 } from '@/lib/permissions';
@@ -64,7 +65,7 @@ export default function PermissionsSettingsPage() {
   if (!draft) return null;
 
   const toggle = (role: CustomisableRole, key: NavKey, value: boolean) => {
-    if (LOCKED_NAV_KEYS.has(key)) return;
+    if (!GRANTABLE_NAV_KEYS.has(key)) return; // only grantable pages are editable
     setDraft((d) => d ? { ...d, [role]: { ...d[role], nav: { ...d[role].nav, [key]: value } } } : d);
   };
 
@@ -77,21 +78,22 @@ export default function PermissionsSettingsPage() {
       if (!d) return d;
       const nav = { ...d[role].nav };
       for (const k of keys) {
-        if (!LOCKED_NAV_KEYS.has(k)) nav[k] = value;
+        if (GRANTABLE_NAV_KEYS.has(k)) nav[k] = value;
       }
       return { ...d, [role]: { ...d[role], nav } };
     });
   };
 
+  const grantableKeys = NAV_KEYS.filter((k) => GRANTABLE_NAV_KEYS.has(k));
   const countEnabled = (role: CustomisableRole) =>
-    NAV_KEYS.filter((k) => draft[role].nav[k]).length;
+    grantableKeys.filter((k) => draft[role].nav[k]).length;
 
   return (
     <div className="space-y-5">
       <SectionHeader
         title="Permissions"
-        subtitle="Choose which pages each role can see. Workspace admins always have full access — only ASSET_MANAGER and EMPLOYEE are editable."
-        action={<Pill tone="brand" dot>{NAV_KEYS.length} permissions</Pill>}
+        subtitle="Choose which operational pages Asset Managers and Employees can see. Admins always have full access. Admin-only pages (billing, user management, integrations, audit log…) stay admin-only — shown locked here."
+        action={<Pill tone="brand" dot>{grantableKeys.length} grantable pages</Pill>}
       />
 
       {/* Role legend */}
@@ -104,7 +106,7 @@ export default function PermissionsSettingsPage() {
             <div>
               <div className="text-sm font-semibold text-am-heading">Admin</div>
               <div className="mt-0.5 text-xs text-am-text-muted">Always full access. Not editable.</div>
-              <div className="mt-2 text-[11px] text-am-text-muted">{NAV_KEYS.length} / {NAV_KEYS.length}</div>
+              <div className="mt-2 text-[11px] text-am-text-muted">{grantableKeys.length} / {grantableKeys.length}</div>
             </div>
           </div>
         </Card>
@@ -129,7 +131,7 @@ export default function PermissionsSettingsPage() {
                     </button>
                   </div>
                   <div className="mt-0.5 text-xs text-am-text-muted">{meta.subtitle}</div>
-                  <div className="mt-2 text-[11px] text-am-text-muted">{n} / {NAV_KEYS.length}</div>
+                  <div className="mt-2 text-[11px] text-am-text-muted">{n} / {grantableKeys.length}</div>
                 </div>
               </div>
             </Card>
@@ -159,7 +161,7 @@ export default function PermissionsSettingsPage() {
                     </td>
                     <td className="px-4 py-2"></td>
                     {CUSTOMISABLE_ROLES.map((role) => {
-                      const editable = group.keys.filter((k) => !LOCKED_NAV_KEYS.has(k));
+                      const editable = group.keys.filter((k) => GRANTABLE_NAV_KEYS.has(k));
                       const allOn = editable.length > 0 && editable.every((k) => draft[role].nav[k]);
                       const allOff = editable.length > 0 && editable.every((k) => !draft[role].nav[k]);
                       return (
@@ -185,15 +187,15 @@ export default function PermissionsSettingsPage() {
                     })}
                   </tr>
                   {group.keys.map((key) => {
-                    const locked = LOCKED_NAV_KEYS.has(key);
+                    const locked = !GRANTABLE_NAV_KEYS.has(key);
                     return (
                       <tr key={key} className="hover:bg-am-surface-muted/40">
                         <td className="px-4 py-2 pl-8">
                           <div className="flex items-center gap-2">
                             <span className="text-sm text-am-text">{NAV_LABELS[key]}</span>
                             {locked && (
-                              <span title="Always on — required by everyone" className="inline-flex items-center gap-1 rounded-full bg-am-surface-muted px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-am-text-muted">
-                                <Lock className="h-2.5 w-2.5" /> always on
+                              <span title={ALWAYS_ON_NAV_KEYS.has(key) ? 'Always on — required by everyone' : 'Admin-only page — not grantable'} className="inline-flex items-center gap-1 rounded-full bg-am-surface-muted px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-am-text-muted">
+                                <Lock className="h-2.5 w-2.5" /> {ALWAYS_ON_NAV_KEYS.has(key) ? 'always on' : 'admin only'}
                               </span>
                             )}
                           </div>
