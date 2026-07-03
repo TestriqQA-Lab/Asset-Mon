@@ -11,6 +11,8 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { ModuleGuard } from '../tenant-settings/module.guard';
 import { RequireModule } from '../tenant-settings/require-module.decorator';
+import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
+import { RequireNav } from '../tenant-settings/require-nav.decorator';
 import { writeAuditEntry } from '../common/audit-hash';
 
 const LICENSE_TYPES = ['PERPETUAL', 'SUBSCRIPTION', 'TRIAL', 'OPEN_SOURCE'] as const;
@@ -261,8 +263,9 @@ class AssignDto {
 // ------------ Controllers ------------
 @ApiTags('software')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard, NavPermissionsGuard)
 @RequireModule('software')
+@RequireNav('software')
 // Software inventory is operational data; EMPLOYEE has no nav for it. Lock all
 // reads + writes to manager+ as a defence in depth in case a tenant flips the
 // software nav on for everyone.
@@ -280,8 +283,9 @@ class SoftwareController {
 
 @ApiTags('licenses')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard, NavPermissionsGuard)
 @RequireModule('software')
+@RequireNav('licenses')
 // License records expose license keys + cost. Same manager+ lock as /software.
 @Roles('ADMIN', 'ASSET_MANAGER')
 @Controller('licenses')

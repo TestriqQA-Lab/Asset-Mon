@@ -100,7 +100,25 @@ export function navForRole(role: Role | string | undefined, perms: TenantPermiss
   return navOnly([]);
 }
 
-/** Defensive merge — drops unknown keys, ensures booleans, forces settings:security on. */
+/**
+ * Strict role tiers (Phase 1 RBAC). ONLY these keys may be toggled per role via the
+ * Permissions page; everything not here and not ALWAYS_ON is admin-only and is forced OFF
+ * for ASSET_MANAGER/EMPLOYEE. Keep in sync with the API copy
+ * `apps/api/src/tenant-settings/tenant-settings.types.ts`.
+ */
+export const GRANTABLE_NAV_KEYS: ReadonlySet<NavKey> = new Set<NavKey>([
+  'assets', 'categories', 'locations', 'departments',
+  'tickets', 'maintenance', 'reservations', 'audit-sessions',
+  'purchase-requests', 'purchase-orders', 'depreciation',
+  'software', 'licenses', 'reports', 'data-quality',
+  'settings:statuses', 'users', // users = read-only page for lower roles (writes stay admin-only)
+]);
+/** Always visible to every role — forced ON regardless of the stored matrix. */
+export const ALWAYS_ON_NAV_KEYS: ReadonlySet<NavKey> = new Set<NavKey>([
+  'dashboard', 'settings:security',
+]);
+
+/** Defensive merge — drops unknown keys, ensures booleans, and enforces the strict tiers. */
 function mergeRolePerm(stored: any, fallback: NavMap): RolePermissions {
   const nav: NavMap = { ...fallback };
   const raw = stored && stored.nav && typeof stored.nav === 'object' ? stored.nav : null;
@@ -109,7 +127,12 @@ function mergeRolePerm(stored: any, fallback: NavMap): RolePermissions {
       if (typeof raw[k] === 'boolean') nav[k] = raw[k];
     }
   }
-  nav['settings:security'] = true;
+  // Strict tiers: always-on forced true (incl. settings:security = per-user 2FA);
+  // any non-grantable (admin-only) key forced false for ASSET_MANAGER/EMPLOYEE.
+  for (const k of NAV_KEYS) {
+    if (ALWAYS_ON_NAV_KEYS.has(k)) nav[k] = true;
+    else if (!GRANTABLE_NAV_KEYS.has(k)) nav[k] = false;
+  }
   return { nav };
 }
 

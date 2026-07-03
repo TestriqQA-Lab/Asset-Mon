@@ -11,6 +11,8 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { ModuleGuard } from '../tenant-settings/module.guard';
 import { RequireModule } from '../tenant-settings/require-module.decorator';
+import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
+import { RequireNav } from '../tenant-settings/require-nav.decorator';
 
 @Injectable()
 class PhysicalAuditsService {
@@ -180,8 +182,9 @@ class ScanDto {
 
 @ApiTags('audit-sessions')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard, NavPermissionsGuard)
 @RequireModule('audits')
+@RequireNav('audit-sessions')
 @Controller('audit-sessions')
 class PhysicalAuditsController {
   constructor(private readonly svc: PhysicalAuditsService) {}

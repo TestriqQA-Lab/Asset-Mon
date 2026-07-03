@@ -6,6 +6,8 @@ import { Roles } from '../auth/roles.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { ModuleGuard } from '../tenant-settings/module.guard';
 import { RequireModule } from '../tenant-settings/require-module.decorator';
+import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
+import { RequireNav } from '../tenant-settings/require-nav.decorator';
 
 type Method = 'NONE' | 'STRAIGHT_LINE' | 'DECLINING_BALANCE';
 
@@ -130,8 +132,9 @@ function round2(n: number) { return Math.round(n * 100) / 100; }
 
 @ApiTags('depreciation')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard, NavPermissionsGuard)
 @RequireModule('depreciation')
+@RequireNav('depreciation')
 // Asset book values / accumulated depreciation are finance data; lock to manager+.
 @Roles('ADMIN', 'ASSET_MANAGER')
 @Controller('depreciation')

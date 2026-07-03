@@ -13,6 +13,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
+import { RequireNav } from '../tenant-settings/require-nav.decorator';
 import { AssetsService } from './assets.service';
 import { LifecycleService } from './lifecycle.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -23,7 +25,8 @@ import { signFileToken, verifySignedFileToken } from '../common/signed-url';
 
 @ApiTags('assets')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, NavPermissionsGuard)
+@RequireNav('assets')
 @Controller('assets')
 export class AssetsController {
   constructor(

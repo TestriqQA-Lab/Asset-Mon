@@ -9,6 +9,8 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { EventBusService } from '../events/events.module';
 import { ModuleGuard } from '../tenant-settings/module.guard';
 import { RequireModule } from '../tenant-settings/require-module.decorator';
+import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
+import { RequireNav } from '../tenant-settings/require-nav.decorator';
 import { writeAuditEntry } from '../common/audit-hash';
 import { NotificationsService } from '../notifications/notifications.module';
 
@@ -201,8 +203,9 @@ class UpdateTicketDto {
 
 @ApiTags('tickets')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard, NavPermissionsGuard)
 @RequireModule('tickets')
+@RequireNav('tickets')
 @Controller('tickets')
 class TicketsController {
   constructor(private readonly svc: TicketsService) {}

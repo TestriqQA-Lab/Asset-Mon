@@ -137,7 +137,26 @@ export function navForRole(role: Role | string, perms: TenantPermissions): NavMa
   return navOnly([]);
 }
 
-/** Defensive merge of stored permissions — keeps the matrix well-formed. */
+/**
+ * Strict role tiers (Phase 1 RBAC). ONLY these keys may be toggled per role via the
+ * Permissions page. Everything not here and not ALWAYS_ON is admin-only and is forced
+ * OFF for ASSET_MANAGER/EMPLOYEE by mergeRolePerm — so a stale or hand-crafted stored
+ * matrix can never grant a lower role an admin-only page. Keep in sync with the web copy
+ * `apps/web/src/lib/permissions.ts`.
+ */
+export const GRANTABLE_NAV_KEYS: ReadonlySet<NavKey> = new Set<NavKey>([
+  'assets', 'categories', 'locations', 'departments',
+  'tickets', 'maintenance', 'reservations', 'audit-sessions',
+  'purchase-requests', 'purchase-orders', 'depreciation',
+  'software', 'licenses', 'reports', 'data-quality',
+  'settings:statuses', 'users', // users = read-only page for lower roles (writes stay admin-only)
+]);
+/** Always visible to every role — forced ON regardless of the stored matrix. */
+export const ALWAYS_ON_NAV_KEYS: ReadonlySet<NavKey> = new Set<NavKey>([
+  'dashboard', 'settings:security',
+]);
+
+/** Defensive merge of stored permissions — keeps the matrix well-formed AND strictly tiered. */
 function mergeRolePerm(stored: any, fallback: NavMap): RolePermissions {
   const nav: NavMap = { ...fallback };
   const raw = stored && stored.nav && typeof stored.nav === 'object' ? stored.nav : null;
@@ -146,8 +165,12 @@ function mergeRolePerm(stored: any, fallback: NavMap): RolePermissions {
       if (typeof raw[k] === 'boolean') nav[k] = raw[k];
     }
   }
-  // Settings:security is per-user 2FA management — never disable for anyone.
-  nav['settings:security'] = true;
+  // Strict tiers: always-on forced true (incl. settings:security = per-user 2FA);
+  // any non-grantable (admin-only) key forced false for ASSET_MANAGER/EMPLOYEE.
+  for (const k of NAV_KEYS) {
+    if (ALWAYS_ON_NAV_KEYS.has(k)) nav[k] = true;
+    else if (!GRANTABLE_NAV_KEYS.has(k)) nav[k] = false;
+  }
   return { nav };
 }
 

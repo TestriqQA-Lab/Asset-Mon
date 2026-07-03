@@ -8,6 +8,8 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { computeDepreciation } from '../depreciation/depreciation.module';
 import { ModuleGuard } from '../tenant-settings/module.guard';
 import { RequireModule } from '../tenant-settings/require-module.decorator';
+import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
+import { RequireNav } from '../tenant-settings/require-nav.decorator';
 
 const REPORTS = ['assets', 'assets-by-category', 'assets-by-status', 'tickets', 'open-tickets', 'maintenance-due', 'license-compliance', 'depreciation'] as const;
 type ReportKey = typeof REPORTS[number];
@@ -129,8 +131,9 @@ function round2(n: number) { return Math.round(n * 100) / 100; }
 
 @ApiTags('reports')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard, NavPermissionsGuard)
 @RequireModule('reports')
+@RequireNav('reports')
 // Reports surface aggregate financial / lifecycle data the EMPLOYEE role has no
 // business view over. Anything more granular than the dashboard tile counts
 // (which the dashboard endpoint provides separately) requires manager+.
@@ -187,12 +190,14 @@ class MetricsService {
 
 @ApiTags('observability')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('ADMIN')
 @Controller('metrics')
 class MetricsController {
   constructor(private readonly m: MetricsService) {}
   @Get()
   metrics(@Req() req: any) {
+    // Guard-level @Roles('ADMIN') is authoritative; this stays as defence in depth.
     if (req.user?.role !== 'ADMIN') throw new ForbiddenException('Admin only');
     const mem = process.memoryUsage();
     return {

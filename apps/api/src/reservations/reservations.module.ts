@@ -13,6 +13,8 @@ import { LifecycleService } from '../assets/lifecycle.service';
 import { AssetsModule } from '../assets/assets.module';
 import { ModuleGuard } from '../tenant-settings/module.guard';
 import { RequireModule } from '../tenant-settings/require-module.decorator';
+import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
+import { RequireNav } from '../tenant-settings/require-nav.decorator';
 
 @Injectable()
 class ReservationsService {
@@ -220,8 +222,9 @@ class UpdateReservationDto {
 
 @ApiTags('reservations')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard, NavPermissionsGuard)
 @RequireModule('reservations')
+@RequireNav('reservations')
 @Controller('reservations')
 class ReservationsController {
   constructor(private readonly svc: ReservationsService) {}

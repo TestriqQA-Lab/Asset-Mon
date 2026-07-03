@@ -8,6 +8,8 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { ModuleGuard } from '../tenant-settings/module.guard';
 import { RequireModule } from '../tenant-settings/require-module.decorator';
+import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
+import { RequireNav } from '../tenant-settings/require-nav.decorator';
 import { writeAuditEntry } from '../common/audit-hash';
 
 @Injectable()
@@ -81,8 +83,9 @@ class UpdateScheduleDto {
 
 @ApiTags('maintenance')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ModuleGuard, RolesGuard, NavPermissionsGuard)
 @RequireModule('maintenance')
+@RequireNav('maintenance')
 @Controller('maintenance')
 class MaintenanceController {
   constructor(private readonly svc: MaintenanceService) {}
