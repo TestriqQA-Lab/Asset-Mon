@@ -575,6 +575,22 @@ class AssetRequestsService {
       data: { status: 'DECLINED' },
     });
     if (g.count === 0) throw new BadRequestException('Device is no longer declinable');
+
+    // If nothing is left outstanding, close the request: FULFILLED when at least
+    // one device was handed over, otherwise DECLINED (manager declined them all).
+    const outstanding = await db.assetRequestItem.count({
+      where: { requestId: id, status: { in: ['REQUESTED', 'APPROVED'] } },
+    });
+    if (outstanding === 0) {
+      const anyFulfilled = await db.assetRequestItem.count({ where: { requestId: id, status: 'FULFILLED' } });
+      await db.assetRequest.updateMany({
+        where: { id, status: { in: ['PENDING', 'APPROVED'] } },
+        data: anyFulfilled > 0
+          ? { status: 'FULFILLED', fulfilledAt: new Date() }
+          : { status: 'DECLINED', declineReason: 'All requested devices were declined' },
+      });
+    }
+
     return db.assetRequestItem.findUnique({ where: { id: itemId } });
   }
 

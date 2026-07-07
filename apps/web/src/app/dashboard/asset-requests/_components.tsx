@@ -28,6 +28,17 @@ export function RequestUrgencyPill({ u }: { u: string }) {
   return <Pill tone={URGENCY_TONE[u] || 'neutral'}>{u}</Pill>;
 }
 
+const ITEM_STATUS_LABELS: Record<string, string> = {
+  REQUESTED: 'Requested', APPROVED: 'Approved', DECLINED: 'Declined', FULFILLED: 'Fulfilled',
+};
+const ITEM_STATUS_TONE: Record<string, 'brand' | 'green' | 'amber' | 'red' | 'neutral'> = {
+  REQUESTED: 'neutral', APPROVED: 'brand', DECLINED: 'red', FULFILLED: 'green',
+};
+
+export function RequestItemStatusPill({ s }: { s: string }) {
+  return <Pill tone={ITEM_STATUS_TONE[s] || 'neutral'}>{ITEM_STATUS_LABELS[s] || s}</Pill>;
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Age Badge                                                                 */
 /* -------------------------------------------------------------------------- */

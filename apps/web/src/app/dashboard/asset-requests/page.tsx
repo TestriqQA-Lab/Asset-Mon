@@ -7,7 +7,7 @@ import { usePermissions } from '@/lib/settings';
 import { Modal } from '@/components/Modal';
 import { Field, inputClass, btnPrimary, btnSecondary } from '@/components/Field';
 import { SectionHeader, EmptyState, QueryState, Button } from '@/components/ui';
-import { FilePlus, HandHelping, ChevronRight, ChevronDown, RefreshCw } from 'lucide-react';
+import { FilePlus, HandHelping, ChevronRight, ChevronDown, RefreshCw, Search, X, Plus } from 'lucide-react';
 import { RequestStatusPill, RequestUrgencyPill, AgeBadge, RequestStatBar, DemandChart } from './_components';
 
 const URGENCIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
@@ -32,7 +32,10 @@ export default function AssetRequestsPage() {
   
   // Modal state
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ title: '', categoryId: '', urgency: 'NORMAL', reason: '' });
+  const [mode, setMode] = useState<'CATEGORY' | 'SPECIFIC'>('CATEGORY');
+  const [form, setForm] = useState({ title: '', categoryId: '', urgency: 'NORMAL', reason: '', neededBy: '', isTemporary: false, returnBy: '' });
+  const [picked, setPicked] = useState<any[]>([]);
+  const [search, setSearch] = useState('');
 
   // ---------------------------------------------------------------------------
   // Queries
@@ -62,15 +65,34 @@ export default function AssetRequestsPage() {
     queryFn: () => api('/categories'),
   });
 
+  // Device search for SPECIFIC mode — matches tag / name / serial.
+  const deviceSearch = useQuery({
+    queryKey: ['asset-search', search],
+    queryFn: () => api(`/assets?pageSize=25&q=${encodeURIComponent(search.trim())}`),
+    enabled: open && mode === 'SPECIFIC' && search.trim().length > 0,
+  });
+
   // ---------------------------------------------------------------------------
   // Mutations
   // ---------------------------------------------------------------------------
   const create = useMutation({
     mutationFn: () => {
-      const body: any = { title: form.title, urgency: form.urgency };
-      if (form.categoryId) body.categoryId = form.categoryId;
+      const body: any = { mode, urgency: form.urgency };
       if (form.reason) body.reason = form.reason;
-      if (!body.title?.trim()) throw new Error('Title is required');
+      if (form.neededBy) body.neededBy = new Date(form.neededBy).toISOString();
+      if (form.isTemporary) {
+        body.isTemporary = true;
+        if (form.returnBy) body.returnBy = new Date(form.returnBy).toISOString();
+      }
+      if (mode === 'SPECIFIC') {
+        if (picked.length === 0) throw new Error('Pick at least one device');
+        body.assetIds = picked.map((p) => p.id);
+        if (form.title.trim()) body.title = form.title.trim();
+      } else {
+        if (!form.title.trim()) throw new Error('Please say what you need');
+        body.title = form.title.trim();
+        if (form.categoryId) body.categoryId = form.categoryId;
+      }
       return api('/asset-requests', { method: 'POST', body: JSON.stringify(body) });
     },
     onSuccess: () => {
@@ -88,9 +110,19 @@ export default function AssetRequestsPage() {
   // View Helpers
   // ---------------------------------------------------------------------------
   const openModal = (initialForm?: any) => {
-    setForm(initialForm || { title: '', categoryId: '', urgency: 'NORMAL', reason: '' });
+    setMode('CATEGORY');
+    setPicked([]);
+    setSearch('');
+    setForm({ title: '', categoryId: '', urgency: 'NORMAL', reason: '', neededBy: '', isTemporary: false, returnBy: '', ...(initialForm || {}) });
     setOpen(true);
   };
+
+  const deviceAvailable = (a: any) => a.status === 'IN_STOCK';
+  const addDevice = (a: any) => {
+    if (!picked.some((p) => p.id === a.id)) setPicked([...picked, a]);
+    setSearch('');
+  };
+  const removeDevice = (aid: string) => setPicked(picked.filter((p) => p.id !== aid));
 
   const renderCreateModal = () => (
     <Modal
@@ -106,35 +138,124 @@ export default function AssetRequestsPage() {
         </>
       }
     >
-      <div className="space-y-3">
-        <Field label="What do you need?">
-          <input
-            className={inputClass}
-            placeholder="e.g. Laptop for new project"
-            value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
-          />
-        </Field>
-        <Field label="Category (optional)">
-          <select className={inputClass} value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
-            <option value="">— Any —</option>
-            {categories.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </Field>
+      <div className="space-y-4">
+        {/* Mode toggle */}
+        <div className="flex gap-1 rounded-lg bg-ink-100 p-1">
+          <button
+            type="button"
+            className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${mode === 'SPECIFIC' ? 'bg-white text-ink-900 shadow-sm' : 'text-ink-600 hover:bg-ink-200'}`}
+            onClick={() => setMode('SPECIFIC')}
+          >
+            Specific devices
+          </button>
+          <button
+            type="button"
+            className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${mode === 'CATEGORY' ? 'bg-white text-ink-900 shadow-sm' : 'text-ink-600 hover:bg-ink-200'}`}
+            onClick={() => setMode('CATEGORY')}
+          >
+            General need
+          </button>
+        </div>
+
+        {mode === 'SPECIFIC' ? (
+          <>
+            <Field label="Find devices by tag or name">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+                <input
+                  className={`${inputClass} pl-8`}
+                  placeholder="e.g. DEMO-PH or iPhone"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+            </Field>
+            {search.trim() && (
+              <div className="max-h-48 divide-y divide-ink-100 overflow-auto rounded-lg border border-ink-200">
+                {deviceSearch.isLoading && <div className="p-3 text-sm text-ink-500">Searching…</div>}
+                {!deviceSearch.isLoading && (deviceSearch.data?.items || []).filter((a: any) => !picked.some((p) => p.id === a.id)).length === 0 && (
+                  <div className="p-3 text-sm text-ink-500">No matching devices.</div>
+                )}
+                {(deviceSearch.data?.items || [])
+                  .filter((a: any) => !picked.some((p) => p.id === a.id))
+                  .map((a: any) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => addDevice(a)}
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-ink-50"
+                    >
+                      <span className="min-w-0 truncate">
+                        <span className="font-mono text-xs text-ink-500">{a.assetTag}</span>
+                        <span className="ml-2 text-ink-900">{a.name}</span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        <span className={`h-2 w-2 rounded-full ${deviceAvailable(a) ? 'bg-emerald-500' : 'bg-ink-300'}`} />
+                        <span className="text-xs text-ink-500">{deviceAvailable(a) ? 'Available' : 'In use'}</span>
+                        <Plus className="h-4 w-4 text-brand-600" />
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            )}
+            <div>
+              <div className="mb-1 text-xs font-medium text-ink-500">Selected devices ({picked.length})</div>
+              {picked.length === 0 ? (
+                <p className="text-sm text-ink-400">Search and add the exact devices you need.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {picked.map((p) => (
+                    <span key={p.id} className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-xs text-brand-800 ring-1 ring-brand-200">
+                      <span className={`h-1.5 w-1.5 rounded-full ${deviceAvailable(p) ? 'bg-emerald-500' : 'bg-ink-300'}`} />
+                      <span className="font-mono">{p.assetTag}</span>
+                      <button type="button" onClick={() => removeDevice(p.id)} className="text-brand-400 hover:text-brand-700">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <Field label="Note for the manager (optional)">
+              <input className={inputClass} placeholder="e.g. Need these for the payments test rig" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+            </Field>
+          </>
+        ) : (
+          <>
+            <Field label="What do you need?">
+              <input className={inputClass} placeholder="e.g. Laptop for new project" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+            </Field>
+            <Field label="Category (optional)">
+              <select className={inputClass} value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
+                <option value="">— Any —</option>
+                {categories.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </Field>
+          </>
+        )}
+
         <Field label="Urgency">
           <select className={inputClass} value={form.urgency} onChange={(e) => setForm({ ...form, urgency: e.target.value })}>
             {URGENCIES.map((u) => <option key={u} value={u}>{u.charAt(0) + u.slice(1).toLowerCase()}</option>)}
           </select>
         </Field>
-        <Field label="Reason (optional)">
-          <textarea
-            className={inputClass}
-            rows={3}
-            placeholder="Why do you need this?"
-            value={form.reason}
-            onChange={(e) => setForm({ ...form, reason: e.target.value })}
-          />
+        <Field label="Needed by (optional)">
+          <input type="datetime-local" className={inputClass} value={form.neededBy} onChange={(e) => setForm({ ...form, neededBy: e.target.value })} />
         </Field>
+        <label className="flex items-center gap-2 text-sm text-ink-700">
+          <input type="checkbox" checked={form.isTemporary} onChange={(e) => setForm({ ...form, isTemporary: e.target.checked })} />
+          Temporary use (I&apos;ll return it)
+        </label>
+        {form.isTemporary && (
+          <Field label="Return by (optional)">
+            <input type="date" className={inputClass} value={form.returnBy} onChange={(e) => setForm({ ...form, returnBy: e.target.value })} />
+          </Field>
+        )}
+        {mode === 'CATEGORY' && (
+          <Field label="Reason (optional)">
+            <textarea className={inputClass} rows={2} placeholder="Why do you need this?" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+          </Field>
+        )}
         {create.error && <p className="text-sm text-red-600">{(create.error as Error).message}</p>}
       </div>
     </Modal>
