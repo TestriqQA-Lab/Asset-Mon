@@ -306,13 +306,18 @@ class AssetRequestsService {
     return updated;
   }
 
-  async approve(id: string, fulfilledAssetId: string, reviewerId: string) {
+  async approve(id: string, fulfilledAssetId: string | undefined, reviewerId: string) {
     const db = this.ctx.prisma();
     const r = await db.assetRequest.findUnique({ where: { id } });
     if (!r) throw new NotFoundException();
     if (r.status !== 'PENDING') {
       throw new BadRequestException(`Cannot approve from status ${r.status}`);
     }
+    // SPECIFIC (picked devices): approve every still-requested device that is free now.
+    if ((r as any).mode === 'SPECIFIC') return this.approveSpecific(r, reviewerId);
+
+    // CATEGORY (general need): manager allocates one chosen asset.
+    if (!fulfilledAssetId) throw new BadRequestException('Choose an asset to allocate');
     // Validate the chosen asset exists and is available.
     const asset = await db.asset.findUnique({ where: { id: fulfilledAssetId }, select: { id: true, status: true, assetTag: true, name: true } });
     if (!asset) throw new BadRequestException('Asset not found');
@@ -414,6 +419,9 @@ class AssetRequestsService {
     if (r.status !== 'APPROVED') {
       throw new BadRequestException(`Cannot fulfil from status ${r.status} — approve first`);
     }
+    // SPECIFIC (picked devices): hand over every approved device (partial-safe).
+    if ((r as any).mode === 'SPECIFIC') return this.fulfilSpecific(r, performerId);
+
     if (!r.fulfilledAssetId) {
       throw new BadRequestException('No asset allocated — approve with an asset first');
     }
@@ -438,6 +446,136 @@ class AssetRequestsService {
     }).catch(() => {});
 
     return updated;
+  }
+
+  // ---------------------------------------------------------------------------
+  // v2B — SPECIFIC-mode manager actions
+  // ---------------------------------------------------------------------------
+  private async approveSpecific(r: any, reviewerId: string) {
+    const db = this.ctx.prisma();
+    // Approvable = still REQUESTED and the asset is free (IN_STOCK) right now.
+    const items = await db.assetRequestItem.findMany({
+      where: { requestId: r.id },
+      include: { asset: { select: { id: true, status: true } } },
+    });
+    const approvableIds = items
+      .filter((it: any) => it.status === 'REQUESTED' && it.asset?.status === 'IN_STOCK')
+      .map((it: any) => it.id);
+    if (approvableIds.length === 0) {
+      throw new BadRequestException('None of the requested devices are available right now — send a note or decline instead.');
+    }
+    const guard = await db.assetRequest.updateMany({
+      where: { id: r.id, status: 'PENDING' },
+      data: { status: 'APPROVED', reviewedById: reviewerId, reviewedAt: new Date() },
+    });
+    if (guard.count === 0) throw new BadRequestException('Request was already handled by someone else.');
+    await db.assetRequestItem.updateMany({
+      where: { id: { in: approvableIds }, status: 'REQUESTED' },
+      data: { status: 'APPROVED' },
+    });
+
+    this.notifications.push({
+      userId: r.requestedById,
+      kind: 'asset_request.approved',
+      title: `Your request ${r.number} was approved`,
+      body: `${approvableIds.length} device${approvableIds.length === 1 ? '' : 's'} approved — ready to be handed over.`,
+      href: `/dashboard/asset-requests/${r.id}`,
+    }).catch(() => {});
+
+    return db.assetRequest.findUnique({ where: { id: r.id } });
+  }
+
+  private async fulfilSpecific(r: any, performerId: string) {
+    const db = this.ctx.prisma();
+    // Temporary requests check out with a due date (surfaces in the Overdue alert).
+    const dueAt = r.isTemporary && r.returnBy ? new Date(r.returnBy).toISOString() : null;
+
+    // Hand over every APPROVED device. Never force-take: if a device was grabbed
+    // by someone else since approval, checkout throws → skip it (leave APPROVED)
+    // and report; it can be retried or declined later.
+    const approved = await db.assetRequestItem.findMany({
+      where: { requestId: r.id, status: 'APPROVED' },
+      include: { asset: { select: { id: true, assetTag: true } } },
+    });
+    let handed = 0;
+    const skipped: string[] = [];
+    for (const it of approved) {
+      try {
+        await this.lifecycle.checkout(it.assetId, r.requestedById, dueAt, performerId);
+        const g = await db.assetRequestItem.updateMany({
+          where: { id: it.id, status: 'APPROVED' },
+          data: { status: 'FULFILLED' },
+        });
+        if (g.count > 0) handed++;
+      } catch {
+        skipped.push((it as any).asset?.assetTag || it.assetId);
+      }
+    }
+
+    // The request is FULFILLED only when no line is left REQUESTED or APPROVED
+    // (every device is now FULFILLED or DECLINED); otherwise it stays APPROVED.
+    const remaining = await db.assetRequestItem.count({
+      where: { requestId: r.id, status: { in: ['REQUESTED', 'APPROVED'] } },
+    });
+    if (remaining === 0) {
+      await db.assetRequest.updateMany({
+        where: { id: r.id, status: 'APPROVED' },
+        data: { status: 'FULFILLED', fulfilledAt: new Date() },
+      });
+    }
+
+    const total = await db.assetRequestItem.count({ where: { requestId: r.id } });
+    this.notifications.push({
+      userId: r.requestedById,
+      kind: 'asset_request.fulfilled',
+      title: `Devices handed over for ${r.number}`,
+      body: `${handed} of ${total} device${total === 1 ? '' : 's'} checked out to you${skipped.length ? ` (${skipped.length} still unavailable)` : ''}.`,
+      href: `/dashboard/asset-requests/${r.id}`,
+    }).catch(() => {});
+
+    const updated = await db.assetRequest.findUnique({ where: { id: r.id } });
+    return { ...updated, handed, total, skipped };
+  }
+
+  async note(id: string, note: string, performerId: string) {
+    const db = this.ctx.prisma();
+    const r = await db.assetRequest.findUnique({ where: { id } });
+    if (!r) throw new NotFoundException();
+    if (r.status === 'CANCELLED') throw new BadRequestException('Request was cancelled');
+    await db.assetRequest.update({ where: { id }, data: { managerNote: note } });
+
+    // One-way note → the requester (no reply surface).
+    this.notifications.push({
+      userId: r.requestedById,
+      kind: 'asset_request.note',
+      title: `Note on your request ${r.number}`,
+      body: note,
+      href: `/dashboard/asset-requests/${r.id}`,
+    }).catch(() => {});
+
+    return db.assetRequest.findUnique({ where: { id } });
+  }
+
+  async declineItem(id: string, itemId: string, performerId: string) {
+    const db = this.ctx.prisma();
+    const r = await db.assetRequest.findUnique({ where: { id } });
+    if (!r) throw new NotFoundException();
+    if ((r as any).mode !== 'SPECIFIC') {
+      throw new BadRequestException('Per-device decline applies to specific-device requests only');
+    }
+    if (!['PENDING', 'APPROVED'].includes(r.status)) {
+      throw new BadRequestException(`Cannot change devices from status ${r.status}`);
+    }
+    const item = await db.assetRequestItem.findFirst({ where: { id: itemId, requestId: id } });
+    if (!item) throw new NotFoundException('Requested device not found');
+    if (item.status === 'FULFILLED') throw new BadRequestException('That device was already handed over');
+    if (item.status === 'DECLINED') return item;
+    const g = await db.assetRequestItem.updateMany({
+      where: { id: itemId, requestId: id, status: { in: ['REQUESTED', 'APPROVED'] } },
+      data: { status: 'DECLINED' },
+    });
+    if (g.count === 0) throw new BadRequestException('Device is no longer declinable');
+    return db.assetRequestItem.findUnique({ where: { id: itemId } });
   }
 
   // ---------------------------------------------------------------------------
@@ -568,7 +706,11 @@ class CreateAssetRequestDto {
 }
 
 class ApproveDto {
-  @IsUUID() assetId: string;
+  @IsOptional() @IsUUID() assetId?: string;
+}
+
+class NoteDto {
+  @IsString() @MinLength(1) note: string;
 }
 
 class DeclineDto {
@@ -671,6 +813,18 @@ class AssetRequestsController {
   @Roles('ADMIN', 'ASSET_MANAGER')
   fulfil(@Param('id') id: string, @CurrentUser('sub') uid: string) {
     return this.svc.fulfil(id, uid);
+  }
+
+  @Post(':id/note')
+  @Roles('ADMIN', 'ASSET_MANAGER')
+  note(@Param('id') id: string, @Body() dto: NoteDto, @CurrentUser('sub') uid: string) {
+    return this.svc.note(id, dto.note, uid);
+  }
+
+  @Post(':id/items/:itemId/decline')
+  @Roles('ADMIN', 'ASSET_MANAGER')
+  declineItem(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser('sub') uid: string) {
+    return this.svc.declineItem(id, itemId, uid);
   }
 }
 
