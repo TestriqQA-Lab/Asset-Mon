@@ -188,6 +188,7 @@ model Asset {
   statusDefId   String?
   statusDef     AssetStatusDef? @relation(fields: [statusDefId], references: [id])
   fulfilledRequests AssetRequest[] @relation("FulfilledRequests")
+  requestedItems AssetRequestItem[] @relation("RequestedAssets")
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -727,6 +728,13 @@ model AssetRequest {
   fulfilledAssetId String?
   fulfilledAsset   Asset?           @relation("FulfilledRequests", fields: [fulfilledAssetId], references: [id])
   fulfilledAt      DateTime?
+  // v2 (asset-requests redesign): request mode, scheduling, per-device lines, one-way manager note
+  mode          RequestMode        @default(CATEGORY)
+  neededBy      DateTime?
+  isTemporary   Boolean            @default(false)
+  returnBy      DateTime?
+  managerNote   String?
+  items         AssetRequestItem[]
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
@@ -734,6 +742,19 @@ model AssetRequest {
   @@index([status])
   @@index([assignedToId])
   @@index([categoryId])
+}
+
+model AssetRequestItem {
+  id        String            @id @default(uuid())
+  requestId String
+  request   AssetRequest      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  assetId   String
+  asset     Asset             @relation("RequestedAssets", fields: [assetId], references: [id])
+  status    RequestItemStatus @default(REQUESTED)
+  createdAt DateTime          @default(now())
+
+  @@index([requestId])
+  @@index([assetId])
 }
 
 enum RequestStatus {
@@ -749,4 +770,16 @@ enum RequestUrgency {
   NORMAL
   HIGH
   URGENT
+}
+
+enum RequestMode {
+  CATEGORY
+  SPECIFIC
+}
+
+enum RequestItemStatus {
+  REQUESTED
+  APPROVED
+  DECLINED
+  FULFILLED
 }

@@ -2,7 +2,7 @@ import {
   BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Injectable, Module,
   NotFoundException, Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
-import { IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsDateString, IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -17,6 +17,7 @@ import { NotificationsService } from '../notifications/notifications.module';
 
 const URGENCIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
 const STATUSES = ['PENDING', 'APPROVED', 'DECLINED', 'FULFILLED', 'CANCELLED'] as const;
+const MODES = ['CATEGORY', 'SPECIFIC'] as const;
 
 // ---------------------------------------------------------------------------
 // Service
@@ -64,6 +65,7 @@ class AssetRequestsService {
         assignedTo: { select: { id: true, firstName: true, lastName: true } },
         category: { select: { id: true, name: true } },
         fulfilledAsset: { select: { id: true, assetTag: true, name: true, status: true } },
+        items: { select: { id: true, status: true } },
       },
     });
 
@@ -101,6 +103,22 @@ class AssetRequestsService {
         reviewedBy: { select: { id: true, firstName: true, lastName: true } },
         category: { select: { id: true, name: true } },
         fulfilledAsset: { select: { id: true, assetTag: true, name: true, status: true } },
+        items: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            asset: {
+              select: {
+                id: true, assetTag: true, name: true, status: true,
+                assignments: {
+                  where: { returnedAt: null },
+                  take: 1,
+                  orderBy: { checkedOutAt: 'desc' },
+                  include: { user: { select: { id: true, firstName: true, lastName: true } } },
+                },
+              },
+            },
+          },
+        },
       },
     });
     if (!r) throw new NotFoundException('Asset request not found');
@@ -108,30 +126,98 @@ class AssetRequestsService {
     if (viewer.role === 'EMPLOYEE' && r.requestedById !== viewer.userId) {
       throw new NotFoundException('Asset request not found');
     }
-    return r;
+
+    // Enrich each specific-device line with LIVE availability, computed from the
+    // asset's current status + open assignment (never stored → always accurate).
+    // The holder NAME is shown to reviewers only (ADMIN/ASSET_MANAGER); the employee
+    // sees "in use" via `available` but not who holds it (consistent with asset scoping).
+    const canSeeHolder = viewer.role === 'ADMIN' || viewer.role === 'ASSET_MANAGER';
+    const items = ((r as any).items ?? []).map((it: any) => {
+      const open = it.asset?.assignments?.[0];
+      const holder = open?.user;
+      return {
+        id: it.id,
+        status: it.status,
+        assetId: it.assetId,
+        asset: it.asset
+          ? { id: it.asset.id, assetTag: it.asset.assetTag, name: it.asset.name, status: it.asset.status }
+          : null,
+        available: it.asset?.status === 'IN_STOCK' && !open,
+        heldBy: (canSeeHolder && holder) ? { id: holder.id, name: `${holder.firstName} ${holder.lastName}`.trim() } : null,
+      };
+    });
+
+    return { ...r, items };
   }
 
-  async create(data: { title: string; categoryId?: string; reason?: string; urgency?: string }, requestedById: string) {
+  async create(
+    data: {
+      mode?: string; title?: string; categoryId?: string; reason?: string; urgency?: string;
+      assetIds?: string[]; neededBy?: string; isTemporary?: boolean; returnBy?: string;
+    },
+    requestedById: string,
+  ) {
     const db = this.ctx.prisma();
-    const number = await this.nextNumber();
+    const mode = data.mode === 'SPECIFIC' ? 'SPECIFIC' : 'CATEGORY';
 
+    // Optional scheduling fields — apply to both modes.
+    const neededBy = data.neededBy ? new Date(data.neededBy) : null;
+    const isTemporary = !!data.isTemporary;
+    const returnBy = isTemporary && data.returnBy ? new Date(data.returnBy) : null;
+
+    let title: string;
+    let categoryId: string | null = null;
+    let assetIds: string[] = [];
+
+    if (mode === 'SPECIFIC') {
+      // De-dupe the picked device ids and validate they all exist in THIS tenant
+      // (ctx.prisma() is already tenant-scoped). Availability is intentionally NOT
+      // checked here — the manager sees live availability at review time and decides.
+      assetIds = [...new Set((data.assetIds ?? []).filter(Boolean))];
+      if (assetIds.length === 0) {
+        throw new BadRequestException('Pick at least one device for a specific-device request');
+      }
+      const found = await db.asset.findMany({ where: { id: { in: assetIds } }, select: { id: true } });
+      if (found.length !== assetIds.length) {
+        throw new BadRequestException('One or more selected devices no longer exist');
+      }
+      title = data.title?.trim() || `${assetIds.length} specific device${assetIds.length === 1 ? '' : 's'}`;
+      // categoryId stays null — a specific pick can span categories.
+    } else {
+      // CATEGORY (general need): title required, category optional (unchanged from Phase 2).
+      if (!data.title || !data.title.trim()) {
+        throw new BadRequestException('A title is required');
+      }
+      title = data.title.trim();
+      categoryId = data.categoryId || null;
+    }
+
+    const number = await this.nextNumber();
     // Round-robin: assign to the ASSET_MANAGER with the fewest open (PENDING) requests.
     const assignedToId = await this.pickManager();
 
     const request = await db.assetRequest.create({
       data: {
         number,
-        title: data.title,
-        categoryId: data.categoryId || null,
+        mode: mode as any,
+        title,
+        categoryId,
         reason: data.reason || null,
         urgency: (data.urgency as any) || 'NORMAL',
         status: 'PENDING',
+        neededBy,
+        isTemporary,
+        returnBy,
         requestedById,
         assignedToId,
+        ...(assetIds.length > 0
+          ? { items: { create: assetIds.map((assetId) => ({ assetId })) } }
+          : {}),
       },
       include: {
         requestedBy: { select: { id: true, firstName: true, lastName: true } },
         category: { select: { id: true, name: true } },
+        items: { select: { id: true, assetId: true, status: true } },
       },
     });
 
@@ -469,10 +555,16 @@ class AssetRequestsService {
 // DTOs
 // ---------------------------------------------------------------------------
 class CreateAssetRequestDto {
-  @IsString() @MinLength(1) title: string;
+  @IsOptional() @IsEnum(MODES) mode?: typeof MODES[number];
+  @IsOptional() @IsString() @MinLength(1) title?: string;
   @IsOptional() @IsUUID() categoryId?: string;
   @IsOptional() @IsString() reason?: string;
   @IsOptional() @IsEnum(URGENCIES) urgency?: typeof URGENCIES[number];
+  // v2: specific-device mode + optional scheduling fields
+  @IsOptional() @IsArray() @IsUUID('all', { each: true }) assetIds?: string[];
+  @IsOptional() @IsDateString() neededBy?: string;
+  @IsOptional() @IsBoolean() isTemporary?: boolean;
+  @IsOptional() @IsDateString() returnBy?: string;
 }
 
 class ApproveDto {
