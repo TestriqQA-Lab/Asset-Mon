@@ -32,6 +32,7 @@ export const NAV_KEYS = [
   'maintenance',
   'reservations',
   'audit-sessions',
+  'asset-requests',
   'purchase-requests',
   'purchase-orders',
   'depreciation',
@@ -69,6 +70,7 @@ export const DEFAULT_ASSET_MANAGER_NAV: NavMap = navOnly([
   'dashboard', 'reports',
   'assets', 'categories', 'locations', 'departments',
   'tickets', 'maintenance', 'reservations', 'audit-sessions',
+  'asset-requests',
   'purchase-requests', 'purchase-orders', 'depreciation',
   'software', 'licenses',
   'users',
@@ -81,6 +83,7 @@ export const DEFAULT_EMPLOYEE_NAV: NavMap = navOnly([
   'assets',
   'tickets',
   'reservations',
+  'asset-requests',
   'settings:security',
 ]);
 
@@ -109,6 +112,7 @@ export function navForRole(role: Role | string | undefined, perms: TenantPermiss
 export const GRANTABLE_NAV_KEYS: ReadonlySet<NavKey> = new Set<NavKey>([
   'assets', 'categories', 'locations', 'departments',
   'tickets', 'maintenance', 'reservations', 'audit-sessions',
+  'asset-requests',
   'purchase-requests', 'purchase-orders', 'depreciation',
   'software', 'licenses', 'reports', 'data-quality',
   'settings:statuses', 'users', // users = read-only page for lower roles (writes stay admin-only)
@@ -156,6 +160,7 @@ export const NAV_LABELS: Record<NavKey, string> = {
   'maintenance':          'Maintenance',
   'reservations':         'Reservations',
   'audit-sessions':       'Physical audits',
+  'asset-requests':       'Asset requests',
   'purchase-requests':    'Purchase requests',
   'purchase-orders':      'Purchase orders',
   'depreciation':         'Depreciation',
@@ -180,7 +185,7 @@ export const NAV_LABELS: Record<NavKey, string> = {
 export const NAV_GROUPS: Array<{ label: string; keys: NavKey[] }> = [
   { label: 'Overview',  keys: ['dashboard', 'reports', 'data-quality'] },
   { label: 'Inventory', keys: ['assets', 'categories', 'locations', 'departments', 'software', 'licenses'] },
-  { label: 'Lifecycle', keys: ['tickets', 'maintenance', 'reservations', 'audit-sessions'] },
+  { label: 'Lifecycle', keys: ['tickets', 'maintenance', 'reservations', 'audit-sessions', 'asset-requests'] },
   { label: 'Finance',   keys: ['purchase-requests', 'purchase-orders', 'depreciation'] },
   { label: 'Settings',  keys: [
     'users',

@@ -3,15 +3,24 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import {
   Package, CheckCircle2, UserCheck, Wrench, Archive,
-  AlertTriangle, CalendarClock, KeyRound, FileWarning, Activity,
+  AlertTriangle, CalendarClock, KeyRound, FileWarning, Activity, HandHelping,
 } from 'lucide-react';
 import { Card, StatCard, Pill, SectionHeader, EmptyState, Skeleton } from '@/components/ui';
 import { SetupChecklist } from '@/components/SetupChecklist';
+import { usePermissions } from '@/lib/settings';
 
 export default function DashboardHome() {
   const me = useQuery({ queryKey: ['me'], queryFn: () => api('/me') });
   const stats = useQuery({ queryKey: ['stats'], queryFn: () => api('/dashboard/stats') });
   const alerts = useQuery({ queryKey: ['alerts'], queryFn: () => api('/dashboard/alerts') });
+  const perms = usePermissions();
+  const isEmployee = perms.role === 'EMPLOYEE';
+  // Employee-specific: count pending asset requests
+  const myRequests = useQuery({
+    queryKey: ['my-asset-requests-pending'],
+    queryFn: () => api('/asset-requests?status=PENDING'),
+    enabled: isEmployee,
+  });
   const s = stats.data;
 
   return (
@@ -38,6 +47,15 @@ export default function DashboardHome() {
           <StatCard label="Retired" value={s.byStatus?.RETIRED || 0} icon={<Archive className="h-4 w-4" />} href="/dashboard/assets?status=RETIRED" />
           <StatCard label="Open tickets" value={s.openTickets || 0} accent="amber" icon={<AlertTriangle className="h-4 w-4" />} href="/dashboard/tickets?status=open" />
           <StatCard label="Licenses expiring" value={s.licensesExpiringSoon || 0} accent="red" icon={<KeyRound className="h-4 w-4" />} href="/dashboard/licenses?expiringInDays=30" />
+        </div>
+      )}
+
+      {/* Employee-specific cards */}
+      {isEmployee && s && (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          <StatCard label="My pending requests" value={myRequests.data?.length || 0} accent="amber" icon={<HandHelping className="h-4 w-4" />} href="/dashboard/asset-requests" />
+          <StatCard label="My open tickets" value={s.myOpenTickets ?? 0} accent="amber" icon={<AlertTriangle className="h-4 w-4" />} href="/dashboard/tickets?mine=true" />
+          <StatCard label="My assets" value={s.myAssignedAssets ?? 0} accent="brand" icon={<UserCheck className="h-4 w-4" />} href="/dashboard/assets" />
         </div>
       )}
 

@@ -14,12 +14,16 @@ import { ModuleGuard } from '../tenant-settings/module.guard';
 import { RequireModule } from '../tenant-settings/require-module.decorator';
 import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
 import { RequireNav } from '../tenant-settings/require-nav.decorator';
+import { NotificationsService } from '../notifications/notifications.module';
 
 const STATUSES = ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'ORDERED', 'CANCELLED'] as const;
 
 @Injectable()
 class PurchaseRequestsService {
-  constructor(private readonly ctx: TenantContextService) {}
+  constructor(
+    private readonly ctx: TenantContextService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   list(filter: { status?: string; requestedById?: string }) {
     const where: any = {};
@@ -109,7 +113,24 @@ class PurchaseRequestsService {
     }
     if (pr.status !== 'DRAFT') throw new BadRequestException(`Cannot submit from status ${pr.status}`);
     if (pr.items.length === 0) throw new BadRequestException('Add at least one item');
-    return db.purchaseRequest.update({ where: { id }, data: { status: 'SUBMITTED' } });
+    const updated = await db.purchaseRequest.update({ where: { id }, data: { status: 'SUBMITTED' } });
+
+    // Phase 2 RBAC: notify Asset Managers when a PR is submitted.
+    const managers = await db.user.findMany({
+      where: { role: 'ASSET_MANAGER', active: true },
+      select: { id: true },
+    });
+    for (const mgr of managers) {
+      this.notifications.push({
+        userId: mgr.id,
+        kind: 'purchase_request.submitted',
+        title: `Purchase request ${pr.number} submitted`,
+        body: pr.title,
+        href: `/dashboard/purchase-requests/${pr.id}`,
+      }).catch(() => {});
+    }
+
+    return updated;
   }
 
   async approve(id: string, approve: boolean, approverId: string, role: string) {
@@ -118,10 +139,21 @@ class PurchaseRequestsService {
     const pr = await db.purchaseRequest.findUnique({ where: { id } });
     if (!pr) throw new NotFoundException();
     if (pr.status !== 'SUBMITTED') throw new BadRequestException(`Cannot approve/reject from ${pr.status}`);
-    return db.purchaseRequest.update({
+    const updated = await db.purchaseRequest.update({
       where: { id },
       data: { status: approve ? 'APPROVED' : 'REJECTED', approvedById: approverId, approvedAt: new Date() },
     });
+
+    // Phase 2 RBAC: notify the requester about the decision.
+    this.notifications.push({
+      userId: pr.requestedById,
+      kind: approve ? 'purchase_request.approved' : 'purchase_request.rejected',
+      title: `Purchase request ${pr.number} ${approve ? 'approved' : 'rejected'}`,
+      body: pr.title,
+      href: `/dashboard/purchase-requests/${pr.id}`,
+    }).catch(() => {});
+
+    return updated;
   }
 
   async cancel(id: string, userId: string, role: string) {

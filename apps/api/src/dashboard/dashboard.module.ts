@@ -3,15 +3,16 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
 @Injectable()
 class DashboardService {
   constructor(private readonly ctx: TenantContextService) {}
 
-  async stats() {
+  async stats(uid: string) {
     const db = this.ctx.prisma();
-    const [total, byStatusRows, byCategoryRows, openAssignments, warrantyExpiringSoon, openTickets, dueMaintenance, licensesExpiringSoon, recentActivity] = await Promise.all([
+    const [total, byStatusRows, byCategoryRows, openAssignments, warrantyExpiringSoon, openTickets, dueMaintenance, licensesExpiringSoon, recentActivity, myOpenTickets, myAssignedAssets] = await Promise.all([
       db.asset.count(),
       db.asset.groupBy({ by: ['status'], _count: { _all: true } }),
       db.asset.groupBy({ by: ['categoryId'], _count: { _all: true } }),
@@ -32,6 +33,10 @@ class DashboardService {
           performedBy: { select: { firstName: true, lastName: true } },
         },
       }),
+      // The current user's OWN counts — used by the employee dashboard cards
+      // (workspace-wide counts above are not "mine").
+      db.serviceTicket.count({ where: { status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING_VENDOR'] }, OR: [{ openedById: uid }, { assignedToId: uid }] } }),
+      db.assignment.count({ where: { userId: uid, returnedAt: null } }),
     ]);
 
     const cats = await db.category.findMany({ select: { id: true, name: true } });
@@ -47,6 +52,8 @@ class DashboardService {
       dueMaintenance,
       licensesExpiringSoon,
       recentActivity,
+      myOpenTickets,
+      myAssignedAssets,
     };
   }
 
@@ -104,7 +111,7 @@ class DashboardService {
 class DashboardController {
   constructor(private readonly svc: DashboardService) {}
   // Aggregate counts only — safe for any authenticated workspace member.
-  @Get('stats') stats() { return this.svc.stats(); }
+  @Get('stats') stats(@CurrentUser('sub') uid: string) { return this.svc.stats(uid); }
   // Alerts surface specific overdue assignments / tickets that include user
   // names + emails. Keep it manager+ — EMPLOYEE sees only the dashboard tile
   // counts via /stats.

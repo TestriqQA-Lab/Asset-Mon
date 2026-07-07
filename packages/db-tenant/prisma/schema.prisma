@@ -53,6 +53,10 @@ model User {
   lastTotpStep            BigInt?
   mfaPending              TenantMfaPending[]
   backupCodes             TenantBackupCode[]
+  // --- Asset Requests (Phase 2 RBAC) ---
+  assetRequests     AssetRequest[] @relation("AssetRequests")
+  assignedRequests  AssetRequest[] @relation("AssignedRequests")
+  reviewedRequests  AssetRequest[] @relation("ReviewedRequests")
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
@@ -122,6 +126,7 @@ model Category {
   assets        Asset[]
   prItems       PurchaseRequestItem[]
   poItems       PurchaseOrderItem[]
+  assetRequests AssetRequest[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -182,6 +187,7 @@ model Asset {
   // Optional custom status display (system status enum stays canonical for business logic).
   statusDefId   String?
   statusDef     AssetStatusDef? @relation(fields: [statusDefId], references: [id])
+  fulfilledRequests AssetRequest[] @relation("FulfilledRequests")
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -692,4 +698,55 @@ model TenantBackupCode {
   createdAt     DateTime        @default(now())
 
   @@unique([userId, codeHash])
+}
+
+// ------------ Asset Requests (employee → manager approval, Phase 2 RBAC) ------------
+model AssetRequest {
+  id            String             @id @default(uuid())
+  number        String             @unique       // AR-00001
+  requestedById String
+  requestedBy   User               @relation("AssetRequests", fields: [requestedById], references: [id])
+  categoryId    String?
+  category      Category?          @relation(fields: [categoryId], references: [id])
+  title         String
+  reason        String?
+  urgency       RequestUrgency     @default(NORMAL)
+  status        RequestStatus      @default(PENDING)
+  // Auto-assigned manager (round-robin, fewest open requests)
+  assignedToId  String?
+  assignedTo    User?              @relation("AssignedRequests", fields: [assignedToId], references: [id])
+  // Resolution fields (filled by the approver — usually the assignedTo manager)
+  reviewedById  String?
+  reviewedBy    User?              @relation("ReviewedRequests", fields: [reviewedById], references: [id])
+  reviewedAt    DateTime?
+  declineReason String?
+  // Escalation: manager can push to Admin for a decision
+  escalatedToAdmin Boolean        @default(false)
+  escalationNote   String?
+  // If approved → the manager assigns a specific asset
+  fulfilledAssetId String?
+  fulfilledAsset   Asset?           @relation("FulfilledRequests", fields: [fulfilledAssetId], references: [id])
+  fulfilledAt      DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([requestedById])
+  @@index([status])
+  @@index([assignedToId])
+  @@index([categoryId])
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  FULFILLED
+  CANCELLED
+}
+
+enum RequestUrgency {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
 }

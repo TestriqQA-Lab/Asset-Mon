@@ -43,6 +43,7 @@ import { PlatformModule } from './platform/platform.module';
 import { SupportModule } from './support/support.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { DataQualityModule } from './data-quality/data-quality.module';
+import { AssetRequestsModule } from './asset-requests/asset-requests.module';
 
 function normaliseIpKey(raw: any): string {
   const first = typeof raw === 'string' ? raw.split(',')[0].trim() : '';
@@ -105,6 +106,7 @@ function normaliseIpKey(raw: any): string {
     SupportModule,
     AnnouncementsModule,
     DataQualityModule,
+    AssetRequestsModule,
   ],
   controllers: [HealthController, MeController],
   providers: [

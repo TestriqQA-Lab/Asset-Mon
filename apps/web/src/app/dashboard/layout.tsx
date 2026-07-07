@@ -16,6 +16,7 @@ import {
   AppWindow, KeyRound, ClipboardCheck, BarChart3, ListChecks,
   Users, Webhook, ScrollText, Settings, LogOut, ChevronDown, Search,
   Sliders, Palette, Shield, ShieldCheck, CreditCard, Circle, Menu, X, Lock, LifeBuoy,
+  HandHelping,
 } from 'lucide-react';
 
 type NavItem = { href: string; label: string; icon: React.ReactNode; navKey: NavKey; module?: ModuleKey };
@@ -51,6 +52,7 @@ const NAV: NavGroup[] = [
       { href: '/dashboard/maintenance', label: 'Maintenance', icon: <CalendarClock className="h-4 w-4" />, navKey: 'maintenance', module: 'maintenance' },
       { href: '/dashboard/reservations', label: 'Reservations', icon: <CalendarClock className="h-4 w-4" />, navKey: 'reservations', module: 'reservations' },
       { href: '/dashboard/audit-sessions', label: 'Physical audits', icon: <ClipboardCheck className="h-4 w-4" />, navKey: 'audit-sessions', module: 'audits' },
+      { href: '/dashboard/asset-requests', label: 'Asset requests', icon: <HandHelping className="h-4 w-4" />, navKey: 'asset-requests' },
     ],
   },
   {

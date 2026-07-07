@@ -50,6 +50,7 @@ export const NAV_KEYS = [
   'maintenance',
   'reservations',
   'audit-sessions',
+  'asset-requests',
   // Finance
   'purchase-requests',
   'purchase-orders',
@@ -101,6 +102,7 @@ export const DEFAULT_ASSET_MANAGER_NAV: NavMap = navOnly([
   'dashboard', 'reports',
   'assets', 'categories', 'locations', 'departments',
   'tickets', 'maintenance', 'reservations', 'audit-sessions',
+  'asset-requests',
   'purchase-requests', 'purchase-orders', 'depreciation',
   'software', 'licenses',
   'users',
@@ -113,6 +115,7 @@ export const DEFAULT_EMPLOYEE_NAV: NavMap = navOnly([
   'assets',           // own assignments view
   'tickets',          // raise + view own
   'reservations',     // request + view own
+  'asset-requests',   // request + view own
   'settings:security',
 ]);
 
@@ -147,6 +150,7 @@ export function navForRole(role: Role | string, perms: TenantPermissions): NavMa
 export const GRANTABLE_NAV_KEYS: ReadonlySet<NavKey> = new Set<NavKey>([
   'assets', 'categories', 'locations', 'departments',
   'tickets', 'maintenance', 'reservations', 'audit-sessions',
+  'asset-requests',
   'purchase-requests', 'purchase-orders', 'depreciation',
   'software', 'licenses', 'reports', 'data-quality',
   'settings:statuses', 'users', // users = read-only page for lower roles (writes stay admin-only)

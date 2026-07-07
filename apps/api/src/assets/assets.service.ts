@@ -36,13 +36,8 @@ export class AssetsService {
     // Department-scoped users only see their dept's assets.
     const scope = await this.scopedDepartmentId();
     if (scope) where.departmentId = scope;
-    // EMPLOYEEs without an explicit dept scope only see assets currently
-    // checked out to them. Matches the "view own assignments" spec — and
-    // forecloses workspace-wide enumeration of asset names / serial numbers
-    // through the assets list.
-    if (this.ctx.role === 'EMPLOYEE' && !scope && this.ctx.userId) {
-      where.assignments = { some: { userId: this.ctx.userId, returnedAt: null } };
-    }
+    // EMPLOYEEs without an explicit dept scope now see all assets globally
+    // as per user request (removed the where.assignments restriction).
     if (q.q) {
       const term = q.q.trim();
       where.OR = [

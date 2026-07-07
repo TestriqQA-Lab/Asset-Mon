@@ -125,6 +125,33 @@ class TicketsService {
         body: ticket.title,
         href: `/dashboard/tickets/${ticket.id}`,
       }).catch(() => {});
+    } else if (openedByRole === 'EMPLOYEE') {
+      // Phase 2 RBAC: employee ticket with no assignee → notify all Asset Managers
+      // so the ticket doesn't go into a black hole. Manager escalates to Admin if needed.
+      const managers = await db.user.findMany({
+        where: { role: 'ASSET_MANAGER', active: true },
+        select: { id: true, email: true },
+      });
+      for (const mgr of managers) {
+        this.notifications.push({
+          userId: mgr.id,
+          kind: 'ticket.opened',
+          title: `New employee ticket ${ticket.ticketNumber}`,
+          body: ticket.title,
+          href: `/dashboard/tickets/${ticket.id}`,
+        }).catch(() => {});
+      }
+      // Also email the managers.
+      const mgrEmails = managers.map((m) => ({
+        to: m.email,
+        subject: `[AssetMon] New ticket ${ticket.ticketNumber}: ${ticket.title}`,
+        body: `An employee has raised ticket ${ticket.ticketNumber}.\n\n${ticket.description || ''}\n`,
+      }));
+      if (mgrEmails.length) {
+        this.events.emit('ticket.opened', {
+          id: ticket.id, ticketNumber: ticket.ticketNumber, title: ticket.title,
+        }, { emails: mgrEmails }).catch(() => {});
+      }
     }
     return ticket;
   }

@@ -9,6 +9,10 @@ const ALLOWED_KINDS = new Set([
   'ticket.assigned', 'ticket.opened', 'ticket.status_changed',
   'warranty.expiring', 'maint.due', 'license.expiring',
   'asset.checked_out', 'asset.checked_in', 'system',
+  // Phase 2 RBAC: asset requests + purchase request routing
+  'asset_request.created', 'asset_request.escalated',
+  'asset_request.approved', 'asset_request.declined', 'asset_request.fulfilled',
+  'purchase_request.submitted', 'purchase_request.approved', 'purchase_request.rejected',
 ]);
 
 // Only same-origin relative paths are allowed in notification hrefs. javascript:,

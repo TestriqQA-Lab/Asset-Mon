@@ -261,7 +261,7 @@ export function TD({ children, className, onClick }: { children?: React.ReactNod
 
 /* ----------------------- StatCard ----------------------- */
 export function StatCard({
-  label, value, hint, accent = 'neutral', icon, href,
+  label, value, hint, accent = 'neutral', icon, href, onClick,
 }: {
   label: string;
   value: any;
@@ -269,6 +269,7 @@ export function StatCard({
   accent?: 'brand' | 'green' | 'amber' | 'red' | 'neutral';
   icon?: React.ReactNode;
   href?: string;
+  onClick?: () => void;
 }) {
   const accentBg: Record<string, string> = {
     brand: 'bg-brand-50 text-brand-700 ring-brand-200',
@@ -279,8 +280,8 @@ export function StatCard({
   };
 
   const containerClass = cn(
-    'group relative block rounded-xl border border-ink-200 bg-white p-4 shadow-card transition-all',
-    href
+    'group relative block rounded-xl border border-ink-200 bg-white p-4 text-left shadow-card transition-all w-full',
+    (href || onClick)
       ? 'cursor-pointer hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-pop focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40'
       : 'hover:-translate-y-0.5 hover:shadow-pop',
   );
@@ -291,7 +292,7 @@ export function StatCard({
         <div className="text-[11px] font-medium uppercase tracking-wider text-ink-500">{label}</div>
         {icon && <div className={cn('flex h-7 w-7 items-center justify-center rounded-lg ring-1 ring-inset', accentBg[accent])}>{icon}</div>}
       </div>
-      <div className={cn('mt-3 text-2xl font-semibold tracking-tight text-ink-900', href && 'transition-colors group-hover:text-brand-700')}>{value}</div>
+      <div className={cn('mt-3 text-2xl font-semibold tracking-tight text-ink-900', (href || onClick) && 'transition-colors group-hover:text-brand-700')}>{value}</div>
       {hint && <div className="mt-1 text-xs text-ink-500">{hint}</div>}
     </>
   );
@@ -301,6 +302,13 @@ export function StatCard({
       <a href={href} aria-label={`${label}: ${value}`} className={containerClass}>
         {body}
       </a>
+    );
+  }
+  if (onClick) {
+    return (
+      <button onClick={onClick} type="button" aria-label={`${label}: ${value}`} className={containerClass}>
+        {body}
+      </button>
     );
   }
   return <div className={containerClass}>{body}</div>;
