@@ -10,7 +10,7 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 class DashboardService {
   constructor(private readonly ctx: TenantContextService) {}
 
-  async stats(uid: string) {
+  async stats(uid: string, role?: string) {
     const db = this.ctx.prisma();
     const [total, byStatusRows, byCategoryRows, openAssignments, warrantyExpiringSoon, openTickets, dueMaintenance, licensesExpiringSoon, recentActivity, myOpenTickets, myAssignedAssets] = await Promise.all([
       db.asset.count(),
@@ -51,7 +51,9 @@ class DashboardService {
       openTickets,
       dueMaintenance,
       licensesExpiringSoon,
-      recentActivity,
+      // Workspace-wide "who did what" is manager+ information — employees see only
+      // their own tiles, so it is withheld from their payload.
+      recentActivity: role === 'EMPLOYEE' ? [] : recentActivity,
       myOpenTickets,
       myAssignedAssets,
     };
@@ -110,8 +112,9 @@ class DashboardService {
 @Controller('dashboard')
 class DashboardController {
   constructor(private readonly svc: DashboardService) {}
-  // Aggregate counts only — safe for any authenticated workspace member.
-  @Get('stats') stats(@CurrentUser('sub') uid: string) { return this.svc.stats(uid); }
+  // Aggregate counts for any authenticated member; workspace-wide recent-activity
+  // is omitted for EMPLOYEE (they see only their own dashboard tiles).
+  @Get('stats') stats(@CurrentUser() u: any) { return this.svc.stats(u.sub, u.role); }
   // Alerts surface specific overdue assignments / tickets that include user
   // names + emails. Keep it manager+ — EMPLOYEE sees only the dashboard tile
   // counts via /stats.

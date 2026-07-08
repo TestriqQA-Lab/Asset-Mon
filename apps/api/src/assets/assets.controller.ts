@@ -46,6 +46,7 @@ export class AssetsController {
   }
 
   @Get('export.csv')
+  @Roles('ADMIN', 'ASSET_MANAGER')
   async exportCsv(@Res() res: Response) {
     const { items } = await this.svc.list({ pageSize: 10000 });
     const head = ['assetTag','name','serialNumber','model','status','category','location','department','vendor','purchaseDate','purchaseCost','warrantyEnd','notes'];
