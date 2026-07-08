@@ -151,6 +151,7 @@ model Asset {
   assetTag      String        @unique
   name          String
   serialNumber  String?
+  model         String?
   status        AssetStatus   @default(IN_STOCK)
   categoryId    String
   category      Category      @relation(fields: [categoryId], references: [id])

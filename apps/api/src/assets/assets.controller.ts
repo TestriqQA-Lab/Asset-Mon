@@ -48,9 +48,9 @@ export class AssetsController {
   @Get('export.csv')
   async exportCsv(@Res() res: Response) {
     const { items } = await this.svc.list({ pageSize: 10000 });
-    const head = ['assetTag','name','serialNumber','status','category','location','department','vendor','purchaseDate','purchaseCost','warrantyEnd','notes'];
+    const head = ['assetTag','name','serialNumber','model','status','category','location','department','vendor','purchaseDate','purchaseCost','warrantyEnd','notes'];
     const rows = items.map((a: any) => [
-      a.assetTag, a.name, a.serialNumber || '', a.status,
+      a.assetTag, a.name, a.serialNumber || '', a.model || '', a.status,
       a.category?.name || '', a.location?.name || '', a.department?.name || '', a.vendor?.name || '',
       a.purchaseDate ? a.purchaseDate.toISOString().slice(0, 10) : '',
       a.purchaseCost ?? '',
@@ -240,6 +240,7 @@ export class AssetsController {
           name: r.name,
           assetTag: r.assetTag || undefined,
           serialNumber: r.serialNumber || null,
+          model: r.model || null,
           status: r.status || 'IN_STOCK',
           categoryId: cat.id,
           locationId: loc?.id || null,

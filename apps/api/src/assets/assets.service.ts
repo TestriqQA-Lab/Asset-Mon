@@ -142,6 +142,7 @@ export class AssetsService {
         assetTag,
         name: data.name,
         serialNumber: data.serialNumber || null,
+        model: data.model || null,
         status: data.status || 'IN_STOCK',
         categoryId: data.categoryId,
         locationId: data.locationId || null,

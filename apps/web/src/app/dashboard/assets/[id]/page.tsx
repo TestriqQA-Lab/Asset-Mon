@@ -73,7 +73,7 @@ export default function AssetDetailPage() {
   const startEdit = () => {
     setEditing(true);
     setDraft({
-      name: a.name, assetTag: a.assetTag, serialNumber: a.serialNumber || '',
+      name: a.name, assetTag: a.assetTag, serialNumber: a.serialNumber || '', model: a.model || '',
       status: a.status, notes: a.notes || '',
       categoryId: a.categoryId, locationId: a.locationId || '', departmentId: a.departmentId || '', vendorId: a.vendorId || '',
       parentId: a.parentId || '',
@@ -174,6 +174,10 @@ export default function AssetDetailPage() {
           <Row label="Serial #">
             {!editing ? (a.serialNumber || '—') :
               <input className={inputClass} value={draft.serialNumber} onChange={(e) => setDraft({ ...draft, serialNumber: e.target.value })} />}
+          </Row>
+          <Row label="Model">
+            {!editing ? (a.model || '—') :
+              <input className={inputClass} value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} />}
           </Row>
           <Row label="Location">
             {!editing ? (a.location?.name || '—') :

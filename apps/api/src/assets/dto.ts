@@ -9,6 +9,7 @@ export class CreateAssetDto {
   @IsString() @IsUUID() categoryId: string;
   @IsOptional() @IsString() @MaxLength(64) assetTag?: string;
   @IsOptional() @IsString() @MaxLength(128) serialNumber?: string;
+  @IsOptional() @IsString() @MaxLength(128) model?: string;
   @IsOptional() @IsEnum(STATUSES) status?: typeof STATUSES[number];
   @IsOptional() @IsUUID() locationId?: string | null;
   @IsOptional() @IsUUID() departmentId?: string | null;
@@ -35,6 +36,7 @@ export class UpdateAssetDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(200) name?: string;
   @IsOptional() @IsString() @MaxLength(64) assetTag?: string;
   @IsOptional() @IsString() @MaxLength(128) serialNumber?: string | null;
+  @IsOptional() @IsString() @MaxLength(128) model?: string | null;
   @IsOptional() @IsEnum(STATUSES) status?: typeof STATUSES[number];
   @ValidateIf((_, v) => v != null && v !== '') @IsUUID() locationId?: string | null;
   @ValidateIf((_, v) => v != null && v !== '') @IsUUID() departmentId?: string | null;

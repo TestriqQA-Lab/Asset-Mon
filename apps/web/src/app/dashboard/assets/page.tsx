@@ -60,7 +60,7 @@ export default function AssetsPage() {
     setSelected((s) => s.size === ids.length ? new Set() : new Set(ids));
   };
   const [form, setForm] = useState<any>({
-    name: '', assetTag: '', serialNumber: '', categoryId: '', locationId: '', departmentId: '', vendorId: '',
+    name: '', assetTag: '', serialNumber: '', model: '', categoryId: '', locationId: '', departmentId: '', vendorId: '',
     purchaseDate: '', purchaseCost: '', warrantyEnd: '', notes: '', customFields: {}, parentId: '',
   });
   const selectedCat = categories.data?.find((c: any) => c.id === form.categoryId);
@@ -86,7 +86,7 @@ export default function AssetsPage() {
       ['locationId', 'departmentId', 'vendorId', 'parentId'].forEach((k) => { if (!body[k]) body[k] = null; });
       // Strip optional empty strings — class-validator @IsOptional only skips undefined/null,
       // so '' falls through to @IsISO8601 / @IsNumber and fails with a confusing 400.
-      ['purchaseDate', 'warrantyEnd', 'depreciationStart', 'serialNumber', 'notes'].forEach((k) => {
+      ['purchaseDate', 'warrantyEnd', 'depreciationStart', 'serialNumber', 'model', 'notes'].forEach((k) => {
         if (body[k] === '' || body[k] === undefined) delete body[k];
       });
       ['purchaseCost', 'salvageValue', 'usefulLifeMonths'].forEach((k) => {
@@ -270,6 +270,7 @@ export default function AssetsPage() {
                       <TD className="font-medium text-ink-900">
                         {a.parent && <span className="mr-1 text-ink-400">↳</span>}
                         {a.name}
+                        {a.model && <div className="text-[11px] font-normal text-ink-400">{a.model}</div>}
                       </TD>
                       <TD className="text-ink-600">{a.category?.name}</TD>
                       <TD><AssetStatusPill s={a.status} def={a.statusDef} /></TD>
@@ -303,6 +304,7 @@ export default function AssetsPage() {
                             {a.parent && <span className="mr-1 text-ink-400">↳</span>}
                             {a.name}
                           </div>
+                          {a.model && <div className="truncate text-[11px] text-ink-400">{a.model}</div>}
                         </div>
                         <AssetStatusPill s={a.status} def={a.statusDef} />
                       </div>
@@ -338,6 +340,7 @@ export default function AssetsPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Asset tag" hint="leave blank for auto"><input className={inputClass} value={form.assetTag} onChange={(e) => setForm({ ...form, assetTag: e.target.value })} /></Field>
             <Field label="Serial number"><input className={inputClass} value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} /></Field>
+            <Field label="Model" hint="e.g. MacBook Pro 14 (2023)"><input className={inputClass} value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></Field>
           </div>
           <Field label="Category">
             <select className={selectClass} value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value, customFields: {} })}>
