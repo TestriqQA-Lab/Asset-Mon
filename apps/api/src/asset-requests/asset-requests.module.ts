@@ -14,6 +14,7 @@ import { AssetsModule } from '../assets/assets.module';
 import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
 import { RequireNav } from '../tenant-settings/require-nav.decorator';
 import { NotificationsService } from '../notifications/notifications.module';
+import { writeAuditEntry } from '../common/audit-hash';
 
 const URGENCIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
 const STATUSES = ['PENDING', 'APPROVED', 'DECLINED', 'FULFILLED', 'CANCELLED'] as const;
@@ -192,34 +193,44 @@ class AssetRequestsService {
       categoryId = data.categoryId || null;
     }
 
-    const number = await this.nextNumber();
     // Round-robin: assign to the ASSET_MANAGER with the fewest open (PENDING) requests.
     const assignedToId = await this.pickManager();
 
-    const request = await db.assetRequest.create({
-      data: {
-        number,
-        mode: mode as any,
-        title,
-        categoryId,
-        reason: data.reason || null,
-        urgency: (data.urgency as any) || 'NORMAL',
-        status: 'PENDING',
-        neededBy,
-        isTemporary,
-        returnBy,
-        requestedById,
-        assignedToId,
-        ...(assetIds.length > 0
-          ? { items: { create: assetIds.map((assetId) => ({ assetId })) } }
-          : {}),
-      },
-      include: {
-        requestedBy: { select: { id: true, firstName: true, lastName: true } },
-        category: { select: { id: true, name: true } },
-        items: { select: { id: true, assetId: true, status: true } },
-      },
-    });
+    // AR-number is count()+1; on the (rare) unique clash from two concurrent creates,
+    // recompute and retry rather than surfacing a 500 to one of them.
+    let request: any;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        request = await db.assetRequest.create({
+          data: {
+            number: await this.nextNumber(),
+            mode: mode as any,
+            title,
+            categoryId,
+            reason: data.reason || null,
+            urgency: (data.urgency as any) || 'NORMAL',
+            status: 'PENDING',
+            neededBy,
+            isTemporary,
+            returnBy,
+            requestedById,
+            assignedToId,
+            ...(assetIds.length > 0
+              ? { items: { create: assetIds.map((assetId) => ({ assetId })) } }
+              : {}),
+          },
+          include: {
+            requestedBy: { select: { id: true, firstName: true, lastName: true } },
+            category: { select: { id: true, name: true } },
+            items: { select: { id: true, assetId: true, status: true } },
+          },
+        });
+        break;
+      } catch (e: any) {
+        if (e?.code === 'P2002' && attempt < 5) continue; // number collision → recompute + retry
+        throw e;
+      }
+    }
 
     // Notify the assigned manager (or all admins as fallback).
     if (assignedToId) {
@@ -260,12 +271,13 @@ class AssetRequestsService {
     const guard = await db.assetRequest.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'CANCELLED' } });
     if (guard.count === 0) throw new BadRequestException('Request is no longer pending.');
     const updated = await db.assetRequest.findUnique({ where: { id } });
+    await this.audit('asset_request.cancel', userId, { requestId: id, number: r.number });
 
     // Notify the assigned manager that it was cancelled.
     if (r.assignedToId) {
       this.notifications.push({
         userId: r.assignedToId,
-        kind: 'system',
+        kind: 'asset_request.cancelled',
         title: `Asset request ${r.number} cancelled`,
         body: 'The employee cancelled their request.',
         href: `/dashboard/asset-requests/${r.id}`,
@@ -302,6 +314,7 @@ class AssetRequestsService {
       body: r.title,
       href: `/dashboard/asset-requests/${r.id}`,
     }).catch(() => {});
+    await this.audit('asset_request.reassign', performerId, { requestId: id, number: r.number, to: newAssigneeId });
 
     return updated;
   }
@@ -345,6 +358,7 @@ class AssetRequestsService {
       body: `Asset ${asset.assetTag} (${asset.name}) has been allocated.`,
       href: `/dashboard/asset-requests/${r.id}`,
     }).catch(() => {});
+    await this.audit('asset_request.approve', reviewerId, { requestId: id, number: r.number, mode: 'CATEGORY', assetId: fulfilledAssetId });
 
     return updated;
   }
@@ -376,6 +390,7 @@ class AssetRequestsService {
       body: reason,
       href: `/dashboard/asset-requests/${r.id}`,
     }).catch(() => {});
+    await this.audit('asset_request.decline', reviewerId, { requestId: id, number: r.number, reason });
 
     return updated;
   }
@@ -408,6 +423,7 @@ class AssetRequestsService {
         href: `/dashboard/asset-requests/${r.id}`,
       }).catch(() => {});
     }
+    await this.audit('asset_request.escalate', performerId, { requestId: id, number: r.number });
 
     return updated;
   }
@@ -444,6 +460,7 @@ class AssetRequestsService {
       body: 'Your asset is ready — check your assignments.',
       href: `/dashboard/asset-requests/${r.id}`,
     }).catch(() => {});
+    await this.audit('asset_request.fulfil', performerId, { requestId: id, number: r.number, mode: 'CATEGORY', assetId: r.fulfilledAssetId });
 
     return updated;
   }
@@ -481,6 +498,7 @@ class AssetRequestsService {
       body: `${approvableIds.length} device${approvableIds.length === 1 ? '' : 's'} approved — ready to be handed over.`,
       href: `/dashboard/asset-requests/${r.id}`,
     }).catch(() => {});
+    await this.audit('asset_request.approve', reviewerId, { requestId: r.id, number: r.number, mode: 'SPECIFIC', approved: approvableIds.length });
 
     return db.assetRequest.findUnique({ where: { id: r.id } });
   }
@@ -534,6 +552,7 @@ class AssetRequestsService {
     }).catch(() => {});
 
     const updated = await db.assetRequest.findUnique({ where: { id: r.id } });
+    await this.audit('asset_request.fulfil', performerId, { requestId: r.id, number: r.number, mode: 'SPECIFIC', handed, total, skipped: skipped.length });
     return { ...updated, handed, total, skipped };
   }
 
@@ -552,6 +571,7 @@ class AssetRequestsService {
       body: note,
       href: `/dashboard/asset-requests/${r.id}`,
     }).catch(() => {});
+    await this.audit('asset_request.note', performerId, { requestId: id, number: r.number });
 
     return db.assetRequest.findUnique({ where: { id } });
   }
@@ -590,6 +610,7 @@ class AssetRequestsService {
           : { status: 'DECLINED', declineReason: 'All requested devices were declined' },
       });
     }
+    await this.audit('asset_request.decline_item', performerId, { requestId: id, itemId });
 
     return db.assetRequestItem.findUnique({ where: { id: itemId } });
   }
@@ -635,6 +656,17 @@ class AssetRequestsService {
   private async nextNumber(): Promise<string> {
     const count = await this.ctx.prisma().assetRequest.count();
     return `AR-${String(count + 1).padStart(5, '0')}`;
+  }
+
+  // One tamper-evident audit entry per request decision (best-effort — an audit
+  // failure never blocks the action). Mirrors the users/assets audit pattern.
+  private async audit(action: string, performedById: string, detail: any) {
+    await writeAuditEntry(this.ctx.prisma(), {
+      action,
+      performedById,
+      detail,
+      impersonatedBy: this.ctx.impersonatedBy ?? null,
+    }).catch(() => {});
   }
 
   // ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ const ALLOWED_KINDS = new Set([
   'asset.checked_out', 'asset.checked_in', 'system',
   // Phase 2 RBAC: asset requests + purchase request routing
   'asset_request.created', 'asset_request.escalated',
-  'asset_request.approved', 'asset_request.declined', 'asset_request.fulfilled', 'asset_request.note',
+  'asset_request.approved', 'asset_request.declined', 'asset_request.fulfilled', 'asset_request.note', 'asset_request.cancelled',
   'purchase_request.submitted', 'purchase_request.approved', 'purchase_request.rejected',
 ]);
 
