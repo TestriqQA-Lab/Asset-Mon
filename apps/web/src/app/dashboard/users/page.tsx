@@ -45,6 +45,13 @@ export default function UsersPage() {
   const [offboardTargetUserId, setOffboardTargetUserId] = useState('');
   const closeOffboard = () => { setOffboardTarget(null); setOffboardPassword(''); setOffboardDeactivate(true); setOffboardTargetUserId(''); };
   const openOffboard = (u: any) => { setOffboardTarget(u); setOffboardPassword(''); setOffboardDeactivate(true); setOffboardTargetUserId(''); };
+
+  // ── Phase 4: change role (Employee ⇄ Asset-Manager) — ADMIN only ──
+  const [roleTarget, setRoleTarget] = useState<any>(null);
+  const [roleTo, setRoleTo] = useState<'EMPLOYEE' | 'ASSET_MANAGER'>('EMPLOYEE');
+  const [reassignToId, setReassignToId] = useState('');
+  const closeRole = () => { setRoleTarget(null); setReassignToId(''); };
+  const openRole = (u: any) => { setRoleTarget(u); setRoleTo(u.role === 'ASSET_MANAGER' ? 'EMPLOYEE' : 'ASSET_MANAGER'); setReassignToId(''); };
   const offboardPreview = useQuery({
     queryKey: ['offboard-preview', offboardTarget?.id],
     queryFn: () => api<any>(`/users/${offboardTarget.id}/offboarding-preview`),
@@ -73,6 +80,30 @@ export default function UsersPage() {
     },
   });
   const canOffboard = (u: any) => isAdmin && u.active && u.id !== myId;
+
+  const rolePreview = useQuery({
+    queryKey: ['role-change-preview', roleTarget?.id, roleTo],
+    queryFn: () => api<any>(`/users/${roleTarget.id}/role-change-preview?to=${roleTo}`),
+    enabled: !!roleTarget,
+  });
+  const changeRole = useMutation({
+    mutationFn: () => api<any>(`/users/${roleTarget.id}/change-role`, {
+      method: 'POST',
+      body: JSON.stringify({ role: roleTo, reassignToId: reassignToId || undefined }),
+    }),
+    onSuccess: (res: any) => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      const moved: string[] = [];
+      if (res.movedRequests) moved.push(`${res.movedRequests} request${res.movedRequests === 1 ? '' : 's'}`);
+      if (res.movedTickets) moved.push(`${res.movedTickets} ticket${res.movedTickets === 1 ? '' : 's'}`);
+      const dir = res.to === 'ASSET_MANAGER' ? 'is now an Asset-Manager' : 'is now an Employee';
+      let msg = `${roleTarget.firstName} ${roleTarget.lastName} ${dir}.`;
+      if (moved.length) msg += ` ${moved.join(' and ')} reassigned.`;
+      toast.success(msg);
+      closeRole();
+    },
+  });
+  const canChangeRole = (u: any) => isAdmin && u.role !== 'ADMIN' && u.id !== myId;
 
   const save = useMutation({
     mutationFn: () => {
@@ -134,6 +165,7 @@ export default function UsersPage() {
               <td className="px-4 py-2 text-right whitespace-nowrap">
                 {canReset(u) && <button className={btnSecondary + ' mr-2'} onClick={() => { setResetTarget(u); setResetPassword(''); }}>Reset verification</button>}
                 {isAdmin && <button className={btnSecondary + ' mr-2'} onClick={() => editUser(u)}>Edit</button>}
+                {canChangeRole(u) && <button className={btnSecondary + ' mr-2'} onClick={() => openRole(u)}>Change role</button>}
                 {canOffboard(u) && <button className={btnSecondary + ' mr-2'} onClick={() => openOffboard(u)}>Offboard</button>}
                 {isAdmin && <button className={btnDanger} onClick={() => confirm('Delete user?') && del.mutate(u.id)}>Delete</button>}
                 {!isAdmin && <span className="text-xs text-gray-400">Read-only</span>}
@@ -163,6 +195,7 @@ export default function UsersPage() {
               <div className="mt-2 flex flex-wrap gap-2">
                 {canReset(u) && <button className={btnSecondary} onClick={() => { setResetTarget(u); setResetPassword(''); }}>Reset verification</button>}
                 {isAdmin && <button className={btnSecondary} onClick={() => editUser(u)}>Edit</button>}
+                {canChangeRole(u) && <button className={btnSecondary} onClick={() => openRole(u)}>Change role</button>}
                 {canOffboard(u) && <button className={btnSecondary} onClick={() => openOffboard(u)}>Offboard</button>}
                 {isAdmin && <button className={btnDanger} onClick={() => confirm('Delete user?') && del.mutate(u.id)}>Delete</button>}
                 {!isAdmin && <span className="text-xs text-gray-400">Read-only</span>}
@@ -347,6 +380,73 @@ export default function UsersPage() {
               {/password/i.test((offboard.error as Error).message) ? 'Incorrect password.' : (offboard.error as Error).message}
             </p>
           )}
+        </div>
+      </Modal>
+
+      {/* Change role — Employee <-> Asset-Manager (Phase 4, admin only) */}
+      <Modal
+        open={!!roleTarget}
+        onClose={closeRole}
+        title="Change role"
+        footer={
+          <>
+            <button className={btnSecondary} onClick={closeRole}>Cancel</button>
+            <button
+              className={btnPrimary}
+              disabled={changeRole.isPending || rolePreview.isLoading || roleTo === roleTarget?.role}
+              onClick={() => changeRole.mutate()}
+            >
+              {changeRole.isPending ? 'Saving…' : `Switch to ${roleTo === 'ASSET_MANAGER' ? 'Asset-Manager' : 'Employee'}`}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p className="text-ink-700">
+            <b>{roleTarget?.firstName} {roleTarget?.lastName}</b> is currently{' '}
+            <b>{roleTarget?.role === 'ASSET_MANAGER' ? 'an Asset-Manager' : 'an Employee'}</b>. Switch them to:
+          </p>
+          <div className="flex gap-1 rounded-lg bg-ink-100 p-1">
+            <button
+              type="button"
+              className={`flex-1 rounded-md px-3 py-1.5 font-medium transition-colors ${roleTo === 'EMPLOYEE' ? 'bg-white text-ink-900 shadow-sm' : 'text-ink-600 hover:bg-ink-200'}`}
+              onClick={() => setRoleTo('EMPLOYEE')}
+            >
+              Employee
+            </button>
+            <button
+              type="button"
+              className={`flex-1 rounded-md px-3 py-1.5 font-medium transition-colors ${roleTo === 'ASSET_MANAGER' ? 'bg-white text-ink-900 shadow-sm' : 'text-ink-600 hover:bg-ink-200'}`}
+              onClick={() => setRoleTo('ASSET_MANAGER')}
+            >
+              Asset-Manager
+            </button>
+          </div>
+          <p className="rounded-md bg-ink-50 px-3 py-2 text-xs text-ink-600">
+            They&apos;ll be signed out and asked to sign in again. An Asset-Manager gets the Asset-Requests hub and can approve requests; an Employee does not.
+          </p>
+
+          {rolePreview.isLoading && <p className="text-ink-500">Checking what they&apos;re handling…</p>}
+          {rolePreview.data?.isDemotion && !rolePreview.isLoading && (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <OffboardCount label="open requests" n={rolePreview.data.counts.requests} />
+                <OffboardCount label="open tickets" n={rolePreview.data.counts.tickets} />
+              </div>
+              {(rolePreview.data.counts.requests + rolePreview.data.counts.tickets) > 0 && (
+                <Field label="Hand their open work to" hint="Auto goes to the Asset-Manager with the fewest open items — or, if there's no other manager, back to the unassigned queue. Or pick someone specific.">
+                  <select className={inputClass} value={reassignToId} onChange={(e) => setReassignToId(e.target.value)}>
+                    <option value="">— Auto: the manager with the fewest open items —</option>
+                    {(rolePreview.data.eligibleManagers || []).map((m: any) => (
+                      <option key={m.id} value={m.id}>{m.firstName} {m.lastName} · {m.role === 'ADMIN' ? 'Admin' : 'Asset-Manager'}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+            </>
+          )}
+          {roleTo === roleTarget?.role && <p className="text-xs text-ink-400">They already have this role.</p>}
+          {changeRole.error && <p className="text-red-600">{(changeRole.error as Error).message}</p>}
         </div>
       </Modal>
     </div>
