@@ -120,18 +120,20 @@ export default function AssetsPage() {
     setFilter({ ...EMPTY_FILTER, ...(v.filters || {}) });
   };
 
+  const isManager = getSession()?.user?.role !== 'EMPLOYEE';
+
   return (
     <div className="space-y-5">
       <SectionHeader
         title="Assets"
         subtitle={list.data?.total != null ? `${list.data.total} assets total` : 'All hardware, peripherals and equipment'}
-        action={
+        action={isManager ? (
           <>
             <ImportCsvButton onDone={() => qc.invalidateQueries({ queryKey: ['assets'] })} />
             <ExportCsvButton />
             <Button icon={<Plus className="h-4 w-4" />} onClick={() => setOpen(true)}>New asset</Button>
           </>
-        }
+        ) : undefined}
       />
 
       {/* Saved Views row */}
@@ -201,11 +203,11 @@ export default function AssetsPage() {
             icon={<Plus className="h-4 w-4" />}
             title="No assets match"
             description="Try clearing the filters, or add your first asset."
-            action={<Button onClick={() => setOpen(true)} icon={<Plus className="h-4 w-4" />}>New asset</Button>}
+            action={isManager ? <Button onClick={() => setOpen(true)} icon={<Plus className="h-4 w-4" />}>New asset</Button> : undefined}
           />
         ) : (
           <>
-            {selected.size > 0 && (
+            {isManager && selected.size > 0 && (
               <div className="flex items-center justify-between border-b border-ink-100 bg-brand-50/40 px-3 py-2 text-sm">
                 <span className="text-brand-800">{selected.size} selected</span>
                 <div className="flex flex-wrap gap-2">
@@ -235,6 +237,7 @@ export default function AssetsPage() {
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
                 <THead>
+                  {isManager && (
                   <TH className="w-8">
                     <input
                       type="checkbox"
@@ -243,12 +246,13 @@ export default function AssetsPage() {
                       onChange={toggleAll}
                     />
                   </TH>
+                  )}
                   <TH>Tag</TH>
                   <TH>Name</TH>
                   <TH>Category</TH>
                   <TH>Status</TH>
                   <TH>Assigned to</TH>
-                  <TH>Location</TH>
+                  {isManager && <TH>Location</TH>}
                   <TH className="text-right pr-4">Sub</TH>
                 </THead>
                 <TBody>
@@ -258,6 +262,7 @@ export default function AssetsPage() {
                       className={selected.has(a.id) ? 'bg-brand-50/40' : ''}
                       onClick={() => router.push(`/dashboard/assets/${a.id}`)}
                     >
+                      {isManager && (
                       <TD onClick={(e: any) => e.stopPropagation()}>
                         <input
                           type="checkbox"
@@ -266,6 +271,7 @@ export default function AssetsPage() {
                           onChange={() => toggle(a.id)}
                         />
                       </TD>
+                      )}
                       <TD className="font-mono text-xs text-ink-500">{a.assetTag}</TD>
                       <TD className="font-medium text-ink-900">
                         {a.parent && <span className="mr-1 text-ink-400">↳</span>}
@@ -277,7 +283,7 @@ export default function AssetsPage() {
                       <TD className="text-ink-600">
                         {a.assignments?.[0]?.user ? `${a.assignments[0].user.firstName} ${a.assignments[0].user.lastName}` : '—'}
                       </TD>
-                      <TD className="text-ink-600">{a.location?.name || '—'}</TD>
+                      {isManager && <TD className="text-ink-600">{a.location?.name || '—'}</TD>}
                       <TD className="text-right pr-4 text-xs text-ink-500">
                         {a._count?.children ? `${a._count.children} child${a._count.children === 1 ? '' : 'ren'}` : ''}
                       </TD>
@@ -310,7 +316,7 @@ export default function AssetsPage() {
                       </div>
                       <MobileCardRow label="Category" value={a.category?.name || '—'} />
                       <MobileCardRow label="Assigned" value={assignee ? `${assignee.firstName} ${assignee.lastName}` : '—'} />
-                      <MobileCardRow label="Location" value={a.location?.name || '—'} />
+                      {isManager && <MobileCardRow label="Location" value={a.location?.name || '—'} />}
                       {a._count?.children ? (
                         <MobileCardRow label="Sub-assets" value={`${a._count.children}`} />
                       ) : null}

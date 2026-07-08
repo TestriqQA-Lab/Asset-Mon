@@ -73,10 +73,13 @@ export class AssetsService {
       }),
       db.asset.count({ where }),
     ]);
+    if (this.ctx.role === 'EMPLOYEE') {
+      return { items: items.map((a: any) => this.toEmployeeAssetView(a)), total, page, pageSize };
+    }
     return { items, total, page, pageSize };
   }
 
-  async get(id: string) {
+  async get(id: string): Promise<any> {
     const db = this.ctx.prisma();
     const a = await db.asset.findUnique({
       where: { id },
@@ -102,12 +105,36 @@ export class AssetsService {
     // Enforce scope on direct gets too.
     const scope = await this.scopedDepartmentId();
     if (scope && a.departmentId !== scope) throw new NotFoundException('Asset not found');
-    // EMPLOYEE-self enforcement: only the assignee sees the detail view.
-    if (this.ctx.role === 'EMPLOYEE' && !scope && this.ctx.userId) {
-      const ownsIt = (a as any).assignments?.some((as: any) => as.userId === this.ctx.userId && !as.returnedAt);
-      if (!ownsIt) throw new NotFoundException('Asset not found');
+    // EMPLOYEE may open ANY asset (Decision A) but sees a LIMITED view — no
+    // financials / notes / vendor / location / other users' PII. (A department-
+    // scoped employee is still limited to their dept by the check above.)
+    if (this.ctx.role === 'EMPLOYEE') {
+      return this.toEmployeeAssetView(a);
     }
     return a;
+  }
+
+  // The limited asset shape an EMPLOYEE receives (Decision A, 2026-07-08): identity
+  // + tracking only — tag / name / model / serial / status / category / current
+  // holder's NAME + since. No cost / purchase / warranty / depreciation / notes /
+  // custom fields / vendor / location, and never the holder's email/id.
+  private toEmployeeAssetView(a: any) {
+    const open = (a.assignments || []).find((x: any) => !x.returnedAt) || null;
+    return {
+      id: a.id,
+      assetTag: a.assetTag,
+      name: a.name,
+      model: a.model ?? null,
+      serialNumber: a.serialNumber ?? null,
+      status: a.status,
+      statusDef: a.statusDef ?? null,
+      categoryId: a.categoryId,
+      category: a.category ? { id: a.category.id, name: a.category.name } : null,
+      assignments: open ? [{ checkedOutAt: open.checkedOutAt, user: open.user ? { firstName: open.user.firstName, lastName: open.user.lastName } : null }] : [],
+      _count: a._count ? { children: a._count.children ?? 0 } : undefined,
+      createdAt: a.createdAt,
+      updatedAt: a.updatedAt,
+    };
   }
 
   /** Returns the caller's scopedDepartmentId, or null if unscoped (admin/ops). */

@@ -69,6 +69,38 @@ export default function AssetDetailPage() {
 
   const a = asset.data;
   const open = (a.assignments || []).find((x: any) => !x.returnedAt);
+  const isEmployee = getSession()?.user?.role === 'EMPLOYEE';
+
+  // Employees get a read-only, limited view (Decision A): identity + who holds it.
+  if (isEmployee) {
+    return (
+      <div className="space-y-6">
+        <a href="/dashboard/assets" className="inline-flex items-center gap-1 text-sm text-brand-600 hover:underline">← Assets</a>
+        <div className="min-w-0">
+          <div className="font-mono text-xs text-gray-500">{a.assetTag}</div>
+          <h1 className="truncate text-xl font-semibold sm:text-2xl">{a.name}</h1>
+          {a.model && <div className="text-sm text-ink-500">{a.model}</div>}
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2 lg:gap-6">
+          <div className="space-y-3 rounded-lg border bg-white p-4 sm:p-5">
+            <Row label="Status"><StatusBadge s={a.status} def={a.statusDef} /></Row>
+            <Row label="Category">{a.category?.name || '—'}</Row>
+            <Row label="Model">{a.model || '—'}</Row>
+            <Row label="Serial #">{a.serialNumber || '—'}</Row>
+          </div>
+          <div className="rounded-lg border bg-white p-4 sm:p-5">
+            <div className="mb-2 text-sm font-medium">Assignment</div>
+            {open ? (
+              <>
+                <p className="text-sm">Assigned to <b>{open.user.firstName} {open.user.lastName}</b></p>
+                <p className="text-xs text-gray-500">since {new Date(open.checkedOutAt).toLocaleString()}</p>
+              </>
+            ) : <p className="text-sm text-gray-500">Not currently assigned.</p>}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const startEdit = () => {
     setEditing(true);
