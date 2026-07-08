@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -8,6 +8,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { UsersService } from './users.service';
 
 const ROLES = ['ADMIN', 'ASSET_MANAGER', 'EMPLOYEE'] as const;
+const SWITCHABLE_ROLES = ['ASSET_MANAGER', 'EMPLOYEE'] as const;
 
 class CreateUserDto {
   @IsEmail() email: string;
@@ -40,6 +41,12 @@ class OffboardUserDto {
   @IsOptional() @IsString() password?: string;
   @IsOptional() @IsString() targetUserId?: string;
 }
+class ChangeRoleDto {
+  // Phase 4: Employee <-> Asset-Manager only (never ADMIN). reassignToId (optional)
+  // is who takes a demoted manager's open work; omit to auto round-robin / unassign.
+  @IsEnum(SWITCHABLE_ROLES) role: typeof SWITCHABLE_ROLES[number];
+  @IsOptional() @IsString() reassignToId?: string;
+}
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -67,6 +74,19 @@ export class UsersController {
   @Roles('ADMIN')
   update(@Param('id') id: string, @Body() dto: UpdateUserDto, @CurrentUser() actor: any) {
     return this.svc.update(id, dto, { id: actor.sub, role: actor.role });
+  }
+
+  // Phase 4: dedicated ADMIN-only Employee <-> Asset-Manager switch.
+  @Get(':id/role-change-preview')
+  @Roles('ADMIN')
+  roleChangePreview(@Param('id') id: string, @Query('to') to: string, @CurrentUser() actor: any) {
+    return this.svc.getRoleChangePreview(id, to, { id: actor.sub, role: actor.role });
+  }
+
+  @Post(':id/change-role')
+  @Roles('ADMIN')
+  changeRole(@Param('id') id: string, @Body() dto: ChangeRoleDto, @CurrentUser() actor: any) {
+    return this.svc.changeRole(id, dto, { id: actor.sub, role: actor.role });
   }
 
   // Company-admin recovery: clear a user's MFA so they can re-enroll after

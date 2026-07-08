@@ -5,6 +5,7 @@ import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { BillingService } from '../billing/billing.module';
 import { writeAuditEntry } from '../common/audit-hash';
 import { clearTenantMfaUserData } from '../auth/tenant-mfa-clear';
+import { NotificationsService } from '../notifications/notifications.module';
 
 type Actor = { id: string; role: string };
 
@@ -14,6 +15,7 @@ export class UsersService {
     private readonly ctx: TenantContextService,
     private readonly catalog: CatalogPrismaService,
     private readonly billing: BillingService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   list() {
@@ -222,6 +224,174 @@ export class UsersService {
       detail: { userId: id, email: u.email },
       impersonatedBy: this.ctx.impersonatedBy ?? null,
     }).catch(() => {});
+  }
+
+  // ── Phase 4: Employee ⇄ Asset-Manager role switch ─────────────────────────
+  // Dedicated, ADMIN-only path (controller @Roles + this service-level check, so
+  // it holds even if the guard were disabled). NEVER touches ADMIN as source or
+  // target — admin role changes stay in update() with the last-admin guard.
+  // A demotion reassigns the manager's open requests + tickets before the flip so
+  // nothing is orphaned; the flip bumps tokenVersion so the demoted session dies on
+  // its next request (JwtAuthGuard re-checks it) — enforced at the API, not the UI.
+
+  async getRoleChangePreview(id: string, to: string, actor: Actor) {
+    if (actor.role !== 'ADMIN') throw new ForbiddenException('Only an admin can change roles');
+    const db = this.ctx.prisma();
+    const target = await db.user.findUnique({
+      where: { id },
+      select: { id: true, email: true, firstName: true, lastName: true, role: true, active: true },
+    });
+    if (!target) throw new NotFoundException('User not found');
+
+    const [openRequests, openTickets, eligibleManagers] = await Promise.all([
+      db.assetRequest.findMany({
+        where: { assignedToId: id, status: { in: ['PENDING', 'APPROVED'] } },
+        select: { id: true, number: true, title: true, status: true },
+      }),
+      db.serviceTicket.findMany({
+        where: { assignedToId: id, status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING_VENDOR'] } },
+        select: { id: true, ticketNumber: true, title: true, status: true },
+      }),
+      db.user.findMany({
+        where: { active: true, id: { not: id }, role: { in: ['ASSET_MANAGER', 'ADMIN'] } },
+        select: { id: true, firstName: true, lastName: true, email: true, role: true },
+        orderBy: { firstName: 'asc' },
+      }),
+    ]);
+
+    const isDemotion = target.role === 'ASSET_MANAGER' && to === 'EMPLOYEE';
+    return {
+      user: target,
+      to,
+      isDemotion,
+      counts: { requests: openRequests.length, tickets: openTickets.length },
+      openRequests,
+      openTickets,
+      eligibleManagers,
+    };
+  }
+
+  async changeRole(id: string, dto: { role: string; reassignToId?: string }, actor: Actor) {
+    if (actor.role !== 'ADMIN') throw new ForbiddenException('Only an admin can change roles');
+    const role = dto.role;
+    if (role !== 'EMPLOYEE' && role !== 'ASSET_MANAGER') {
+      throw new BadRequestException('This action only switches between Employee and Asset-Manager');
+    }
+    const db = this.ctx.prisma();
+    const target = await db.user.findUnique({ where: { id } });
+    if (!target) throw new NotFoundException('User not found');
+    if (target.role === 'ADMIN') {
+      throw new BadRequestException("Change an admin's role from Edit — this action does not touch admins");
+    }
+    if (target.role === role) {
+      throw new BadRequestException(`User is already ${role === 'ASSET_MANAGER' ? 'an Asset-Manager' : 'an Employee'}`);
+    }
+
+    const demotion = target.role === 'ASSET_MANAGER' && role === 'EMPLOYEE';
+
+    // Resolve the hand-off target for a demotion: the admin's pick, else the active
+    // manager with the fewest open requests, else null (unassign back to the pool).
+    let handoffTargetId: string | null = null;
+    if (demotion) {
+      if (dto.reassignToId) {
+        if (dto.reassignToId === id) throw new BadRequestException('Reassign target must be a different user');
+        const to = await db.user.findUnique({ where: { id: dto.reassignToId }, select: { active: true, role: true } });
+        if (!to || !to.active || !['ASSET_MANAGER', 'ADMIN'].includes(to.role)) {
+          throw new BadRequestException('Reassign target must be an active manager or admin');
+        }
+        handoffTargetId = dto.reassignToId;
+      } else {
+        handoffTargetId = await this.pickFallbackManager(id);
+      }
+    }
+
+    const runTx = () =>
+      db.$transaction(
+        async (tx: any) => {
+          let movedRequests = 0;
+          let movedTickets = 0;
+          if (demotion) {
+            const rr = await tx.assetRequest.updateMany({
+              where: { assignedToId: id, status: { in: ['PENDING', 'APPROVED'] } },
+              data: { assignedToId: handoffTargetId },
+            });
+            movedRequests = rr.count;
+            const tt = await tx.serviceTicket.updateMany({
+              where: { assignedToId: id, status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING_VENDOR'] } },
+              data: { assignedToId: handoffTargetId },
+            });
+            movedTickets = tt.count;
+          }
+          // Flip the role + kill the target's live sessions (JwtAuthGuard's
+          // tokenVersion check). Promotion clears any leftover dept access-scope.
+          await tx.user.update({
+            where: { id },
+            data: {
+              role: role as any,
+              tokenVersion: { increment: 1 },
+              ...(role === 'ASSET_MANAGER' ? { scopedDepartmentId: null } : {}),
+            },
+          });
+          return { movedRequests, movedTickets };
+        },
+        { isolationLevel: 'Serializable' },
+      );
+
+    let counts: { movedRequests: number; movedTickets: number };
+    for (let attempt = 1; ; attempt++) {
+      try { counts = await runTx(); break; }
+      catch (e: any) {
+        const serialization = e?.code === 'P2034' || /serial/i.test(e?.message || '');
+        if (serialization && attempt < 3) continue;
+        throw e;
+      }
+    }
+
+    // Best-effort: tell the hand-off manager that work landed on them.
+    if (demotion && handoffTargetId && counts.movedRequests + counts.movedTickets > 0) {
+      this.notifications.push({
+        userId: handoffTargetId,
+        kind: 'asset_request.created',
+        title: 'Work reassigned to you',
+        body: `${counts.movedRequests} request(s) and ${counts.movedTickets} ticket(s) moved from ${target.firstName} ${target.lastName} (role change).`,
+        href: '/dashboard/asset-requests',
+      }).catch(() => {});
+    }
+
+    await writeAuditEntry(db, {
+      action: 'user.role_change',
+      performedById: actor.id,
+      detail: { userId: id, email: target.email, from: target.role, to: role, reassignToId: handoffTargetId, ...counts },
+      impersonatedBy: this.ctx.impersonatedBy ?? null,
+    }).catch(() => {});
+
+    return { id, from: target.role, to: role, reassignToId: handoffTargetId, ...counts };
+  }
+
+  // Fallback hand-off pick: active ASSET_MANAGER (excluding the leaver) with the
+  // fewest open PENDING requests; null when there is no other manager.
+  private async pickFallbackManager(excludeId: string): Promise<string | null> {
+    const db = this.ctx.prisma();
+    const managers = await db.user.findMany({
+      where: { role: 'ASSET_MANAGER', active: true, id: { not: excludeId } },
+      select: { id: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (managers.length === 0) return null;
+    if (managers.length === 1) return managers[0].id;
+    const counts = await db.assetRequest.groupBy({
+      by: ['assignedToId'],
+      where: { assignedToId: { in: managers.map((m: any) => m.id) }, status: 'PENDING' },
+      _count: { _all: true },
+    });
+    const countMap = new Map(counts.map((c: any) => [c.assignedToId, c._count._all]));
+    let best = managers[0];
+    let bestCount = countMap.get(best.id) || 0;
+    for (let i = 1; i < managers.length; i++) {
+      const c = countMap.get(managers[i].id) || 0;
+      if (c < bestCount) { best = managers[i]; bestCount = c; }
+    }
+    return best.id;
   }
 
   // ── Offboarding (Slice 6a + 6b reassign) ──────────────────────────────────
