@@ -82,7 +82,10 @@ class AssetAttachmentsService {
 class AttachmentsController {
   constructor(private readonly svc: AssetAttachmentsService) {}
 
+  // Manager+ only: attachments carry invoices/receipts/warranty & contract docs plus
+  // uploader emails — exactly the financial/PII data the EMPLOYEE asset view withholds.
   @Get()
+  @Roles('ADMIN', 'ASSET_MANAGER')
   async list(@Param('assetId') assetId: string) {
     if (!UUID_RE.test(assetId)) throw new BadRequestException('Invalid id');
     return this.svc.list(assetId);
@@ -168,8 +171,11 @@ class AttachmentsAdminController {
     return this.svc.remove(id);
   }
 
-  // Auth-protected file fetch — verifies the file belongs to the current tenant.
+  // Auth-protected file fetch — manager+ only (attachments hold invoices/receipts/
+  // contracts the EMPLOYEE asset view deliberately withholds) AND verified to belong
+  // to the current tenant.
   @Get('file/:name')
+  @Roles('ADMIN', 'ASSET_MANAGER')
   async serve(@Param('name') name: string, @Res() res: Response) {
     const safe = path.basename(name);
     if (!/^att-[0-9a-f]{32}\.[a-z0-9]{1,5}$/i.test(safe)) {
