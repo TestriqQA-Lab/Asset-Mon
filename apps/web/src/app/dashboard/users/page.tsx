@@ -71,9 +71,11 @@ export default function UsersPage() {
       if (res.assets) parts.push(`${res.assets} asset${res.assets === 1 ? '' : 's'}`);
       if (res.tickets) parts.push(`${res.tickets} ticket${res.tickets === 1 ? '' : 's'}`);
       if (res.seats) parts.push(`${res.seats} seat${res.seats === 1 ? '' : 's'}`);
+      if (res.requests) parts.push(`${res.requests} request${res.requests === 1 ? '' : 's'}`);
       let msg = parts.length ? `${verb} ${parts.join(', ')}.` : 'Nothing was held.';
       if (res.seatsSkipped) msg += ` ${res.seatsSkipped} seat${res.seatsSkipped === 1 ? '' : 's'} already held (freed).`;
       if (res.reservations) msg += ` ${res.reservations} booking${res.reservations === 1 ? '' : 's'} cancelled.`;
+      if (res.apiKeys) msg += ` ${res.apiKeys} API key${res.apiKeys === 1 ? '' : 's'} revoked.`;
       if (res.deactivated) msg += ' Account deactivated.';
       toast.success(msg);
       closeOffboard();
@@ -345,11 +347,15 @@ export default function UsersPage() {
                 <OffboardCount label={reassigning ? 'tickets → reassigned' : 'tickets → unassigned'} n={offboardPreview.data.counts.tickets} />
                 <OffboardCount label="bookings → cancelled" n={offboardPreview.data.counts.reservations} />
                 <OffboardCount label={reassigning ? 'seats → reassigned' : 'seats → freed'} n={offboardPreview.data.counts.seats} />
+                <OffboardCount label={reassigning ? 'requests → reassigned' : 'requests → handed off'} n={offboardPreview.data.counts.requests} />
+                <OffboardCount label={!isLastAdmin && offboardDeactivate ? 'API keys → revoked' : 'API keys → kept'} n={offboardPreview.data.counts.apiKeys} />
               </div>
               {offboardPreview.data.assets.length > 0 && <OffboardList title="Assets" items={offboardPreview.data.assets.map((a: any) => `${a.asset.assetTag} · ${a.asset.name}`)} />}
               {offboardPreview.data.tickets.length > 0 && <OffboardList title="Tickets" items={offboardPreview.data.tickets.map((t: any) => `${t.ticketNumber} · ${t.title}`)} />}
               {offboardPreview.data.reservations.length > 0 && <OffboardList title="Bookings" items={offboardPreview.data.reservations.map((r: any) => `${r.asset.assetTag} · ${r.asset.name}`)} />}
               {offboardPreview.data.seats.length > 0 && <OffboardList title="Software seats" items={offboardPreview.data.seats.map((s: any) => s.license.software.name)} />}
+              {offboardPreview.data.openRequests?.length > 0 && <OffboardList title="Asset-requests" items={offboardPreview.data.openRequests.map((r: any) => `${r.number} · ${r.title}`)} />}
+              {offboardPreview.data.apiKeys?.length > 0 && <OffboardList title="API keys" items={offboardPreview.data.apiKeys.map((k: any) => `${k.name} (${k.prefix}…)`)} />}
             </>
           )}
 

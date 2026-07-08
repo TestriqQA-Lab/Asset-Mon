@@ -406,7 +406,7 @@ export class UsersService {
     });
     if (!target) throw new NotFoundException('User not found');
 
-    const [assets, tickets, reservations, seats, eligibleTargets] = await Promise.all([
+    const [assets, tickets, reservations, seats, openRequests, apiKeys, eligibleTargets] = await Promise.all([
       db.assignment.findMany({
         where: { userId: id, returnedAt: null },
         select: { id: true, asset: { select: { id: true, assetTag: true, name: true, status: true } } },
@@ -423,6 +423,16 @@ export class UsersService {
         where: { userId: id, returnedAt: null },
         select: { id: true, license: { select: { id: true, software: { select: { name: true } } } } },
       }),
+      // Open asset-requests still assigned to them (a leaving manager's approve/decline queue).
+      db.assetRequest.findMany({
+        where: { assignedToId: id, status: { in: ['PENDING', 'APPROVED'] } },
+        select: { id: true, number: true, title: true, status: true },
+      }),
+      // Live API keys they created — revoked on deactivation (a departed user's key must not survive).
+      db.apiKey.findMany({
+        where: { createdById: id, revokedAt: null },
+        select: { id: true, name: true, prefix: true },
+      }),
       // Active teammates a reassign can hand the holdings to (exclude the leaver).
       db.user.findMany({
         where: { active: true, id: { not: id } },
@@ -438,8 +448,15 @@ export class UsersService {
 
     return {
       user: target,
-      counts: { assets: assets.length, tickets: tickets.length, reservations: reservations.length, seats: seats.length },
-      assets, tickets, reservations, seats,
+      counts: {
+        assets: assets.length,
+        tickets: tickets.length,
+        reservations: reservations.length,
+        seats: seats.length,
+        requests: openRequests.length,
+        apiKeys: apiKeys.length,
+      },
+      assets, tickets, reservations, seats, openRequests, apiKeys,
       eligibleTargets,
       isLastAdmin,
     };
@@ -484,6 +501,20 @@ export class UsersService {
     if (admin && admin.mfaMethod && admin.mfaMethod !== 'NONE') {
       const ok = await bcrypt.compare(dto.password || '', admin.passwordHash);
       if (!ok) throw new UnauthorizedException('Re-enter your password to offboard a user.');
+    }
+
+    // Request hand-off target: asset-requests are only actionable by a manager/admin, so a
+    // leaver's open queue must land on one — the chosen reassign target when they qualify,
+    // else the active manager with the fewest open requests, else unassigned (null).
+    let requestHandoffId: string | null = null;
+    if (mode === 'reassign') {
+      const rt = await db.user.findUnique({ where: { id: targetUserId! }, select: { role: true } });
+      requestHandoffId =
+        rt && (rt.role === 'ASSET_MANAGER' || rt.role === 'ADMIN')
+          ? targetUserId
+          : await this.pickFallbackManager(id);
+    } else {
+      requestHandoffId = await this.pickFallbackManager(id);
     }
 
     const now = new Date();
@@ -546,16 +577,33 @@ export class UsersService {
             seats = s.count;
           }
 
+          // Asset-requests: hand the leaver's open queue to a manager/admin (or unassign).
+          const rq = await tx.assetRequest.updateMany({
+            where: { assignedToId: id, status: { in: ['PENDING', 'APPROVED'] } },
+            data: { assignedToId: requestHandoffId },
+          });
+
+          // API keys: revoke every live key the leaver created — only when we deactivate
+          // them (an active user keeps their integrations). Idempotent (revokedAt was null).
+          let apiKeys = 0;
+          if (deactivate) {
+            const ak = await tx.apiKey.updateMany({
+              where: { createdById: id, revokedAt: null },
+              data: { revokedAt: now },
+            });
+            apiKeys = ak.count;
+          }
+
           // Deactivate + invalidate the leaver's outstanding access tokens.
           if (deactivate) await tx.user.update({ where: { id }, data: { active: false, tokenVersion: { increment: 1 } } });
-          return { assets, tickets: t.count, reservations: r.count, seats, seatsSkipped };
+          return { assets, tickets: t.count, reservations: r.count, seats, seatsSkipped, requests: rq.count, apiKeys };
         },
         { isolationLevel: 'Serializable' },
       );
 
     // Serialization-failure retry (codebase pattern, common/audit-hash.ts): retry the
     // whole transaction on P2034 / Postgres 40001, up to 3 attempts.
-    let counts: { assets: number; tickets: number; reservations: number; seats: number; seatsSkipped: number };
+    let counts: { assets: number; tickets: number; reservations: number; seats: number; seatsSkipped: number; requests: number; apiKeys: number };
     for (let attempt = 1; ; attempt++) {
       try { counts = await runTx(); break; }
       catch (e: any) {
@@ -566,7 +614,7 @@ export class UsersService {
     }
 
     const summary = { mode, targetUserId, deactivated: deactivate, ...counts };
-    const changed = counts.assets + counts.tickets + counts.reservations + counts.seats + counts.seatsSkipped;
+    const changed = counts.assets + counts.tickets + counts.reservations + counts.seats + counts.seatsSkipped + counts.requests + counts.apiKeys;
     // ONE summary audit entry (amendment #5: not one per asset). Skip on a pure no-op.
     if (deactivate || changed > 0) {
       await writeAuditEntry(db, {
