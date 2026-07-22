@@ -25,10 +25,17 @@ class PurchaseRequestsService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  list(filter: { status?: string; requestedById?: string }) {
+  list(filter: { status?: string; requestedById?: string }, viewer: { userId: string; role: string }) {
+    const isManager = ['ADMIN', 'ASSET_MANAGER'].includes(viewer.role);
     const where: any = {};
     if (filter.status) where.status = filter.status;
-    if (filter.requestedById) where.requestedById = filter.requestedById;
+    if (isManager) {
+      // Managers see everything, and may optionally narrow to one requester.
+      if (filter.requestedById) where.requestedById = filter.requestedById;
+    } else {
+      // Employees may only ever see their OWN requests, regardless of the query param.
+      where.requestedById = viewer.userId;
+    }
     return this.ctx.prisma().purchaseRequest.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -41,8 +48,8 @@ class PurchaseRequestsService {
     });
   }
 
-  get(id: string) {
-    return this.ctx.prisma().purchaseRequest.findUnique({
+  async get(id: string, viewer: { userId: string; role: string }) {
+    const pr = await this.ctx.prisma().purchaseRequest.findUnique({
       where: { id },
       include: {
         requestedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
@@ -52,6 +59,13 @@ class PurchaseRequestsService {
         purchaseOrders: { select: { id: true, poNumber: true, status: true } },
       },
     });
+    if (!pr) throw new NotFoundException();
+    const isManager = ['ADMIN', 'ASSET_MANAGER'].includes(viewer.role);
+    if (!isManager && pr.requestedById !== viewer.userId) {
+      // Don't reveal that another user's request exists.
+      throw new NotFoundException();
+    }
+    return pr;
   }
 
   async create(data: any, requestedById: string) {
@@ -211,12 +225,19 @@ class PurchaseRequestsController {
   constructor(private readonly svc: PurchaseRequestsService) {}
 
   @Get()
-  list(@Query('status') status?: string, @Query('requestedById') rid?: string) {
-    return this.svc.list({ status, requestedById: rid });
+  list(
+    @CurrentUser('sub') uid: string,
+    @CurrentUser('role') role: string,
+    @Query('status') status?: string,
+    @Query('requestedById') rid?: string,
+  ) {
+    return this.svc.list({ status, requestedById: rid }, { userId: uid, role });
   }
 
   @Get(':id')
-  get(@Param('id') id: string) { return this.svc.get(id); }
+  get(@Param('id') id: string, @CurrentUser('sub') uid: string, @CurrentUser('role') role: string) {
+    return this.svc.get(id, { userId: uid, role });
+  }
 
   @Post()
   create(@Body() dto: CreatePRDto, @CurrentUser('sub') uid: string) {

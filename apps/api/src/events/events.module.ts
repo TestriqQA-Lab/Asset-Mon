@@ -1,8 +1,45 @@
 import { Global, Injectable, Logger, Module } from '@nestjs/common';
 import * as crypto from 'crypto';
+import * as http from 'http';
+import * as https from 'https';
 import * as nodemailer from 'nodemailer';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { assertSafeOutboundUrl } from '../common/url-safety';
+
+/**
+ * POST to a URL while pinning the TCP connection to a pre-validated IP address.
+ * The custom `lookup` makes Node connect to exactly `address` (no second DNS
+ * resolution), while the Host header and TLS SNI still use the URL's hostname.
+ * Node's http/https do not follow redirects, so a 3xx is surfaced as a non-2xx status.
+ */
+function postToPinnedHost(
+  target: URL,
+  address: string,
+  family: number,
+  init: { headers: Record<string, string>; body: string; timeoutMs: number },
+): Promise<{ status: number }> {
+  return new Promise((resolve, reject) => {
+    const mod = target.protocol === 'https:' ? https : http;
+    const req = mod.request(
+      target,
+      {
+        method: 'POST',
+        headers: { ...init.headers, 'content-length': Buffer.byteLength(init.body).toString() },
+        lookup: (_hostname: string, options: any, cb: any) =>
+          options && options.all ? cb(null, [{ address, family }]) : cb(null, address, family),
+        timeout: init.timeoutMs,
+      },
+      (res) => {
+        res.resume(); // drain & discard the response body
+        res.on('end', () => resolve({ status: res.statusCode || 0 }));
+      },
+    );
+    req.on('timeout', () => req.destroy(new Error('Webhook request timed out')));
+    req.on('error', reject);
+    req.write(init.body);
+    req.end();
+  });
+}
 
 @Injectable()
 export class MailerService {
@@ -88,14 +125,11 @@ export class EventBusService {
     for (let i = 1; i <= 3 && !succeeded; i++) {
       attempts = i;
       try {
-        // Re-validate the URL on every attempt to defeat DNS rebinding (the host could
-        // have resolved to a public IP at create time but now resolves to 127.0.0.1).
-        await assertSafeOutboundUrl(hook.url);
-
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 5000);
-        const res = await fetch(hook.url, {
-          method: 'POST',
+        // Re-validate AND pin the resolved IP on every attempt: we connect to the exact
+        // address we just checked, so a rebind to an internal IP between the check and the
+        // connect (DNS rebinding) cannot happen.
+        const { url, address, family } = await assertSafeOutboundUrl(hook.url);
+        const res = await postToPinnedHost(url, address, family, {
           headers: {
             'content-type': 'application/json',
             'x-assetmon-event': event,
@@ -103,12 +137,10 @@ export class EventBusService {
             'user-agent': 'AssetMon-Webhooks/1.0',
           },
           body,
-          signal: ctrl.signal,
-          redirect: 'error', // do not follow redirects (could redirect to internal hosts)
+          timeoutMs: 5000,
         });
-        clearTimeout(timer);
         status = res.status;
-        if (res.ok) succeeded = true;
+        if (res.status >= 200 && res.status < 300) succeeded = true;
         else lastError = `HTTP ${res.status}`;
       } catch (e: any) {
         lastError = e.message;

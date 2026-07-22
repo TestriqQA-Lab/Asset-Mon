@@ -55,15 +55,21 @@ export type SsrfCheckOptions = {
   allowLoopback?: boolean;
 };
 
+export type SafeOutboundResult = { url: URL; address: string; family: number };
+
 /**
  * Validate that `urlStr` is a safe outbound URL — i.e. the scheme is allowed and the
  * resolved host is NOT a private, loopback, link-local, broadcast or multicast address.
+ *
+ * Returns the parsed URL together with a validated, pinned IP the caller should connect
+ * to directly — so a second DNS resolution at request time cannot rebind the host to an
+ * internal address (TOCTOU / DNS-rebinding).
  *
  * Throws BadRequestException with a generic message on failure (does not leak internal addresses).
  *
  * Set `WEBHOOK_ALLOW_LOOPBACK=1` in env to permit 127.0.0.1 / ::1 for local dev only.
  */
-export async function assertSafeOutboundUrl(urlStr: string, opts: SsrfCheckOptions = {}): Promise<URL> {
+export async function assertSafeOutboundUrl(urlStr: string, opts: SsrfCheckOptions = {}): Promise<SafeOutboundResult> {
   let u: URL;
   try { u = new URL(urlStr); } catch { throw new BadRequestException('Invalid URL'); }
 
@@ -87,14 +93,19 @@ export async function assertSafeOutboundUrl(urlStr: string, opts: SsrfCheckOptio
   let addrs: dns.LookupAddress[];
   try { addrs = await lookup(hostname); } catch { throw new BadRequestException('URL host is not resolvable'); }
 
+  // Validate EVERY resolved address (reject if any is private — defeats dual-stack bypass),
+  // and remember the first acceptable one so the caller can PIN the connection to it.
+  let pinned: dns.LookupAddress | undefined;
   for (const a of addrs) {
     const isPriv = a.family === 6 ? isPrivateIPv6(a.address) : isPrivateIPv4(a.address);
     if (isPriv) {
       const isLoopback = a.family === 6 ? a.address === '::1' : a.address.startsWith('127.');
-      if (isLoopback && allowLoopback) continue;
+      if (isLoopback && allowLoopback) { if (!pinned) pinned = a; continue; }
       throw new BadRequestException('URL host is not reachable');
     }
+    if (!pinned) pinned = a;
   }
+  if (!pinned) throw new BadRequestException('URL host is not resolvable');
 
-  return u;
+  return { url: u, address: pinned.address, family: pinned.family };
 }
