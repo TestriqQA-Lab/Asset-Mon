@@ -2,25 +2,54 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
 export type CustomField = { name: string; type: 'text' | 'number' | 'date' | 'boolean'; required?: boolean };
+export type CategoryType = 'ASSET' | 'ACCESSORY' | 'LICENSE';
+
+type CategoryWrite = {
+  name?: string;
+  description?: string;
+  customFields?: CustomField[];
+  type?: CategoryType;
+  imageUrl?: string | null;
+};
 
 @Injectable()
 export class CategoriesService {
   constructor(private readonly ctx: TenantContextService) {}
 
-  list() {
-    return this.ctx.prisma().category.findMany({ orderBy: { name: 'asc' } });
+  /** List categories with a LIVE count of assets in each (self-updating "quantity"). */
+  async list() {
+    const db = this.ctx.prisma();
+    const [cats, counts] = await Promise.all([
+      db.category.findMany({ orderBy: { name: 'asc' } }),
+      db.asset.groupBy({ by: ['categoryId'], _count: { _all: true } }),
+    ]);
+    const countMap = new Map<string, number>(
+      counts.filter((c: any) => c.categoryId).map((c: any) => [c.categoryId, c._count._all]),
+    );
+    return cats.map((c) => ({ ...c, assetCount: countMap.get(c.id) || 0 }));
   }
+
   get(id: string) {
     return this.ctx.prisma().category.findUnique({ where: { id } });
   }
-  create(data: { name: string; description?: string; customFields?: CustomField[] }) {
+
+  create(data: CategoryWrite & { name: string }) {
     return this.ctx.prisma().category.create({
-      data: { name: data.name, description: data.description, customFields: data.customFields || [] },
+      data: {
+        name: data.name,
+        description: data.description,
+        customFields: data.customFields || [],
+        type: (data.type as any) || 'ASSET',
+        imageUrl: data.imageUrl ?? null,
+      },
     });
   }
-  update(id: string, data: { name?: string; description?: string; customFields?: CustomField[] }) {
+
+  update(id: string, data: CategoryWrite) {
+    // Undefined fields are ignored by Prisma; `imageUrl: null` explicitly clears the image.
     return this.ctx.prisma().category.update({ where: { id }, data: data as any });
   }
+
   async remove(id: string) {
     const db = this.ctx.prisma();
     const [assetCount, prItemCount, poItemCount] = await Promise.all([

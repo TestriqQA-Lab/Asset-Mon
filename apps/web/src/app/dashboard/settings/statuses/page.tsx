@@ -7,14 +7,14 @@ import { api } from '@/lib/api';
 import { Modal } from '@/components/Modal';
 import { Card, SectionHeader, Button, Field, inputClass, selectClass, Pill } from '@/components/ui';
 
-const MAPS_TO = ['IN_STOCK', 'ASSIGNED', 'IN_REPAIR', 'RETIRED', 'LOST'] as const;
+const MAPS_TO = ['PENDING', 'AVAILABLE', 'ASSIGNED', 'OUT_OF_SERVICE', 'OUT_FOR_REPAIR', 'LOST_STOLEN', 'ARCHIVED'] as const;
 const COLORS = ['green', 'blue', 'amber', 'red', 'purple', 'gray', 'brand'] as const;
 
 export default function StatusesSettingsPage() {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ['status-defs'], queryFn: () => api('/asset-status-defs') });
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<any>({ key: '', label: '', color: 'gray', mapsTo: 'IN_STOCK' });
+  const [form, setForm] = useState<any>({ key: '', label: '', color: 'gray', mapsTo: 'AVAILABLE' });
 
   const create = useMutation({
     mutationFn: () => api('/asset-status-defs', { method: 'POST', body: JSON.stringify(form) }),
@@ -38,7 +38,7 @@ export default function StatusesSettingsPage() {
       <SectionHeader
         title="Asset statuses"
         subtitle="Rename or recolor the five built-in statuses, or add your own (e.g. IN_TRANSIT). Custom statuses map back to a system state so reports keep working."
-        action={<Button icon={<Plus className="h-4 w-4" />} onClick={() => { setForm({ key: '', label: '', color: 'gray', mapsTo: 'IN_STOCK' }); setOpen(true); }}>New status</Button>}
+        action={<Button icon={<Plus className="h-4 w-4" />} onClick={() => { setForm({ key: '', label: '', color: 'gray', mapsTo: 'AVAILABLE' }); setOpen(true); }}>New status</Button>}
       />
 
       <Card padded={false}>

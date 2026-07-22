@@ -12,7 +12,7 @@ class DashboardService {
 
   async stats(uid: string, role?: string) {
     const db = this.ctx.prisma();
-    const [total, byStatusRows, byCategoryRows, openAssignments, warrantyExpiringSoon, openTickets, dueMaintenance, licensesExpiringSoon, recentActivity, myOpenTickets, myAssignedAssets] = await Promise.all([
+    const [total, byStatusRows, byCategoryRows, openAssignments, warrantyExpiringSoon, openTickets, dueMaintenance, licensesExpiringSoon, recentActivity, myOpenTickets, myAssignedAssets, totalTickets, totalUsers, totalLicenses] = await Promise.all([
       db.asset.count(),
       db.asset.groupBy({ by: ['status'], _count: { _all: true } }),
       db.asset.groupBy({ by: ['categoryId'], _count: { _all: true } }),
@@ -37,6 +37,9 @@ class DashboardService {
       // (workspace-wide counts above are not "mine").
       db.serviceTicket.count({ where: { status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING_VENDOR'] }, OR: [{ openedById: uid }, { assignedToId: uid }] } }),
       db.assignment.count({ where: { userId: uid, returnedAt: null } }),
+      db.serviceTicket.count(),
+      db.user.count(),
+      db.softwareLicense.count(),
     ]);
 
     const cats = await db.category.findMany({ select: { id: true, name: true } });
@@ -56,6 +59,11 @@ class DashboardService {
       recentActivity: role === 'EMPLOYEE' ? [] : recentActivity,
       myOpenTickets,
       myAssignedAssets,
+      // Workspace-wide aggregate counts are manager+ information; withheld from the
+      // employee payload (their dashboard renders only the "my" tiles above).
+      totalTickets: role === 'EMPLOYEE' ? undefined : totalTickets,
+      totalUsers: role === 'EMPLOYEE' ? undefined : totalUsers,
+      totalLicenses: role === 'EMPLOYEE' ? undefined : totalLicenses,
     };
   }
 

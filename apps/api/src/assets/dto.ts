@@ -1,12 +1,12 @@
 import { IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsISO8601, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
-const STATUSES = ['IN_STOCK', 'ASSIGNED', 'IN_REPAIR', 'RETIRED', 'LOST'] as const;
+const STATUSES = ['PENDING', 'AVAILABLE', 'ASSIGNED', 'OUT_OF_SERVICE', 'OUT_FOR_REPAIR', 'LOST_STOLEN', 'ARCHIVED'] as const;
 const DEP_METHODS = ['NONE', 'STRAIGHT_LINE', 'DECLINING_BALANCE'] as const;
 
 export class CreateAssetDto {
   @IsString() @MinLength(1) @MaxLength(200) name: string;
-  @IsString() @IsUUID() categoryId: string;
+  @IsOptional() @IsString() @IsUUID() categoryId?: string;
   @IsOptional() @IsString() @MaxLength(64) assetTag?: string;
   @IsOptional() @IsString() @MaxLength(128) serialNumber?: string;
   @IsOptional() @IsString() @MaxLength(128) model?: string;
@@ -18,6 +18,8 @@ export class CreateAssetDto {
   @IsOptional() @IsNumber() purchaseCost?: number;
   @IsOptional() @IsISO8601() warrantyEnd?: string;
   @IsOptional() @IsString() @MaxLength(2000) notes?: string;
+  @IsOptional() @IsString() @MaxLength(128) orderNumber?: string;
+  @IsOptional() @IsBoolean() requestable?: boolean;
   @IsOptional() @IsObject() customFields?: Record<string, any>;
   @IsOptional() @IsString() @MaxLength(500) photoUrl?: string;
   @IsOptional() @IsEnum(DEP_METHODS) depreciationMethod?: typeof DEP_METHODS[number];
@@ -38,6 +40,7 @@ export class UpdateAssetDto {
   @IsOptional() @IsString() @MaxLength(128) serialNumber?: string | null;
   @IsOptional() @IsString() @MaxLength(128) model?: string | null;
   @IsOptional() @IsEnum(STATUSES) status?: typeof STATUSES[number];
+  @ValidateIf((_, v) => v != null && v !== '') @IsUUID() categoryId?: string | null;
   @ValidateIf((_, v) => v != null && v !== '') @IsUUID() locationId?: string | null;
   @ValidateIf((_, v) => v != null && v !== '') @IsUUID() departmentId?: string | null;
   @ValidateIf((_, v) => v != null && v !== '') @IsUUID() vendorId?: string | null;
@@ -45,6 +48,8 @@ export class UpdateAssetDto {
   @IsOptional() @IsNumber() purchaseCost?: number | null;
   @ValidateIf((_, v) => v != null && v !== '') @IsISO8601() warrantyEnd?: string | null;
   @IsOptional() @IsString() @MaxLength(2000) notes?: string;
+  @IsOptional() @IsString() @MaxLength(128) orderNumber?: string;
+  @IsOptional() @IsBoolean() requestable?: boolean;
   @IsOptional() @IsObject() customFields?: Record<string, any>;
   @IsOptional() @IsString() @MaxLength(500) photoUrl?: string;
   @IsOptional() @IsEnum(DEP_METHODS) depreciationMethod?: typeof DEP_METHODS[number];

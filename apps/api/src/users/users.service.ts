@@ -526,7 +526,7 @@ export class UsersService {
           let seatsSkipped = 0;
 
           // Assets: close the leaver's open assignments. RELEASE → free each asset to
-          // the pool (if nothing else holds it, not RETIRED/LOST). REASSIGN → create a
+          // the pool (if nothing else holds it, not ARCHIVED/LOST_STOLEN). REASSIGN → create a
           // new assignment to the target (asset stays ASSIGNED); skip if the target
           // already holds that asset.
           const open = await tx.assignment.findMany({ where: { userId: id, returnedAt: null }, select: { id: true, assetId: true } });
@@ -541,8 +541,8 @@ export class UsersService {
               const remaining = await tx.assignment.count({ where: { assetId, returnedAt: null } });
               if (remaining === 0) {
                 const asset = await tx.asset.findUnique({ where: { id: assetId }, select: { status: true } });
-                if (asset && asset.status !== 'RETIRED' && asset.status !== 'LOST') {
-                  await tx.asset.update({ where: { id: assetId }, data: { status: 'IN_STOCK' } });
+                if (asset && asset.status !== 'ARCHIVED' && asset.status !== 'LOST_STOLEN') {
+                  await tx.asset.update({ where: { id: assetId }, data: { status: 'AVAILABLE' } });
                 }
               }
             }

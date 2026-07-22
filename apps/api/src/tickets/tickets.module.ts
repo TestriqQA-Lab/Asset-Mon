@@ -96,11 +96,11 @@ class TicketsService {
         vendorId: restricted ? null : (data.vendorId || null),
       },
     });
-    if ((['IN_REPAIR', 'IN_STOCK', 'ASSIGNED'] as const).includes((await db.asset.findUnique({ where: { id: data.assetId } }))?.status as any)) {
-      // mark asset in repair if previously not
+    if ((['OUT_OF_SERVICE', 'AVAILABLE', 'ASSIGNED'] as const).includes((await db.asset.findUnique({ where: { id: data.assetId } }))?.status as any)) {
+      // mark asset out of service if previously not
       const a = await db.asset.findUnique({ where: { id: data.assetId } });
-      if (a && a.status !== 'IN_REPAIR') {
-        await db.asset.update({ where: { id: data.assetId }, data: { status: 'IN_REPAIR' } });
+      if (a && a.status !== 'OUT_OF_SERVICE') {
+        await db.asset.update({ where: { id: data.assetId }, data: { status: 'OUT_OF_SERVICE' } });
       }
     }
     await writeAuditEntry(db, { assetId: data.assetId, action: 'TICKET_OPENED', performedById: openedById, detail: { ticketId: ticket.id, title: ticket.title } });
@@ -181,12 +181,12 @@ class TicketsService {
           const others = await db.serviceTicket.count({
             where: { assetId: before.assetId, id: { not: id }, status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING_VENDOR'] } },
           });
-          if (others === 0 && asset.status === 'IN_REPAIR') {
-            await db.asset.update({ where: { id: asset.id }, data: { status: 'IN_STOCK' } });
+          if (others === 0 && asset.status === 'OUT_OF_SERVICE') {
+            await db.asset.update({ where: { id: asset.id }, data: { status: 'AVAILABLE' } });
           }
-        } else if (!wasOpen && asset.status !== 'IN_REPAIR') {
-          // Ticket re-opened — put the asset back into repair so its dashboard tile is honest.
-          await db.asset.update({ where: { id: asset.id }, data: { status: 'IN_REPAIR' } });
+        } else if (!wasOpen && asset.status !== 'OUT_OF_SERVICE') {
+          // Ticket re-opened — put the asset back out of service so its dashboard tile is honest.
+          await db.asset.update({ where: { id: asset.id }, data: { status: 'OUT_OF_SERVICE' } });
         }
       }
     }

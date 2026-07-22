@@ -183,7 +183,7 @@ class ReservationsService {
     // If no other open assignment / open ticket remains, free the asset.
     const stillOpen = await db.assignment.count({ where: { assetId: r.assetId, returnedAt: null } });
     if (stillOpen === 0) {
-      await db.asset.update({ where: { id: r.assetId }, data: { status: 'IN_STOCK' } }).catch(() => {});
+      await db.asset.update({ where: { id: r.assetId }, data: { status: 'AVAILABLE' } }).catch(() => {});
     }
     return db.reservation.update({ where: { id }, data: { status: 'COMPLETED' } });
   }

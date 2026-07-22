@@ -122,13 +122,21 @@ model Category {
   id            String   @id @default(uuid())
   name          String   @unique
   description   String?
-  customFields  Json     @default("[]") // [{name, type, required}]
+  customFields  Json     @default("[]") // [{name, type, required}] — kept for asset custom fields
+  type          CategoryType @default(ASSET)
+  imageUrl      String?
   assets        Asset[]
   prItems       PurchaseRequestItem[]
   poItems       PurchaseOrderItem[]
   assetRequests AssetRequest[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+enum CategoryType {
+  ASSET
+  ACCESSORY
+  LICENSE
 }
 
 model Vendor {
@@ -152,9 +160,9 @@ model Asset {
   name          String
   serialNumber  String?
   model         String?
-  status        AssetStatus   @default(IN_STOCK)
-  categoryId    String
-  category      Category      @relation(fields: [categoryId], references: [id])
+  status        AssetStatus   @default(AVAILABLE)
+  categoryId    String?
+  category      Category?     @relation(fields: [categoryId], references: [id])
   locationId    String?
   location      Location?     @relation(fields: [locationId], references: [id])
   departmentId  String?
@@ -171,6 +179,8 @@ model Asset {
   usefulLifeMonths Int?
   depreciationStart DateTime?
   notes         String?
+  orderNumber   String?
+  requestable   Boolean       @default(false)
   customFields  Json          @default("{}")
   photoUrl      String?
   assignments   Assignment[]
@@ -199,11 +209,13 @@ model Asset {
 }
 
 enum AssetStatus {
-  IN_STOCK
+  PENDING
+  AVAILABLE
   ASSIGNED
-  IN_REPAIR
-  RETIRED
-  LOST
+  OUT_OF_SERVICE
+  OUT_FOR_REPAIR
+  LOST_STOLEN
+  ARCHIVED
 }
 
 // ------------ Assignments / Check-in-out ------------

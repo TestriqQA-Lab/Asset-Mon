@@ -133,7 +133,7 @@ export function Modal({
         aria-modal="true"
         aria-labelledby={headingId}
         tabIndex={-1}
-        className={`relative flex w-full ${maxW} max-h-screen flex-col bg-white shadow-pop focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 sm:max-h-[90vh] sm:animate-slide-up sm:rounded-2xl`}
+        className={`relative flex w-full ${maxW} max-h-screen flex-col bg-white shadow-pop focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 sm:max-h-[70vh] sm:animate-slide-up sm:rounded-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-ink-100 px-4 py-3.5 sm:px-5">

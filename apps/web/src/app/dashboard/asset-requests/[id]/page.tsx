@@ -498,7 +498,7 @@ export default function AssetRequestDetailPage() {
             >
               <option value="">— Select —</option>
               {(assets.data?.items || assets.data || [])
-                .filter((a: any) => a.status === 'IN_STOCK')
+                .filter((a: any) => a.status === 'AVAILABLE')
                 .map((a: any) => (
                   <option key={a.id} value={a.id}>
                     {a.assetTag} · {a.name} ({a.status})

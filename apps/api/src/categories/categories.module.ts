@@ -1,6 +1,11 @@
 import { Module } from '@nestjs/common';
-import { CategoriesController } from './categories.controller';
+import { MulterModule } from '@nestjs/platform-express';
+import { CategoriesController, CategoryImagePublicController } from './categories.controller';
 import { CategoriesService } from './categories.service';
 
-@Module({ controllers: [CategoriesController], providers: [CategoriesService] })
+@Module({
+  imports: [MulterModule.register({})],
+  controllers: [CategoriesController, CategoryImagePublicController],
+  providers: [CategoriesService],
+})
 export class CategoriesModule {}

@@ -140,7 +140,7 @@ class PhysicalAuditsService {
     const s = await db.auditSession.findUnique({ where: { id }, include: { scans: true } });
     if (!s) throw new NotFoundException();
     const scope = (s.scope || {}) as { locationId?: string; departmentId?: string; categoryId?: string };
-    const where: any = { status: { notIn: ['RETIRED', 'LOST'] } };
+    const where: any = { status: { notIn: ['ARCHIVED', 'LOST_STOLEN'] } };
     if (scope.locationId) where.locationId = scope.locationId;
     if (scope.departmentId) where.departmentId = scope.departmentId;
     if (scope.categoryId) where.categoryId = scope.categoryId;

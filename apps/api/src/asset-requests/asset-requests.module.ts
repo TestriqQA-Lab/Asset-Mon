@@ -77,13 +77,13 @@ class AssetRequestsService {
       daysOpen: Math.floor((now - new Date(r.createdAt).getTime()) / 86_400_000),
     }));
 
-    // Batch-fetch IN_STOCK counts per unique categoryId (avoids N+1).
+    // Batch-fetch AVAILABLE counts per unique categoryId (avoids N+1).
     const categoryIds = [...new Set(rows.map((r) => r.categoryId).filter(Boolean))] as string[];
     let stockMap = new Map<string, number>();
     if (categoryIds.length > 0) {
       const stockCounts = await this.ctx.prisma().asset.groupBy({
         by: ['categoryId'],
-        where: { categoryId: { in: categoryIds }, status: 'IN_STOCK' },
+        where: { categoryId: { in: categoryIds }, status: 'AVAILABLE' },
         _count: { _all: true },
       });
       stockMap = new Map(stockCounts.map((s: any) => [s.categoryId, s._count._all]));
@@ -143,7 +143,7 @@ class AssetRequestsService {
         asset: it.asset
           ? { id: it.asset.id, assetTag: it.asset.assetTag, name: it.asset.name, status: it.asset.status }
           : null,
-        available: it.asset?.status === 'IN_STOCK' && !open,
+        available: it.asset?.status === 'AVAILABLE' && !open,
         heldBy: (canSeeHolder && holder) ? { id: holder.id, name: `${holder.firstName} ${holder.lastName}`.trim() } : null,
       };
     });
@@ -334,7 +334,7 @@ class AssetRequestsService {
     // Validate the chosen asset exists and is available.
     const asset = await db.asset.findUnique({ where: { id: fulfilledAssetId }, select: { id: true, status: true, assetTag: true, name: true } });
     if (!asset) throw new BadRequestException('Asset not found');
-    if (!['IN_STOCK', 'ASSIGNED'].includes(asset.status)) {
+    if (!['AVAILABLE', 'ASSIGNED'].includes(asset.status)) {
       throw new BadRequestException(`Asset is ${asset.status} — pick an available asset`);
     }
 
@@ -470,13 +470,13 @@ class AssetRequestsService {
   // ---------------------------------------------------------------------------
   private async approveSpecific(r: any, reviewerId: string) {
     const db = this.ctx.prisma();
-    // Approvable = still REQUESTED and the asset is free (IN_STOCK) right now.
+    // Approvable = still REQUESTED and the asset is free (AVAILABLE) right now.
     const items = await db.assetRequestItem.findMany({
       where: { requestId: r.id },
       include: { asset: { select: { id: true, status: true } } },
     });
     const approvableIds = items
-      .filter((it: any) => it.status === 'REQUESTED' && it.asset?.status === 'IN_STOCK')
+      .filter((it: any) => it.status === 'REQUESTED' && it.asset?.status === 'AVAILABLE')
       .map((it: any) => it.id);
     if (approvableIds.length === 0) {
       throw new BadRequestException('None of the requested devices are available right now — send a note or decline instead.');

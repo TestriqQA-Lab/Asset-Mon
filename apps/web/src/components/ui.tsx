@@ -55,13 +55,16 @@ export function Field({ label, hint, children, error }: { label?: string; hint?:
 }
 
 /* ----------------------- Card / Surface ----------------------- */
-export function Card({ children, className, padded = true }: { children: React.ReactNode; className?: string; padded?: boolean }) {
-  return (
-    <div className={cn('rounded-xl border border-ink-200 bg-white shadow-card', padded && 'p-5', className)}>
-      {children}
-    </div>
-  );
-}
+export const Card = React.forwardRef<HTMLDivElement, { children: React.ReactNode; className?: string; padded?: boolean }>(
+  ({ children, className, padded = true }, ref) => {
+    return (
+      <div ref={ref} className={cn('rounded-xl border border-ink-200 bg-white shadow-card', padded && 'p-5', className)}>
+        {children}
+      </div>
+    );
+  }
+);
+Card.displayName = 'Card';
 
 export function SectionHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: React.ReactNode }) {
   return (
@@ -97,12 +100,13 @@ export function Pill({ children, tone = 'neutral', dot, className }: { children:
 
 // Status mapping helpers — keep all status colors consistent everywhere.
 const ASSET_STATUS_TONE: Record<string, keyof typeof PILL_THEMES> = {
-  IN_STOCK: 'green', ASSIGNED: 'blue', IN_REPAIR: 'amber', RETIRED: 'gray', LOST: 'red',
+  PENDING: 'amber', AVAILABLE: 'green', ASSIGNED: 'blue', OUT_OF_SERVICE: 'red', OUT_FOR_REPAIR: 'amber', LOST_STOLEN: 'red', ARCHIVED: 'gray',
 };
 // `def` is the tenant's custom AssetStatusDef row; falls back to system enum styling.
 export function AssetStatusPill({ s, def }: { s: string; def?: { label?: string; color?: string } | null }) {
   const tone = (def?.color as keyof typeof PILL_THEMES) || ASSET_STATUS_TONE[s] || 'neutral';
-  const label = def?.label || s.replace('_', ' ');
+  // Preserve the tenant's chosen casing for custom labels; only upcase the raw enum fallback.
+  const label = def?.label || s.replaceAll('_', ' ').toUpperCase();
   return <Pill dot tone={tone}>{label}</Pill>;
 }
 

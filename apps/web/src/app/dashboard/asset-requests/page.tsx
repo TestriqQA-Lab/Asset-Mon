@@ -117,7 +117,7 @@ export default function AssetRequestsPage() {
     setOpen(true);
   };
 
-  const deviceAvailable = (a: any) => a.status === 'IN_STOCK';
+  const deviceAvailable = (a: any) => a.status === 'AVAILABLE';
   const addDevice = (a: any) => {
     if (!picked.some((p) => p.id === a.id)) setPicked([...picked, a]);
     setSearch('');

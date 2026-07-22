@@ -178,7 +178,7 @@ export class AuthService {
       const tag = `AM-${String((await db.asset.count()) + 1).padStart(5, '0')}`;
       await db.asset.create({
         data: {
-          assetTag: tag, name: s.name, status: 'IN_STOCK',
+          assetTag: tag, name: s.name, status: 'AVAILABLE',
           categoryId: cat.id, locationId: s.loc, departmentId: s.dept, vendorId: s.vendor,
           serialNumber: s.serial, purchaseCost: s.cost,
           purchaseDate: new Date(Date.now() - 200 * 86_400_000),
@@ -582,15 +582,16 @@ export class AuthService {
     ];
     for (const c of cats) await db.category.create({ data: c });
 
-    const SYSTEM_STATUSES = ['IN_STOCK', 'ASSIGNED', 'IN_REPAIR', 'RETIRED', 'LOST'] as const;
-    const SYSTEM_COLOR: Record<string, string> = {
-      IN_STOCK: 'green', ASSIGNED: 'blue', IN_REPAIR: 'amber', RETIRED: 'gray', LOST: 'red',
+    const SYSTEM_STATUSES = ['PENDING', 'AVAILABLE', 'ASSIGNED', 'OUT_OF_SERVICE', 'OUT_FOR_REPAIR', 'LOST_STOLEN', 'ARCHIVED'] as const;
+    const COLOR: Record<string, string> = {
+      PENDING: 'amber', AVAILABLE: 'green', ASSIGNED: 'blue', OUT_OF_SERVICE: 'red', OUT_FOR_REPAIR: 'amber', LOST_STOLEN: 'red', ARCHIVED: 'gray',
     };
+    const LABEL_OVERRIDE: Record<string, string> = { LOST_STOLEN: 'Lost/Stolen' };
     for (let i = 0; i < SYSTEM_STATUSES.length; i++) {
       const s = SYSTEM_STATUSES[i];
-      const label = s.replace('_', ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+      const label = LABEL_OVERRIDE[s] || s.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
       await db.assetStatusDef.create({
-        data: { key: s, label, color: SYSTEM_COLOR[s], mapsTo: s, isSystem: true, order: i },
+        data: { key: s, label, color: COLOR[s], mapsTo: s, isSystem: true, order: i },
       }).catch(() => {});
     }
   }

@@ -1,67 +1,105 @@
 'use client';
-import { useState } from 'react';
+import { useState, useRef, type ChangeEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { Modal } from '@/components/Modal';
 import { Field, inputClass, btnPrimary, btnSecondary, btnDanger } from '@/components/Field';
 
-type CF = { name: string; type: 'text' | 'number' | 'date' | 'boolean'; required?: boolean };
+const TYPES = ['ASSET', 'ACCESSORY', 'LICENSE'] as const;
+const TYPE_LABEL: Record<string, string> = { ASSET: 'Asset', ACCESSORY: 'Accessory', LICENSE: 'License' };
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+
+type Form = { name: string; type: string; imageUrl: string | null };
 
 export default function CategoriesPage() {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ['categories'], queryFn: () => api('/categories') });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  const [form, setForm] = useState<{ name: string; description: string; customFields: CF[] }>({ name: '', description: '', customFields: [] });
+  const [form, setForm] = useState<Form>({ name: '', type: 'ASSET', imageUrl: null });
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Both mutations refresh the dashboard's stats too (the "Asset Categories" card).
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['categories'] }); qc.invalidateQueries({ queryKey: ['stats'] }); };
 
   const save = useMutation({
     mutationFn: () => {
-      const body = { name: form.name, description: form.description, customFields: form.customFields };
+      const body = { name: form.name.trim(), type: form.type, imageUrl: form.imageUrl };
       return editing
         ? api(`/categories/${editing.id}`, { method: 'PATCH', body: JSON.stringify(body) })
         : api('/categories', { method: 'POST', body: JSON.stringify(body) });
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['categories'] }); setOpen(false); },
+    onSuccess: () => { refresh(); setOpen(false); },
   });
   const del = useMutation({
     mutationFn: (id: string) => api(`/categories/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
+    onSuccess: refresh,
+    onError: (e) => toast.error((e as Error).message),
   });
 
-  const addField = () => setForm({ ...form, customFields: [...form.customFields, { name: '', type: 'text' }] });
-  const removeField = (i: number) => setForm({ ...form, customFields: form.customFields.filter((_, idx) => idx !== i) });
-  const updateField = (i: number, patch: Partial<CF>) =>
-    setForm({ ...form, customFields: form.customFields.map((f, idx) => (idx === i ? { ...f, ...patch } : f)) });
+  const openNew = () => { setEditing(null); setForm({ name: '', type: 'ASSET', imageUrl: null }); setOpen(true); };
+  const openEdit = (c: any) => { setEditing(c); setForm({ name: c.name, type: c.type || 'ASSET', imageUrl: c.imageUrl ?? null }); setOpen(true); };
+
+  const onPickImage = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await api<{ url: string }>('/categories/image', { method: 'POST', body: fd });
+      setForm((f) => ({ ...f, imageUrl: res.url }));
+    } catch (err) {
+      toast.error((err as Error).message || 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-semibold sm:text-2xl">Categories</h1>
-        <button className={btnPrimary + ' sm:self-start'} onClick={() => { setEditing(null); setForm({ name: '', description: '', customFields: [] }); setOpen(true); }}>
-          New category
-        </button>
+        <button className={btnPrimary + ' sm:self-start'} onClick={openNew}>New category</button>
       </div>
+
       <div className="overflow-x-auto rounded-lg border bg-white"><table className="w-full text-sm">
         <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-          <tr><th className="px-4 py-2">Name</th><th className="px-4 py-2">Description</th><th className="px-4 py-2">Custom fields</th><th></th></tr>
+          <tr>
+            <th className="px-4 py-2">Image</th>
+            <th className="px-4 py-2">Name</th>
+            <th className="px-4 py-2">Type</th>
+            <th className="px-4 py-2">Quantity</th>
+            <th></th>
+          </tr>
         </thead>
         <tbody>
           {list.data?.map((c: any) => (
             <tr key={c.id} className="border-t">
+              <td className="px-4 py-2">
+                {c.imageUrl ? (
+                  <img src={API_URL + c.imageUrl} alt={c.name} className="h-10 w-10 rounded object-cover border border-gray-200" />
+                ) : (
+                  <span className="flex h-10 w-10 items-center justify-center rounded bg-gray-100 text-xs font-semibold text-gray-400">
+                    {(c.name || '?').charAt(0).toUpperCase()}
+                  </span>
+                )}
+              </td>
               <td className="px-4 py-2 font-medium">{c.name}</td>
-              <td className="px-4 py-2 text-gray-500">{c.description || '—'}</td>
-              <td className="px-4 py-2 text-gray-500">{(c.customFields || []).length}</td>
-              <td className="px-4 py-2 text-right">
-                <button className={btnSecondary + ' mr-2'} onClick={() => {
-                  setEditing(c);
-                  setForm({ name: c.name, description: c.description || '', customFields: c.customFields || [] });
-                  setOpen(true);
-                }}>Edit</button>
-                <button className={btnDanger} onClick={() => confirm('Delete?') && del.mutate(c.id)}>Delete</button>
+              <td className="px-4 py-2">
+                <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">{TYPE_LABEL[c.type] || 'Asset'}</span>
+              </td>
+              <td className="px-4 py-2 font-mono text-xs text-gray-600" title="Assets currently in this category">{c.assetCount ?? 0}</td>
+              <td className="px-4 py-2 text-right whitespace-nowrap">
+                <button className={btnSecondary + ' mr-2'} onClick={() => openEdit(c)}>Edit</button>
+                <button className={btnDanger} onClick={() => confirm(`Delete category "${c.name}"?`) && del.mutate(c.id)}>Delete</button>
               </td>
             </tr>
           ))}
-          {list.data?.length === 0 && <tr><td className="px-4 py-6 text-gray-500" colSpan={4}>No categories yet.</td></tr>}
+          {list.data?.length === 0 && <tr><td className="px-4 py-6 text-gray-500" colSpan={5}>No categories yet.</td></tr>}
         </tbody>
       </table></div>
 
@@ -72,41 +110,43 @@ export default function CategoriesPage() {
         footer={
           <>
             <button className={btnSecondary} onClick={() => setOpen(false)}>Cancel</button>
-            <button className={btnPrimary} onClick={() => save.mutate()} disabled={save.isPending}>Save</button>
+            <button className={btnPrimary} onClick={() => save.mutate()} disabled={save.isPending || uploading || !form.name.trim()}>
+              {save.isPending ? 'Saving…' : 'Save'}
+            </button>
           </>
         }
       >
         <div className="space-y-3">
-          <Field label="Name"><input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-          <Field label="Description"><input className={inputClass} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-medium">Custom fields</span>
-              <button className={btnSecondary} onClick={addField}>+ Add field</button>
+          <Field label="Name">
+            <input className={inputClass} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Laptops" />
+          </Field>
+
+          <Field label="Type">
+            <select className={inputClass} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+              {TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
+            </select>
+          </Field>
+
+          <Field label="Image">
+            <div className="flex items-center gap-3">
+              {form.imageUrl ? (
+                <img src={API_URL + form.imageUrl} alt="" className="h-16 w-16 rounded object-cover border border-gray-200" />
+              ) : (
+                <div className="flex h-16 w-16 items-center justify-center rounded border border-dashed border-gray-300 text-[10px] text-gray-400">No image</div>
+              )}
+              <div className="flex flex-col items-start gap-1.5">
+                <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={onPickImage} className="hidden" />
+                <button type="button" className={btnSecondary} onClick={() => fileRef.current?.click()} disabled={uploading}>
+                  {uploading ? 'Uploading…' : form.imageUrl ? 'Replace image' : 'Upload image'}
+                </button>
+                {form.imageUrl && (
+                  <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => setForm({ ...form, imageUrl: null })}>Remove image</button>
+                )}
+              </div>
             </div>
-            <div className="space-y-2">
-              {form.customFields.map((f, i) => (
-                <div key={i} className="flex flex-wrap items-center gap-2">
-                  <input
-                    className={inputClass + ' min-w-[140px] flex-1'}
-                    placeholder="Field name"
-                    value={f.name}
-                    onChange={(e) => updateField(i, { name: e.target.value })}
-                  />
-                  <select className={inputClass + ' w-32'} value={f.type} onChange={(e) => updateField(i, { type: e.target.value as any })}>
-                    <option value="text">text</option>
-                    <option value="number">number</option>
-                    <option value="date">date</option>
-                    <option value="boolean">boolean</option>
-                  </select>
-                  <label className="flex items-center gap-1 text-xs">
-                    <input type="checkbox" checked={!!f.required} onChange={(e) => updateField(i, { required: e.target.checked })} /> req
-                  </label>
-                  <button className={btnDanger} onClick={() => removeField(i)} aria-label="Remove field">×</button>
-                </div>
-              ))}
-            </div>
-          </div>
+            <p className="mt-1 text-xs text-gray-400">PNG, JPEG or WebP · up to 2 MB</p>
+          </Field>
+
           {save.error && <p className="text-sm text-red-600">{(save.error as Error).message}</p>}
         </div>
       </Modal>

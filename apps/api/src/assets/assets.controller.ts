@@ -23,6 +23,12 @@ import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { CreateAssetDto, UpdateAssetDto, ListAssetsQueryDto, CheckoutDto, BulkIdsDto, BulkUpdateDto } from './dto';
 import { signFileToken, verifySignedFileToken } from '../common/signed-url';
 
+// Pre-rename AssetStatus values → current ones, so a CSV exported before the
+// status rename still imports without per-row enum errors.
+const LEGACY_STATUS_MAP: Record<string, string> = {
+  IN_STOCK: 'AVAILABLE', IN_REPAIR: 'OUT_OF_SERVICE', RETIRED: 'ARCHIVED', LOST: 'LOST_STOLEN',
+};
+
 @ApiTags('assets')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, NavPermissionsGuard)
@@ -102,7 +108,7 @@ export class AssetsController {
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'ASSET_MANAGER')
   remove(@Param('id') id: string, @CurrentUser('sub') uid: string) {
     return this.svc.remove(id, uid);
   }
@@ -242,7 +248,8 @@ export class AssetsController {
           assetTag: r.assetTag || undefined,
           serialNumber: r.serialNumber || null,
           model: r.model || null,
-          status: r.status || 'IN_STOCK',
+          // Map pre-rename status values so old exports still import cleanly.
+          status: LEGACY_STATUS_MAP[String(r.status || '').trim().toUpperCase()] || r.status || 'AVAILABLE',
           categoryId: cat.id,
           locationId: loc?.id || null,
           departmentId: dep?.id || null,

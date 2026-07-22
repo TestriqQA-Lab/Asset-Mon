@@ -18,7 +18,7 @@ export class DataQualityService {
 
     // `any` on the where objects avoids enum-literal widening friction while keeping
     // each clause defined once (used for both count + sample).
-    const noLocation: any = { status: { notIn: ['RETIRED', 'LOST'] }, locationId: null };
+    const noLocation: any = { status: { notIn: ['ARCHIVED', 'LOST_STOLEN'] }, locationId: null };
     const noOwner: any = { status: 'ASSIGNED', assignments: { none: { returnedAt: null } } };
     const overdueMaint: any = { active: true, nextDueAt: { lt: now } };
     const expLic: any = { expiresAt: { not: null, lte: in30 } };

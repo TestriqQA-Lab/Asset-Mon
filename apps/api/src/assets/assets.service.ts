@@ -3,6 +3,7 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { EventBusService } from '../events/events.module';
 import { writeAuditEntry } from '../common/audit-hash';
 import { BillingService } from '../billing/billing.module';
+import { signFileToken } from '../common/signed-url';
 
 export type ListAssetsQuery = {
   q?: string;
@@ -78,7 +79,21 @@ export class AssetsService {
     if (this.ctx.role === 'EMPLOYEE') {
       return { items: items.map((a: any) => this.toEmployeeAssetView(a)), total, page, pageSize };
     }
-    return { items, total, page, pageSize };
+    const tid = this.ctx.tenantId;
+    return { items: items.map((a: any) => this.withSignedPhoto(a, tid)), total, page, pageSize };
+  }
+
+  /**
+   * Swap the auth-guarded photo path (`/api/assets/files/…`) for a short-lived
+   * signed public URL (`/api/assets/file-public/…?sig=`) so list thumbnails load
+   * in <img> tags, which cannot send the Bearer header. Mirrors `/photo-url`.
+   */
+  private withSignedPhoto(a: any, tid: string | null | undefined) {
+    if (!a?.photoUrl || !tid) return a;
+    const filename = String(a.photoUrl).split('/').pop();
+    if (!filename) return a;
+    const token = signFileToken(filename, tid, 3600);
+    return { ...a, photoUrl: `/api/assets/file-public/${filename}?sig=${encodeURIComponent(token)}` };
   }
 
   async get(id: string): Promise<any> {
@@ -160,7 +175,6 @@ export class AssetsService {
   }
 
   async create(data: any, performedById?: string, opts?: { skipBillingCheck?: boolean }) {
-    if (!data.categoryId) throw new BadRequestException('categoryId is required');
     if (!data.name) throw new BadRequestException('name is required');
     if (!opts?.skipBillingCheck && this.ctx.tenantId) await this.billing.assertCanAddAsset(this.ctx.tenantId);
     const db = this.ctx.prisma();
@@ -172,8 +186,8 @@ export class AssetsService {
         name: data.name,
         serialNumber: data.serialNumber || null,
         model: data.model || null,
-        status: data.status || 'IN_STOCK',
-        categoryId: data.categoryId,
+        status: data.status || 'AVAILABLE',
+        categoryId: data.categoryId || null,
         locationId: data.locationId || null,
         departmentId: data.departmentId || null,
         vendorId: data.vendorId || null,
@@ -181,6 +195,8 @@ export class AssetsService {
         purchaseCost: data.purchaseCost ?? null,
         warrantyEnd: data.warrantyEnd ? new Date(data.warrantyEnd) : null,
         notes: data.notes || null,
+        orderNumber: data.orderNumber || null,
+        requestable: data.requestable ?? false,
         customFields: data.customFields || {},
         photoUrl: data.photoUrl || null,
         depreciationMethod: data.depreciationMethod || 'NONE',

@@ -8,13 +8,14 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
-const SYSTEM_STATUSES = ['IN_STOCK', 'ASSIGNED', 'IN_REPAIR', 'RETIRED', 'LOST'] as const;
+const SYSTEM_STATUSES = ['PENDING', 'AVAILABLE', 'ASSIGNED', 'OUT_OF_SERVICE', 'OUT_FOR_REPAIR', 'LOST_STOLEN', 'ARCHIVED'] as const;
 const SYSTEM_COLOR: Record<string, string> = {
-  IN_STOCK: 'green', ASSIGNED: 'blue', IN_REPAIR: 'amber', RETIRED: 'gray', LOST: 'red',
+  PENDING: 'amber', AVAILABLE: 'green', ASSIGNED: 'blue', OUT_OF_SERVICE: 'red', OUT_FOR_REPAIR: 'amber', LOST_STOLEN: 'red', ARCHIVED: 'gray',
 };
 
+const LABEL_OVERRIDE: Record<string, string> = { LOST_STOLEN: 'Lost/Stolen' };
 export const SYSTEM_DEFS = SYSTEM_STATUSES.map((s, i) => ({
-  key: s, label: s.replace('_', ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()),
+  key: s, label: LABEL_OVERRIDE[s] || s.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()),
   color: SYSTEM_COLOR[s], mapsTo: s, isSystem: true, order: i,
 }));
 
@@ -28,9 +29,38 @@ export class AssetStatusDefsService {
 
   async ensureSeeded() {
     const db = this.ctx.prisma();
-    const existing = await db.assetStatusDef.count();
-    if (existing > 0) return;
-    for (const d of SYSTEM_DEFS) await db.assetStatusDef.create({ data: d as any });
+    const existing = await db.assetStatusDef.findMany({ where: { isSystem: true } });
+
+    // Rename map for legacy keys → new keys
+    const RENAME: Record<string, string> = {
+      IN_STOCK: 'AVAILABLE', IN_REPAIR: 'OUT_OF_SERVICE', RETIRED: 'ARCHIVED', LOST: 'LOST_STOLEN',
+    };
+
+    // Rename any old-keyed rows to the new key
+    for (const row of existing) {
+      const newKey = RENAME[row.key];
+      if (newKey) {
+        const target = SYSTEM_DEFS.find((d) => d.key === newKey);
+        if (target) {
+          await db.assetStatusDef.update({
+            where: { id: row.id },
+            data: { key: target.key, label: target.label, color: target.color, mapsTo: target.mapsTo, order: target.order },
+          }).catch(() => {});
+        }
+      }
+    }
+
+    // Insert any MISSING system defs, but never touch existing rows — admins are
+    // allowed to re-label / re-colour / re-order the built-in statuses (see update()
+    // and the Settings→Statuses page), and an unconditional update here would revert
+    // those customisations on every list request.
+    for (const d of SYSTEM_DEFS) {
+      await db.assetStatusDef.upsert({
+        where: { key: d.key },
+        update: {},
+        create: { ...d } as any,
+      }).catch(() => {});
+    }
   }
 
   async create(d: { key: string; label: string; color?: string; mapsTo: string; order?: number }) {

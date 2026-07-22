@@ -14,7 +14,7 @@ export class LifecycleService {
     });
     if (!asset) throw new NotFoundException('Asset not found');
     if (asset.assignments.length > 0) throw new BadRequestException('Asset is already checked out');
-    if (asset.status === 'RETIRED' || asset.status === 'LOST') {
+    if (asset.status === 'ARCHIVED' || asset.status === 'LOST_STOLEN') {
       throw new BadRequestException(`Cannot check out asset in status ${asset.status}`);
     }
     const user = await db.user.findUnique({ where: { id: userId } });
@@ -52,7 +52,7 @@ export class LifecycleService {
     const open = await db.assignment.findFirst({ where: { assetId, returnedAt: null }, orderBy: { checkedOutAt: 'desc' } });
     if (!open) throw new BadRequestException('Asset is not checked out');
     const updated = await db.assignment.update({ where: { id: open.id }, data: { returnedAt: new Date() } });
-    await db.asset.update({ where: { id: assetId }, data: { status: 'IN_STOCK' } });
+    await db.asset.update({ where: { id: assetId }, data: { status: 'AVAILABLE' } });
     await writeAuditEntry(db, { assetId, action: 'CHECKED_IN', performedById, detail: { assignmentId: open.id }, impersonatedBy: this.ctx.impersonatedBy ?? null });
     return updated;
   }
