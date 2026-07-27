@@ -116,10 +116,10 @@ export default function AssetsPage() {
       // Remove client-only state
       delete body.imageFile;
       delete body._showExtra;
-      ['locationId', 'categoryId', 'departmentId'].forEach((k) => { if (!body[k]) body[k] = null; });
+      ['locationId', 'categoryId', 'departmentId', 'statusDefId'].forEach((k) => { if (!body[k]) body[k] = null; });
       // Strip optional empty strings — class-validator @IsOptional only skips undefined/null,
       // so '' falls through to @IsISO8601 / @IsNumber and fails with a confusing 400.
-      ['purchaseDate', 'warrantyEnd', 'serialNumber', 'model', 'notes', 'orderNumber', 'statusDefId', 'status'].forEach((k) => {
+      ['purchaseDate', 'warrantyEnd', 'serialNumber', 'model', 'notes', 'orderNumber', 'status'].forEach((k) => {
         if (body[k] === '' || body[k] === undefined) delete body[k];
       });
       ['purchaseCost'].forEach((k) => {
@@ -160,8 +160,8 @@ export default function AssetsPage() {
       const body: any = { ...form };
       delete body.imageFile;
       delete body._showExtra;
-      ['locationId', 'categoryId', 'departmentId'].forEach((k) => { if (!body[k]) body[k] = null; });
-      ['purchaseDate', 'warrantyEnd', 'serialNumber', 'model', 'notes', 'orderNumber', 'statusDefId', 'status'].forEach((k) => {
+      ['locationId', 'categoryId', 'departmentId', 'statusDefId'].forEach((k) => { if (!body[k]) body[k] = null; });
+      ['purchaseDate', 'warrantyEnd', 'serialNumber', 'model', 'notes', 'orderNumber', 'status'].forEach((k) => {
         if (body[k] === '' || body[k] === undefined) delete body[k];
       });
       ['purchaseCost'].forEach((k) => {

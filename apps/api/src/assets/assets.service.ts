@@ -248,7 +248,10 @@ export class AssetsService {
     if (!ids?.length) throw new BadRequestException('No ids');
     if (ids.length > 500) throw new BadRequestException('Too many ids (max 500)');
     const data: any = {};
-    if (patch.status) data.status = patch.status;
+    // A bulk status change is always a raw system status (the "Set status" / "Archive"
+    // controls send the enum value, never a custom status template) — so clear any
+    // per-asset status template too, or the pill would keep showing the old label.
+    if (patch.status) { data.status = patch.status; data.statusDefId = null; }
     if (patch.locationId !== undefined) data.locationId = patch.locationId || null;
     if (patch.departmentId !== undefined) data.departmentId = patch.departmentId || null;
     // Short-circuit no-op patches so we don't bloat the audit chain with empty BULK_UPDATED entries.
