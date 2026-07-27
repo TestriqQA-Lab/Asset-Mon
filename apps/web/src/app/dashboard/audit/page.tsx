@@ -1,10 +1,11 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { Card, Pill, QueryState, EmptyState, Button, Field, inputClass, selectClass } from '@/components/ui';
 import { ShieldCheck, Download } from 'lucide-react';
+import { Pagination, paginate } from '@/components/Pagination';
 
 type Entry = {
   id: string;
@@ -51,6 +52,10 @@ export default function AuditPage() {
   const [q, setQ] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [page, setPage] = useState(1);
+
+  // Reset to page 1 whenever filters change
+  useEffect(() => { setPage(1); }, [q, from, to, limit]);
 
   const log = useQuery({ queryKey: ['audit', limit], queryFn: () => api<Entry[]>(`/audit?limit=${limit}`) });
   const verify = useMutation({
@@ -111,46 +116,52 @@ export default function AuditPage() {
         </div>
 
         <QueryState query={log}>
-          {(data: Entry[]) => (
-            <>
-              <div className="px-3 py-2 text-xs text-ink-500">
-                Showing {filtered.length} of {data.length}{data.length >= limit ? ` (latest ${limit})` : ''}
-              </div>
-              {filtered.length === 0 ? (
-                <div className="p-6">
-                  <EmptyState
-                    title={data.length === 0 ? 'No events yet' : 'No events match your filters'}
-                    description={data.length === 0 ? 'Workspace changes will appear here.' : 'Try widening the date range or clearing the search.'}
-                  />
+          {(data: Entry[]) => {
+            const paged = paginate(filtered, page);
+            return (
+              <>
+                <div className="px-3 py-2 text-xs text-ink-500">
+                  Showing {filtered.length} of {data.length}{data.length >= limit ? ` (latest ${limit})` : ''}
                 </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-ink-50 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-500">
-                      <tr>
-                        <th className="px-4 py-2.5">When</th>
-                        <th className="px-4 py-2.5">Who</th>
-                        <th className="px-4 py-2.5">Action</th>
-                        <th className="px-4 py-2.5">Asset</th>
-                        <th className="px-4 py-2.5">Detail</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filtered.map((e) => (
-                        <tr key={e.id} className="border-t border-ink-100 align-top">
-                          <td className="whitespace-nowrap px-4 py-2 text-ink-500">{new Date(e.createdAt).toLocaleString()}</td>
-                          <td className="px-4 py-2 text-ink-700">{e.performedBy ? `${e.performedBy.firstName} ${e.performedBy.lastName}` : '—'}</td>
-                          <td className="px-4 py-2"><Pill tone="neutral">{e.action}</Pill></td>
-                          <td className="px-4 py-2 font-mono text-xs text-ink-600">{e.asset?.assetTag || (e.assetId ? e.assetId.slice(0, 8) : '—')}</td>
-                          <td className="max-w-[28rem] truncate px-4 py-2 text-xs text-ink-500" title={e.detail ? JSON.stringify(e.detail) : ''}>{e.detail ? JSON.stringify(e.detail) : ''}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
+                {filtered.length === 0 ? (
+                  <div className="p-6">
+                    <EmptyState
+                      title={data.length === 0 ? 'No events yet' : 'No events match your filters'}
+                      description={data.length === 0 ? 'Workspace changes will appear here.' : 'Try widening the date range or clearing the search.'}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-ink-50 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-500">
+                          <tr>
+                            <th className="px-4 py-2.5">When</th>
+                            <th className="px-4 py-2.5">Who</th>
+                            <th className="px-4 py-2.5">Action</th>
+                            <th className="px-4 py-2.5">Asset</th>
+                            <th className="px-4 py-2.5">Detail</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {paged.map((e) => (
+                            <tr key={e.id} className="border-t border-ink-100 align-top">
+                              <td className="whitespace-nowrap px-4 py-2 text-ink-500">{new Date(e.createdAt).toLocaleString()}</td>
+                              <td className="px-4 py-2 text-ink-700">{e.performedBy ? `${e.performedBy.firstName} ${e.performedBy.lastName}` : '—'}</td>
+                              <td className="px-4 py-2"><Pill tone="neutral">{e.action}</Pill></td>
+                              <td className="px-4 py-2 font-mono text-xs text-ink-600">{e.asset?.assetTag || (e.assetId ? e.assetId.slice(0, 8) : '—')}</td>
+                              <td className="max-w-[28rem] truncate px-4 py-2 text-xs text-ink-500" title={e.detail ? JSON.stringify(e.detail) : ''}>{e.detail ? JSON.stringify(e.detail) : ''}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <Pagination totalItems={filtered.length} page={page} onPageChange={setPage} />
+                  </>
+                )}
+              </>
+            );
+          }}
         </QueryState>
       </Card>
     </div>

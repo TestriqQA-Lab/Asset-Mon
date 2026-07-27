@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { toCsv, downloadCsv } from '@/lib/csv';
@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { Card, StatCard, Pill, SectionHeader, EmptyState, Skeleton } from '@/components/ui';
 import { usePermissions } from '@/lib/settings';
+import { Pagination, paginate } from '@/components/Pagination';
 
 const TYPE_LABEL: Record<string, string> = { ASSET: 'Asset', ACCESSORY: 'Accessory', LICENSE: 'License' };
 // Escape user-provided text before interpolating it into the print window's HTML.
@@ -35,6 +36,7 @@ export default function DashboardHome() {
   // ── Asset Categories panel state ──
   const [catSearch, setCatSearch] = useState('');
   const [catExpanded, setCatExpanded] = useState(false);
+  const [catPage, setCatPage] = useState(1);
   const catPanelRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
@@ -64,6 +66,7 @@ export default function DashboardHome() {
   // Refresh: force a re-fetch of the stats + category data from the server.
   const handleCatRefresh = useCallback(() => {
     setCatSearch('');
+    setCatPage(1);
     queryClient.refetchQueries({ queryKey: ['stats'] });
     queryClient.refetchQueries({ queryKey: ['categories'] });
   }, [queryClient]);
@@ -121,6 +124,7 @@ export default function DashboardHome() {
   // ── Recent Activity panel state ──
   const [actSearch, setActSearch] = useState('');
   const [actExpanded, setActExpanded] = useState(false);
+  const [actPage, setActPage] = useState(1);
   const actPanelRef = useRef<HTMLDivElement>(null);
 
   // Admin-gated: fetch full audit log (up to 100 entries) for the dashboard.
@@ -167,6 +171,7 @@ export default function DashboardHome() {
   // Refresh: re-fetch audit (admin) + stats
   const handleActRefresh = useCallback(() => {
     setActSearch('');
+    setActPage(1);
     if (canSeeAudit) queryClient.invalidateQueries({ queryKey: ['audit', 100] });
     queryClient.invalidateQueries({ queryKey: ['stats'] });
   }, [queryClient, canSeeAudit]);
@@ -230,6 +235,12 @@ export default function DashboardHome() {
   }, [filteredActivity]);
 
   const displayedActivity = filteredActivity();
+
+  // Reset pagination when search changes or panels collapse
+  useEffect(() => { setCatPage(1); }, [catSearch]);
+  useEffect(() => { setActPage(1); }, [actSearch]);
+  useEffect(() => { if (!catExpanded) setCatPage(1); }, [catExpanded]);
+  useEffect(() => { if (!actExpanded) setActPage(1); }, [actExpanded]);
 
   return (
     <div className="space-y-6">
@@ -335,7 +346,7 @@ export default function DashboardHome() {
                   ) : displayedCategories.length === 0 ? (
                     <tr><td colSpan={3} className="p-8 text-center text-ink-400">{catSearch ? `No categories matching "${catSearch}"` : 'No categories found.'}</td></tr>
                   ) : (
-                    displayedCategories.map((c: any, i: number) => {
+                    (catExpanded ? paginate(displayedCategories, catPage) : displayedCategories).map((c: any, i: number) => {
                       const colors = ['bg-brand-500', 'bg-green-500', 'bg-amber-500', 'bg-red-500', 'bg-purple-500', 'bg-pink-500', 'bg-sky-500'];
                       const color = colors[i % colors.length];
                       return (
@@ -358,6 +369,9 @@ export default function DashboardHome() {
               <a href="/dashboard/categories" className="block w-full text-center bg-brand-50 hover:bg-brand-100 text-brand-700 py-2.5 text-sm font-medium transition-colors border-t border-ink-100 shrink-0">
                 View All
               </a>
+            )}
+            {catExpanded && (
+              <Pagination totalItems={displayedCategories.length} page={catPage} onPageChange={setCatPage} />
             )}
           </Card>
 
@@ -442,7 +456,7 @@ export default function DashboardHome() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100 bg-white">
-                    {displayedActivity.map((e: any) => (
+                    {(actExpanded ? paginate(displayedActivity, actPage) : displayedActivity).map((e: any) => (
                       <tr key={e.id} className="hover:bg-ink-50 transition-colors">
                         <td className="px-4 py-2.5">
                           <Pill tone="neutral">{prettifyAction(e.action)}</Pill>
@@ -472,6 +486,9 @@ export default function DashboardHome() {
               <a href="/dashboard/audit" className="block w-full text-center bg-brand-50 hover:bg-brand-100 text-brand-700 py-2.5 text-sm font-medium transition-colors border-t border-ink-100 shrink-0">
                 View All
               </a>
+            )}
+            {actExpanded && (
+              <Pagination totalItems={displayedActivity.length} page={actPage} onPageChange={setActPage} />
             )}
           </Card>
         </div>

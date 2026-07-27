@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { Modal } from '@/components/Modal';
 import { Field, inputClass, btnPrimary, btnSecondary, btnDanger } from '@/components/Field';
+import { Pagination, paginate } from '@/components/Pagination';
 
 const TYPES = ['ASSET', 'ACCESSORY', 'LICENSE'] as const;
 const TYPE_LABEL: Record<string, string> = { ASSET: 'Asset', ACCESSORY: 'Accessory', LICENSE: 'License' };
@@ -19,10 +20,11 @@ export default function CategoriesPage() {
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState<Form>({ name: '', type: 'ASSET', imageUrl: null });
   const [uploading, setUploading] = useState(false);
+  const [page, setPage] = useState(1);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Both mutations refresh the dashboard's stats too (the "Asset Categories" card).
-  const refresh = () => { qc.invalidateQueries({ queryKey: ['categories'] }); qc.invalidateQueries({ queryKey: ['stats'] }); };
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['categories'] }); qc.invalidateQueries({ queryKey: ['stats'] }); setPage(1); };
 
   const save = useMutation({
     mutationFn: () => {
@@ -77,7 +79,7 @@ export default function CategoriesPage() {
           </tr>
         </thead>
         <tbody>
-          {list.data?.map((c: any) => (
+          {paginate(list.data ?? [], page).map((c: any) => (
             <tr key={c.id} className="border-t">
               <td className="px-4 py-2">
                 {c.imageUrl ? (
@@ -101,7 +103,9 @@ export default function CategoriesPage() {
           ))}
           {list.data?.length === 0 && <tr><td className="px-4 py-6 text-gray-500" colSpan={5}>No categories yet.</td></tr>}
         </tbody>
-      </table></div>
+      </table>
+      <Pagination totalItems={list.data?.length ?? 0} page={page} onPageChange={setPage} />
+      </div>
 
       <Modal
         open={open}
