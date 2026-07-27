@@ -259,12 +259,21 @@ export class AuthService {
       return this.beginTenantLoginChain(tenantDb, chosen.tenant, user);
     }
 
+    let acceptedTotpStep: bigint | null = null;
     if (user.totpEnabled) {
       if (!dto.totp) throw new UnauthorizedException('TOTP_REQUIRED');
       let secret: string;
       try { secret = decryptSecret(user.totpSecret!); }
       catch { throw new UnauthorizedException('2FA misconfigured — contact an admin'); }
-      if (!authenticator.check(dto.totp, secret)) {
+      // Single-use guard (same as the modern MFA chain in loginMfaTotp): accept the code
+      // only if its time-step is newer than the last one we accepted, so the same code
+      // cannot be replayed within its ~60-90s validity window.
+      const delta = authenticator.checkDelta(dto.totp, secret);
+      if (delta !== null && delta !== undefined) {
+        const step = BigInt(Math.floor(Date.now() / 1000 / 30) + delta);
+        if (user.lastTotpStep == null || step > user.lastTotpStep) acceptedTotpStep = step;
+      }
+      if (acceptedTotpStep == null) {
         await this.recordFailedLogin(tenantDb, user);
         throw new UnauthorizedException('Invalid TOTP code');
       }
@@ -274,7 +283,7 @@ export class AuthService {
     const fresh = await this.maybeRehash(tenantDb, user, dto.password);
     await tenantDb.user.update({
       where: { id: user.id },
-      data: { failedLoginCount: 0, lockedUntil: null },
+      data: { failedLoginCount: 0, lockedUntil: null, ...(acceptedTotpStep != null ? { lastTotpStep: acceptedTotpStep } : {}) },
     });
 
     return this.issueTokens(chosen.tenant.id, chosen.tenant.slug, chosen.tenant.dbName, fresh.id, fresh.role, fresh.email, fresh.tokenVersion);
