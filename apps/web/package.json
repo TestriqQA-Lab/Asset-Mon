@@ -12,7 +12,7 @@
     "@assetmon/shared": "*",
     "@tanstack/react-query": "^5.59.20",
     "lucide-react": "^0.460.0",
-    "next": "14.2.18",
+    "next": "14.2.35",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
