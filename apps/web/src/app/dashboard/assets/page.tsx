@@ -330,14 +330,17 @@ export default function AssetsPage() {
                   )}
                   <TH>Tag</TH>
                   <TH>Name</TH>
-                  <TH className="w-12"></TH>
+                  {/* Photo, cost and purchase date are stripped from the EMPLOYEE payload
+                      by toEmployeeAssetView() — rendering them for employees produced
+                      permanently-empty columns. */}
+                  {isManager && <TH className="w-12"></TH>}
                   <TH>Serial No</TH>
                   <TH>Model</TH>
                   <TH>Category</TH>
                   <TH>Status</TH>
                   <TH>Assigned To</TH>
-                  <TH className="text-right">Cost</TH>
-                  <TH>Purchased</TH>
+                  {isManager && <TH className="text-right">Cost</TH>}
+                  {isManager && <TH>Purchased</TH>}
                   {isManager && <TH className="text-right pr-4">Actions</TH>}
                 </THead>
                 <TBody>
@@ -365,6 +368,7 @@ export default function AssetsPage() {
                         {a.parent && <span className="mr-1 text-ink-400">↳</span>}
                         {a.name}
                       </TD>
+                      {isManager && (
                       <TD className="w-12" onClick={(e: any) => e.stopPropagation()}>
                         {photoSrc ? (
                           <img src={photoSrc} alt={a.name} className="h-8 w-8 rounded object-cover" />
@@ -372,6 +376,7 @@ export default function AssetsPage() {
                           <div className="h-8 w-8 rounded bg-ink-100 flex items-center justify-center text-ink-400 text-[10px]">N/A</div>
                         )}
                       </TD>
+                      )}
                       <TD className="text-ink-600 text-xs whitespace-nowrap">{a.serialNumber || '—'}</TD>
                       <TD className="text-ink-600 text-xs">{a.model || '—'}</TD>
                       <TD className="text-ink-600">{a.category?.name || '—'}</TD>
@@ -379,12 +384,16 @@ export default function AssetsPage() {
                       <TD className="text-ink-600">
                         {assignee ? `${assignee.firstName} ${assignee.lastName}` : '—'}
                       </TD>
+                      {isManager && (
                       <TD className="text-right text-ink-600 whitespace-nowrap">
                         {a.purchaseCost != null ? `$${Number(a.purchaseCost).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
                       </TD>
+                      )}
+                      {isManager && (
                       <TD className="text-ink-600 whitespace-nowrap text-xs">
                         {a.purchaseDate ? new Date(a.purchaseDate).toLocaleDateString() : '—'}
                       </TD>
+                      )}
                       {isManager && (
                       <TD className="text-right pr-4" onClick={(e: any) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
@@ -425,11 +434,11 @@ export default function AssetsPage() {
                     >
                       <div className="mb-1.5 flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
-                          {photoSrc ? (
+                          {isManager && (photoSrc ? (
                             <img src={photoSrc} alt={a.name} className="h-10 w-10 rounded object-cover flex-shrink-0" />
                           ) : (
                             <div className="h-10 w-10 rounded bg-ink-100 flex items-center justify-center text-ink-400 text-[10px] flex-shrink-0">N/A</div>
-                          )}
+                          ))}
                           <div className="min-w-0">
                             <div className="font-mono text-[10px] uppercase tracking-wider text-ink-500">{a.assetTag}</div>
                             <div className="truncate font-medium text-ink-900">{a.name}</div>
@@ -441,8 +450,8 @@ export default function AssetsPage() {
                       <MobileCardRow label="Serial No" value={a.serialNumber || '—'} />
                       <MobileCardRow label="Category" value={a.category?.name || '—'} />
                       <MobileCardRow label="Assigned" value={assignee ? `${assignee.firstName} ${assignee.lastName}` : '—'} />
-                      <MobileCardRow label="Cost" value={a.purchaseCost != null ? `$${Number(a.purchaseCost).toLocaleString()}` : '—'} />
-                      <MobileCardRow label="Purchased" value={a.purchaseDate ? new Date(a.purchaseDate).toLocaleDateString() : '—'} />
+                      {isManager && <MobileCardRow label="Cost" value={a.purchaseCost != null ? `$${Number(a.purchaseCost).toLocaleString()}` : '—'} />}
+                      {isManager && <MobileCardRow label="Purchased" value={a.purchaseDate ? new Date(a.purchaseDate).toLocaleDateString() : '—'} />}
                       {isManager && (
                         <div className="mt-2 flex gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
                           <button className="rounded p-1.5 text-ink-400 hover:bg-brand-50 hover:text-brand-600" onClick={() => openEditModal(a)}><Pencil className="h-4 w-4" /></button>

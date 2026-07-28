@@ -65,24 +65,14 @@ const NAV: NavGroup[] = [
       { href: '/dashboard/depreciation', label: 'Depreciation', icon: <TrendingDown className="h-4 w-4" />, navKey: 'depreciation', module: 'depreciation' },
     ],
   },
-  {
-    label: 'Support',
-    icon: <LifeBuoy className="h-3.5 w-3.5" />,
-    items: [
-      { href: '/dashboard/get-help', label: 'Get help', icon: <LifeBuoy className="h-4 w-4" />, navKey: 'get-help' },
-    ],
-  },
-  {
-    label: 'Admin',
-    icon: <Shield className="h-3.5 w-3.5" />,
-    items: [
-      { href: '/dashboard/admin', label: 'Admin home', icon: <Shield className="h-4 w-4" />, navKey: 'admin-home' },
-    ],
-  },
+  // NOTE: 'Get help' is not a nav group — it lives as a help icon in the top-right
+  // utility area (a dropdown holding a single link is pure friction). 'Admin home'
+  // folded into Settings below for the same reason.
   {
     label: 'Settings',
     icon: <Settings className="h-3.5 w-3.5" />,
     items: [
+      { href: '/dashboard/admin', label: 'Admin home', icon: <Shield className="h-4 w-4" />, navKey: 'admin-home' },
       // People
       { href: '/dashboard/users', label: 'Users & invites', icon: <Users className="h-4 w-4" />, navKey: 'users' },
       // Workspace config
@@ -245,7 +235,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
           <nav className="ml-2 hidden flex-1 items-center gap-0.5 lg:flex" aria-label="Primary">
             {visibleNav.map((group) => (
-              <NavMenu key={group.label} group={group} currentPath={path || ''} badge={group.label === 'Support' ? supportUnread : 0} />
+              <NavMenu key={group.label} group={group} currentPath={path || ''} badge={0} />
             ))}
           </nav>
 
@@ -259,6 +249,23 @@ function Shell({ children }: { children: React.ReactNode }) {
               <span>Search…</span>
               <span className="ml-2 rounded border border-ink-200 px-1.5 py-0.5 text-[10px] text-ink-500">⌘K</span>
             </button>
+            {/* Get help — an icon, not a nav group. Visible on mobile too, since the
+                mobile drawer no longer carries a Support section. */}
+            {perms.canSee('get-help') && (
+              <a
+                href="/dashboard/get-help"
+                className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-transparent text-ink-500 transition hover:border-ink-200 hover:bg-ink-50 hover:text-ink-700"
+                aria-label={supportUnread > 0 ? `Get help (${supportUnread} unread)` : 'Get help'}
+                title="Get help"
+              >
+                <LifeBuoy className="h-4 w-4" />
+                {supportUnread > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">
+                    {supportUnread > 9 ? '9+' : supportUnread}
+                  </span>
+                )}
+              </a>
+            )}
             <NotificationsBell />
             <div className="relative" ref={userMenuRef}>
               <button
