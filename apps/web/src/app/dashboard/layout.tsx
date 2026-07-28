@@ -9,13 +9,14 @@ import { NotificationsBell } from '@/components/NotificationsBell';
 import { AnnouncementBanner } from '@/components/AnnouncementBanner';
 import { THEME_PRESETS, tokensToCss } from '@/lib/themes';
 import type { NavKey } from '@/lib/permissions';
-import { EmptyState } from '@/components/ui';
+import { SETTINGS_ITEMS } from '@/lib/settings-nav';
+import { EmptyState, cn } from '@/components/ui';
 import {
   LayoutDashboard, Package, Tag, Building2,
   Wrench, CalendarClock, ShoppingCart, FileText, TrendingDown,
   AppWindow, KeyRound, ClipboardCheck, BarChart3, ListChecks,
-  Users, Webhook, ScrollText, Settings, LogOut, ChevronDown, Search,
-  Sliders, Palette, Shield, ShieldCheck, CreditCard, Circle, Menu, X, Lock, LifeBuoy,
+  Settings, LogOut, ChevronDown, Search,
+  Palette, ShieldCheck, Menu, X, Lock, LifeBuoy,
   HandHelping,
 } from 'lucide-react';
 
@@ -65,29 +66,13 @@ const NAV: NavGroup[] = [
       { href: '/dashboard/depreciation', label: 'Depreciation', icon: <TrendingDown className="h-4 w-4" />, navKey: 'depreciation', module: 'depreciation' },
     ],
   },
-  // NOTE: 'Get help' is not a nav group — it lives as a help icon in the top-right
-  // utility area (a dropdown holding a single link is pure friction). 'Admin home'
-  // folded into Settings below for the same reason.
-  {
-    label: 'Settings',
-    icon: <Settings className="h-3.5 w-3.5" />,
-    items: [
-      { href: '/dashboard/admin', label: 'Admin home', icon: <Shield className="h-4 w-4" />, navKey: 'admin-home' },
-      // People
-      { href: '/dashboard/users', label: 'Users & invites', icon: <Users className="h-4 w-4" />, navKey: 'users' },
-      // Workspace config
-      { href: '/dashboard/settings/branding', label: 'Branding', icon: <Palette className="h-4 w-4" />, navKey: 'settings:branding' },
-      { href: '/dashboard/settings/modules', label: 'Modules', icon: <Sliders className="h-4 w-4" />, navKey: 'settings:modules' },
-      { href: '/dashboard/settings/statuses', label: 'Asset statuses', icon: <Circle className="h-4 w-4" />, navKey: 'settings:statuses' },
-      { href: '/dashboard/settings/permissions', label: 'Permissions', icon: <Lock className="h-4 w-4" />, navKey: 'settings:permissions' },
-      // Account & billing (Security/2FA lives in the top-right account menu now — every role manages their own)
-      { href: '/dashboard/settings/billing', label: 'Billing', icon: <CreditCard className="h-4 w-4" />, navKey: 'settings:billing' },
-      // Integrations
-      { href: '/dashboard/api-keys', label: 'API keys', icon: <KeyRound className="h-4 w-4" />, navKey: 'api-keys', module: 'integrations' },
-      { href: '/dashboard/webhooks', label: 'Webhooks', icon: <Webhook className="h-4 w-4" />, navKey: 'webhooks', module: 'integrations' },
-      { href: '/dashboard/audit', label: 'Audit log', icon: <ScrollText className="h-4 w-4" />, navKey: 'audit-log' },
-    ],
-  },
+  // NOTE: neither 'Get help' nor 'Settings' is a nav group.
+  //   - Get help is a help icon in the top-right utility area (a dropdown holding a
+  //     single link is pure friction).
+  //   - Workspace configuration moved to its own area at /dashboard/settings, reached
+  //     from the gear icon. It was a nine-item catch-all competing with daily work.
+  //     Those items live in `SETTINGS_GROUPS` (lib/settings-nav) and are still folded
+  //     into the page-level access gate below via SETTINGS_ITEMS.
 ];
 
 // Server-render the `default` preset's CSS variables on `:root` so the first
@@ -173,6 +158,12 @@ function Shell({ children }: { children: React.ReactNode }) {
       .filter((group) => group.items.length > 0);
   }, [perms, settings.modules]);
 
+  // The gear only appears if the role can actually open something in there.
+  const canSeeAnySetting = useMemo(
+    () => SETTINGS_ITEMS.some((i) => (!i.module || settings.modules[i.module]) && perms.canSee(i.navKey)),
+    [perms, settings.modules],
+  );
+
   // Page-level gate: block direct-URL access to any page the role can't see.
   // Match the current path to its nav item (longest href prefix wins) and, if the
   // role's permission for that key is off, render "Not available" instead of the page.
@@ -180,11 +171,12 @@ function Shell({ children }: { children: React.ReactNode }) {
   const activeNavKey = useMemo<NavKey | undefined>(() => {
     const p = path || '';
     let best: { href: string; navKey: NavKey } | undefined;
-    for (const group of NAV) {
-      for (const item of group.items) {
-        if (p === item.href || p.startsWith(item.href + '/')) {
-          if (!best || item.href.length > best.href.length) best = item;
-        }
+    // Settings items are no longer part of NAV, but they must still be gated — omitting
+    // them here would leave every settings page ungated on a direct URL visit.
+    const candidates = [...NAV.flatMap((g) => g.items), ...SETTINGS_ITEMS];
+    for (const item of candidates) {
+      if (p === item.href || p.startsWith(item.href + '/')) {
+        if (!best || item.href.length > best.href.length) best = item;
       }
     }
     return best?.navKey;
@@ -249,6 +241,21 @@ function Shell({ children }: { children: React.ReactNode }) {
               <span>Search…</span>
               <span className="ml-2 rounded border border-ink-200 px-1.5 py-0.5 text-[10px] text-ink-500">⌘K</span>
             </button>
+            {/* Settings — an icon, not a nav group. Only rendered when the role can
+                actually open at least one settings page. */}
+            {canSeeAnySetting && (
+              <a
+                href="/dashboard/settings"
+                className={cn(
+                  'flex h-9 w-9 items-center justify-center rounded-lg border border-transparent transition hover:border-ink-200 hover:bg-ink-50',
+                  (path || '').startsWith('/dashboard/settings') ? 'text-brand-600' : 'text-ink-500 hover:text-ink-700',
+                )}
+                aria-label="Settings"
+                title="Settings"
+              >
+                <Settings className="h-4 w-4" />
+              </a>
+            )}
             {/* Get help — an icon, not a nav group. Visible on mobile too, since the
                 mobile drawer no longer carries a Support section. */}
             {perms.canSee('get-help') && (
