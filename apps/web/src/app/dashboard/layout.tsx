@@ -18,7 +18,7 @@ import {
   Wrench, CalendarClock, ShoppingCart, FileText, TrendingDown,
   ClipboardCheck, BarChart3, ListChecks,
   Settings, LogOut, ChevronDown, Search,
-  Palette, ShieldCheck, Menu, X, Lock, LifeBuoy,
+  Palette, ShieldCheck, Menu, X, Lock, LifeBuoy, PanelLeftClose,
   HandHelping,
 } from 'lucide-react';
 
@@ -152,6 +152,20 @@ function Shell({ children }: { children: React.ReactNode }) {
   const logoUrl = settings.branding.logoUrl
     ? `${process.env.NEXT_PUBLIC_API_URL}${settings.branding.logoUrl}`
     : null;
+
+  // Sidebar collapse. Persisted so the choice survives navigation and reloads, and
+  // read in an effect rather than during render to avoid a hydration mismatch.
+  const [navCollapsed, setNavCollapsed] = useState(false);
+  useEffect(() => {
+    try { setNavCollapsed(localStorage.getItem('am.navCollapsed') === '1'); } catch {}
+  }, []);
+  const toggleNav = () => {
+    setNavCollapsed((v) => {
+      const next = !v;
+      try { localStorage.setItem('am.navCollapsed', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
 
   const perms = usePermissions();
   // Role-based nav filter:
@@ -423,15 +437,40 @@ function Shell({ children }: { children: React.ReactNode }) {
         {/* Persistent sidebar. Data-dense tools need to show where you are while you
             work — hover dropdowns cannot. Mobile keeps the existing drawer. */}
         <aside
-          className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-56 shrink-0 overflow-y-auto border-r border-ink-200 bg-white/60 px-2 py-3 lg:block"
+          className="sticky top-14 hidden h-[calc(100vh-3.5rem)] shrink-0 overflow-hidden border-r border-ink-200 bg-white/60 px-2 py-3 lg:block"
+          // Width is set inline rather than via a utility class so the collapse cannot be
+          // defeated by class ordering or a stale stylesheet. Deliberately NOT animated:
+          // transitioning width reflows the whole page on every frame, and the animation
+          // did not settle reliably — the toggle is instant instead.
+          style={{ width: navCollapsed ? '4rem' : '14rem' }}
           aria-label="Primary"
         >
-          <NavList
-            groups={visibleNav}
-            currentPath={path || ''}
-            isEmployee={perms.role === 'EMPLOYEE'}
-            badges={navBadges}
-          />
+          <div className="flex h-full flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+              <NavList
+                groups={visibleNav}
+                currentPath={path || ''}
+                isEmployee={perms.role === 'EMPLOYEE'}
+                badges={navBadges}
+                collapsed={navCollapsed}
+              />
+            </div>
+            <button
+              onClick={toggleNav}
+              className={cn(
+                'mt-2 flex shrink-0 items-center gap-2 rounded-lg py-2 text-xs text-ink-500 transition hover:bg-ink-100/70 hover:text-ink-800',
+                navCollapsed ? 'justify-center px-0' : 'px-3',
+              )}
+              aria-label={navCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+              title={navCollapsed ? 'Expand' : 'Collapse'}
+              aria-expanded={!navCollapsed}
+            >
+              <PanelLeftClose
+                className={cn('h-4 w-4 transition-transform duration-200', navCollapsed && 'rotate-180')}
+              />
+              {!navCollapsed && <span>Collapse</span>}
+            </button>
+          </div>
         </aside>
 
       <main id="main-content" className="min-w-0 flex-1 px-4 py-5 sm:py-6 lg:px-6">
@@ -462,42 +501,53 @@ function Shell({ children }: { children: React.ReactNode }) {
  * never drift apart. Counts come from `badges`, keyed by navKey.
  */
 function NavList({
-  groups, currentPath, isEmployee, badges, onNavigate,
+  groups, currentPath, isEmployee, badges, onNavigate, collapsed = false,
 }: {
   groups: NavGroup[];
   currentPath: string;
   isEmployee: boolean;
   badges?: Partial<Record<NavKey, number>>;
   onNavigate?: () => void;
+  /** Icon-only rail. Labels become tooltips and counts shrink to a dot. */
+  collapsed?: boolean;
 }) {
   return (
     <>
       {groups.map((group, gi) => (
         <div key={group.label || `g${gi}`} className={gi === 0 ? 'mb-1' : 'mb-1 mt-4'}>
-          {group.label && (
+          {group.label && (collapsed ? (
+            // A rule keeps the grouping legible once the headings are gone.
+            <div className="mx-2 mb-1 border-t border-ink-200" aria-hidden />
+          ) : (
             <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
               {group.label}
             </div>
-          )}
+          ))}
           <div className="space-y-0.5">
             {group.items.map((item) => {
               const active = currentPath === item.href
                 || (item.href !== '/dashboard' && currentPath.startsWith(item.href + '/'));
               const count = badges?.[item.navKey] || 0;
+              const label = (isEmployee && item.employeeLabel) || item.label;
               return (
                 <a
                   key={item.href}
                   href={item.href}
                   onClick={onNavigate}
                   aria-current={active ? 'page' : undefined}
+                  title={collapsed ? (count > 0 ? `${label} (${count})` : label) : undefined}
+                  aria-label={collapsed ? label : undefined}
                   className={cn(
-                    'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors',
+                    'relative flex items-center rounded-lg text-sm transition-colors',
+                    collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-3 py-2',
                     active ? 'bg-ink-900 font-medium text-white' : 'text-ink-700 hover:bg-ink-100/70',
                   )}
                 >
                   <span className={active ? 'text-white' : 'text-ink-400'}>{item.icon}</span>
-                  <span className="truncate">{(isEmployee && item.employeeLabel) || item.label}</span>
-                  {count > 0 && (
+                  {!collapsed && <span className="truncate">{label}</span>}
+                  {count > 0 && (collapsed ? (
+                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" />
+                  ) : (
                     <span
                       className={cn(
                         'ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold leading-none',
@@ -506,7 +556,7 @@ function NavList({
                     >
                       {count > 99 ? '99+' : count}
                     </span>
-                  )}
+                  ))}
                 </a>
               );
             })}
