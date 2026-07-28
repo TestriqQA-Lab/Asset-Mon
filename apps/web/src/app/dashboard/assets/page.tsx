@@ -12,8 +12,8 @@ import {
   MobileCard, MobileCardRow,
 } from '@/components/ui';
 
-type Filter = { q: string; status: string; categoryId: string; departmentId: string; parentId: string; onlyTopLevel: boolean };
-const EMPTY_FILTER: Filter = { q: '', status: '', categoryId: '', departmentId: '', parentId: '', onlyTopLevel: false };
+type Filter = { q: string; status: string; categoryId: string; departmentId: string; parentId: string; onlyTopLevel: boolean; assignedToMe: boolean };
+const EMPTY_FILTER: Filter = { q: '', status: '', categoryId: '', departmentId: '', parentId: '', onlyTopLevel: false, assignedToMe: false };
 
 export default function AssetsPage() {
   const router = useRouter();
@@ -27,6 +27,8 @@ export default function AssetsPage() {
     departmentId: searchParams?.get('departmentId') || '',
     parentId: searchParams?.get('parentId') || '',
     onlyTopLevel: searchParams?.get('onlyTopLevel') === '1',
+    // Driven by the "Assigned to me" tab in the Assets tab strip.
+    assignedToMe: searchParams?.get('assignedToMe') === '1',
   }));
   const [activeViewId, setActiveViewId] = useState<string>('');
 
@@ -42,6 +44,7 @@ export default function AssetsPage() {
   if (filter.departmentId) params.set('departmentId', filter.departmentId);
   if (filter.parentId) params.set('parentId', filter.parentId);
   if (filter.onlyTopLevel) params.set('onlyTopLevel', '1');
+  if (filter.assignedToMe) params.set('assignedToMe', '1');
   const list = useQuery({
     queryKey: ['assets', filter],
     queryFn: () => api(`/assets?${params.toString()}`),

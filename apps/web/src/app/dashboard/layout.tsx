@@ -10,11 +10,13 @@ import { AnnouncementBanner } from '@/components/AnnouncementBanner';
 import { THEME_PRESETS, tokensToCss } from '@/lib/themes';
 import type { NavKey } from '@/lib/permissions';
 import { SETTINGS_ITEMS } from '@/lib/settings-nav';
+import { isAssetsAreaPath, ASSETS_TABS } from '@/lib/assets-nav';
+import { AssetsTabs } from '@/components/AssetsTabs';
 import { EmptyState, cn } from '@/components/ui';
 import {
-  LayoutDashboard, Package, Tag, Building2,
+  LayoutDashboard, Package,
   Wrench, CalendarClock, ShoppingCart, FileText, TrendingDown,
-  AppWindow, KeyRound, ClipboardCheck, BarChart3, ListChecks,
+  ClipboardCheck, BarChart3, ListChecks,
   Settings, LogOut, ChevronDown, Search,
   Palette, ShieldCheck, Menu, X, Lock, LifeBuoy,
   HandHelping,
@@ -37,13 +39,11 @@ const NAV: NavGroup[] = [
     label: 'Inventory',
     icon: <Package className="h-3.5 w-3.5" />,
     items: [
+      // Assets is one destination with a tab strip (ASSETS_TABS): categories,
+      // departments, statuses, software and licences all classify or configure assets
+      // rather than sitting beside them. They are still fed into the page-level access
+      // gate below. Locations was removed from the product UI entirely.
       { href: '/dashboard/assets', label: 'Assets', icon: <Package className="h-4 w-4" />, navKey: 'assets' },
-      { href: '/dashboard/categories', label: 'Categories', icon: <Tag className="h-4 w-4" />, navKey: 'categories' },
-      // Locations is hidden from the Inventory menu. The page + API still exist and
-      // assets keep their location field — restore the nav item to re-expose it.
-      { href: '/dashboard/departments', label: 'Departments', icon: <Building2 className="h-4 w-4" />, navKey: 'departments' },
-      { href: '/dashboard/software', label: 'Software', icon: <AppWindow className="h-4 w-4" />, navKey: 'software', module: 'software' },
-      { href: '/dashboard/licenses', label: 'Licenses', icon: <KeyRound className="h-4 w-4" />, navKey: 'licenses', module: 'software' },
     ],
   },
   {
@@ -173,7 +173,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     let best: { href: string; navKey: NavKey } | undefined;
     // Settings items are no longer part of NAV, but they must still be gated — omitting
     // them here would leave every settings page ungated on a direct URL visit.
-    const candidates = [...NAV.flatMap((g) => g.items), ...SETTINGS_ITEMS];
+    const candidates = [...NAV.flatMap((g) => g.items), ...SETTINGS_ITEMS, ...ASSETS_TABS];
     for (const item of candidates) {
       if (p === item.href || p.startsWith(item.href + '/')) {
         if (!best || item.href.length > best.href.length) best = item;
@@ -418,7 +418,14 @@ function Shell({ children }: { children: React.ReactNode }) {
               description="Your role doesn't have access to this page. Ask a workspace admin if you need it."
             />
           </div>
-        ) : children}
+        ) : (
+          <>
+            {/* Rendered here rather than in each page so every route in the Assets
+                area gets the same strip without repeating markup. */}
+            {isAssetsAreaPath(path || '') && <AssetsTabs />}
+            {children}
+          </>
+        )}
       </main>
     </div>
   );

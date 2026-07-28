@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import {
-  Users, Lock, Palette, Sliders, Circle, CreditCard, KeyRound, Webhook,
+  Users, Lock, Palette, Sliders, CreditCard, KeyRound, Webhook,
   ScrollText, Shield,
 } from 'lucide-react';
 import type { NavKey } from '@/lib/permissions';
@@ -40,7 +40,8 @@ export const SETTINGS_GROUPS: SettingsNavGroup[] = [
     items: [
       { href: '/dashboard/settings/branding', label: 'Branding', description: 'Logo, colours and workspace name', icon: <Palette className="h-4 w-4" />, navKey: 'settings:branding' },
       { href: '/dashboard/settings/modules', label: 'Modules', description: 'Turn features on or off', icon: <Sliders className="h-4 w-4" />, navKey: 'settings:modules' },
-      { href: '/dashboard/settings/statuses', label: 'Asset statuses', description: 'Customise the status labels on assets', icon: <Circle className="h-4 w-4" />, navKey: 'settings:statuses' },
+      // Asset statuses is deliberately absent — it configures assets, so it lives as a
+      // tab in the Assets area (see lib/assets-nav). The URL is unchanged.
     ],
   },
   {

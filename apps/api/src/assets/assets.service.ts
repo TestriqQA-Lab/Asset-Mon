@@ -14,6 +14,7 @@ export type ListAssetsQuery = {
   parentId?: string;
   onlyTopLevel?: boolean;
   assignedTo?: string;
+  assignedToMe?: string;
   page?: number;
   pageSize?: number;
 };
@@ -39,6 +40,12 @@ export class AssetsService {
     if (scope) where.departmentId = scope;
     // EMPLOYEEs without an explicit dept scope now see all assets globally
     // as per user request (removed the where.assignments restriction).
+    // "Assigned to me" — narrows to the caller's currently-held assets. Always keyed
+    // off the session user, never a caller-supplied id, so it cannot be used to read
+    // another person's holdings.
+    if (q.assignedToMe) {
+      where.assignments = { some: { userId: this.ctx.userId, returnedAt: null } };
+    }
     if (q.q) {
       const term = q.q.trim();
       where.OR = [

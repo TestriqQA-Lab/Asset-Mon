@@ -68,6 +68,8 @@ export class ListAssetsQueryDto {
   @IsOptional() @IsUUID() departmentId?: string;
   @IsOptional() @IsUUID() parentId?: string;
   @IsOptional() @IsString() onlyTopLevel?: string;
+  // Presence of any truthy value narrows the list to the caller's own assets.
+  @IsOptional() @IsString() assignedToMe?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) pageSize?: number;
 }
