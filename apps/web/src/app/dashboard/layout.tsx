@@ -22,48 +22,60 @@ import {
   HandHelping,
 } from 'lucide-react';
 
-type NavItem = { href: string; label: string; icon: React.ReactNode; navKey: NavKey; module?: ModuleKey };
-type NavGroup = { label: string; icon: React.ReactNode; items: NavItem[] };
+type NavItem = {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+  navKey: NavKey;
+  module?: ModuleKey;
+  /** Shown to employees instead of `label` — they meet this app rarely and think in
+   *  plain words, not system nouns ("Get help", not "Service tickets"). */
+  employeeLabel?: string;
+};
+/** An empty `label` renders the items with no section heading (used for Dashboard). */
+type NavGroup = { label: string; items: NavItem[] };
 
+/**
+ * Sidebar navigation, ordered by how often a person actually needs each thing rather
+ * than by how the data is modelled. Work queues sit at the top; records and insights
+ * below. Assets is a single entry because its sub-pages are tabs (see lib/assets-nav),
+ * and workspace settings are not here at all — they live behind the gear icon.
+ */
 const NAV: NavGroup[] = [
   {
-    label: 'Overview',
-    icon: <LayoutDashboard className="h-3.5 w-3.5" />,
+    label: '',
     items: [
-      { href: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" />, navKey: 'dashboard' },
-      { href: '/dashboard/reports', label: 'Reports', icon: <BarChart3 className="h-4 w-4" />, navKey: 'reports', module: 'reports' },
-      { href: '/dashboard/data-quality', label: 'Data quality', icon: <ListChecks className="h-4 w-4" />, navKey: 'data-quality' },
+      { href: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" />, navKey: 'dashboard', employeeLabel: 'Home' },
     ],
   },
   {
-    label: 'Inventory',
-    icon: <Package className="h-3.5 w-3.5" />,
+    label: 'Work',
+    items: [
+      { href: '/dashboard/asset-requests', label: 'Asset requests', icon: <HandHelping className="h-4 w-4" />, navKey: 'asset-requests', employeeLabel: 'Ask for something' },
+      { href: '/dashboard/purchase-requests', label: 'Purchase requests', icon: <FileText className="h-4 w-4" />, navKey: 'purchase-requests', module: 'procurement' },
+      { href: '/dashboard/tickets', label: 'Service tickets', icon: <Wrench className="h-4 w-4" />, navKey: 'tickets', module: 'tickets', employeeLabel: 'Get help' },
+      { href: '/dashboard/maintenance', label: 'Maintenance', icon: <CalendarClock className="h-4 w-4" />, navKey: 'maintenance', module: 'maintenance' },
+      { href: '/dashboard/reservations', label: 'Reservations', icon: <CalendarClock className="h-4 w-4" />, navKey: 'reservations', module: 'reservations', employeeLabel: 'Bookings' },
+      { href: '/dashboard/audit-sessions', label: 'Physical audits', icon: <ClipboardCheck className="h-4 w-4" />, navKey: 'audit-sessions', module: 'audits' },
+    ],
+  },
+  {
+    label: 'Records',
     items: [
       // Assets is one destination with a tab strip (ASSETS_TABS): categories,
-      // departments, statuses, software and licences all classify or configure assets
+      // departments, statuses, software and licences classify or configure assets
       // rather than sitting beside them. They are still fed into the page-level access
       // gate below. Locations was removed from the product UI entirely.
-      { href: '/dashboard/assets', label: 'Assets', icon: <Package className="h-4 w-4" />, navKey: 'assets' },
-    ],
-  },
-  {
-    label: 'Lifecycle',
-    icon: <Wrench className="h-3.5 w-3.5" />,
-    items: [
-      { href: '/dashboard/tickets', label: 'Service tickets', icon: <Wrench className="h-4 w-4" />, navKey: 'tickets', module: 'tickets' },
-      { href: '/dashboard/maintenance', label: 'Maintenance', icon: <CalendarClock className="h-4 w-4" />, navKey: 'maintenance', module: 'maintenance' },
-      { href: '/dashboard/reservations', label: 'Reservations', icon: <CalendarClock className="h-4 w-4" />, navKey: 'reservations', module: 'reservations' },
-      { href: '/dashboard/audit-sessions', label: 'Physical audits', icon: <ClipboardCheck className="h-4 w-4" />, navKey: 'audit-sessions', module: 'audits' },
-      { href: '/dashboard/asset-requests', label: 'Asset requests', icon: <HandHelping className="h-4 w-4" />, navKey: 'asset-requests' },
-    ],
-  },
-  {
-    label: 'Finance',
-    icon: <ShoppingCart className="h-3.5 w-3.5" />,
-    items: [
-      { href: '/dashboard/purchase-requests', label: 'Purchase requests', icon: <FileText className="h-4 w-4" />, navKey: 'purchase-requests', module: 'procurement' },
+      { href: '/dashboard/assets', label: 'Assets', icon: <Package className="h-4 w-4" />, navKey: 'assets', employeeLabel: 'My equipment' },
       { href: '/dashboard/purchase-orders', label: 'Purchase orders', icon: <ShoppingCart className="h-4 w-4" />, navKey: 'purchase-orders', module: 'procurement' },
       { href: '/dashboard/depreciation', label: 'Depreciation', icon: <TrendingDown className="h-4 w-4" />, navKey: 'depreciation', module: 'depreciation' },
+    ],
+  },
+  {
+    label: 'Insights',
+    items: [
+      { href: '/dashboard/reports', label: 'Reports', icon: <BarChart3 className="h-4 w-4" />, navKey: 'reports', module: 'reports' },
+      { href: '/dashboard/data-quality', label: 'Data quality', icon: <ListChecks className="h-4 w-4" />, navKey: 'data-quality' },
     ],
   },
   // NOTE: neither 'Get help' nor 'Settings' is a nav group.
@@ -164,6 +176,29 @@ function Shell({ children }: { children: React.ReactNode }) {
     [perms, settings.modules],
   );
 
+  // Queue counts on the sidebar. Both endpoints already existed, so this needs no new
+  // backend. A manager sees the workspace queue; an employee sees only their own
+  // tickets, and gets no approval badge because they are not the approver.
+  const isEmployee = perms.role === 'EMPLOYEE';
+  const navStats = useQuery({
+    queryKey: ['nav-stats'],
+    queryFn: () => api<any>('/dashboard/stats'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const navRequestStats = useQuery({
+    queryKey: ['nav-request-stats'],
+    queryFn: () => api<any>('/asset-requests/stats'),
+    enabled: !isEmployee && perms.canSee('asset-requests'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const navBadges = useMemo<Partial<Record<NavKey, number>>>(() => ({
+    tickets: (isEmployee ? navStats.data?.myOpenTickets : navStats.data?.openTickets) || 0,
+    maintenance: isEmployee ? 0 : (navStats.data?.dueMaintenance || 0),
+    'asset-requests': navRequestStats.data?.pending || 0,
+  }), [isEmployee, navStats.data, navRequestStats.data]);
+
   // Page-level gate: block direct-URL access to any page the role can't see.
   // Match the current path to its nav item (longest href prefix wins) and, if the
   // role's permission for that key is off, render "Not available" instead of the page.
@@ -224,12 +259,6 @@ function Shell({ children }: { children: React.ReactNode }) {
               </>
             )}
           </a>
-
-          <nav className="ml-2 hidden flex-1 items-center gap-0.5 lg:flex" aria-label="Primary">
-            {visibleNav.map((group) => (
-              <NavMenu key={group.label} group={group} currentPath={path || ''} badge={0} />
-            ))}
-          </nav>
 
           <div className="ml-auto flex items-center gap-2">
             <button
@@ -374,32 +403,13 @@ function Shell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
           <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Mobile">
-            {visibleNav.map((group) => (
-              <div key={group.label} className="mb-3">
-                <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-400">{group.label}</div>
-                <div className="space-y-0.5">
-                  {group.items.map((item) => {
-                    const active = path === item.href || (item.href !== '/dashboard' && path?.startsWith(item.href + '/'));
-                    return (
-                      <a
-                        key={item.href}
-                        href={item.href}
-                        className={
-                          'flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm transition-colors ' +
-                          (active ? 'bg-ink-900 text-white' : 'text-ink-700 hover:bg-ink-50')
-                        }
-                      >
-                        {item.icon}
-                        {item.label}
-                        {item.navKey === 'get-help' && supportUnread > 0 && (
-                          <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">{supportUnread > 9 ? '9+' : supportUnread}</span>
-                        )}
-                      </a>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+            <NavList
+              groups={visibleNav}
+              currentPath={path || ''}
+              isEmployee={perms.role === 'EMPLOYEE'}
+              badges={navBadges}
+              onNavigate={() => setMobileOpen(false)}
+            />
           </nav>
           <div className="shrink-0 border-t border-ink-100 px-3 py-2 text-[11px] text-ink-500">
             Signed in as <span className="font-medium text-ink-700">{session?.user.email}</span>
@@ -409,7 +419,22 @@ function Shell({ children }: { children: React.ReactNode }) {
 
       <AnnouncementBanner />
       <TrialBanner isAdmin={isAdmin} />
-      <main id="main-content" className="relative z-10 flex-1 px-4 py-5 sm:py-6 lg:px-6">
+      <div className="relative z-10 flex flex-1">
+        {/* Persistent sidebar. Data-dense tools need to show where you are while you
+            work — hover dropdowns cannot. Mobile keeps the existing drawer. */}
+        <aside
+          className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-56 shrink-0 overflow-y-auto border-r border-ink-200 bg-white/60 px-2 py-3 lg:block"
+          aria-label="Primary"
+        >
+          <NavList
+            groups={visibleNav}
+            currentPath={path || ''}
+            isEmployee={perms.role === 'EMPLOYEE'}
+            badges={navBadges}
+          />
+        </aside>
+
+      <main id="main-content" className="min-w-0 flex-1 px-4 py-5 sm:py-6 lg:px-6">
         {pageBlocked ? (
           <div className="mx-auto max-w-md pt-6">
             <EmptyState
@@ -427,74 +452,68 @@ function Shell({ children }: { children: React.ReactNode }) {
           </>
         )}
       </main>
+      </div>
     </div>
   );
 }
 
-function NavMenu({ group, currentPath, badge = 0 }: { group: NavGroup; currentPath: string; badge?: number }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const closeTimer = useRef<number | null>(null);
-
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, []);
-
-  const groupActive = group.items.some((it) =>
-    currentPath === it.href || (it.href !== '/dashboard' && currentPath.startsWith(it.href + '/')),
-  );
-
-  const onEnter = () => {
-    if (closeTimer.current) { window.clearTimeout(closeTimer.current); closeTimer.current = null; }
-    setOpen(true);
-  };
-  const onLeave = () => {
-    if (closeTimer.current) window.clearTimeout(closeTimer.current);
-    closeTimer.current = window.setTimeout(() => setOpen(false), 120);
-  };
-
+/**
+ * The nav list. Shared by the desktop sidebar and the mobile drawer so the two can
+ * never drift apart. Counts come from `badges`, keyed by navKey.
+ */
+function NavList({
+  groups, currentPath, isEmployee, badges, onNavigate,
+}: {
+  groups: NavGroup[];
+  currentPath: string;
+  isEmployee: boolean;
+  badges?: Partial<Record<NavKey, number>>;
+  onNavigate?: () => void;
+}) {
   return (
-    <div ref={wrapRef} className="relative" onMouseEnter={onEnter} onMouseLeave={onLeave}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className={
-          'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors ' +
-          (groupActive ? 'bg-ink-100 text-ink-900' : 'text-ink-600 hover:bg-ink-50 hover:text-ink-900')
-        }
-        aria-haspopup="true"
-        aria-expanded={open}
-      >
-        <span className={groupActive ? 'text-ink-700' : 'text-ink-400'}>{group.icon}</span>
-        {group.label}
-        {badge > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">{badge > 9 ? '9+' : badge}</span>}
-        <ChevronDown className={'h-3.5 w-3.5 text-ink-400 transition-transform ' + (open ? 'rotate-180' : '')} />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-56 animate-slide-up rounded-xl border border-ink-200 bg-white p-1 shadow-pop">
-          {group.items.map((item) => {
-            const active = currentPath === item.href || (item.href !== '/dashboard' && currentPath.startsWith(item.href + '/'));
-            return (
-              <a
-                key={item.href}
-                href={item.href}
-                className={
-                  'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors ' +
-                  (active ? 'bg-ink-900 text-white' : 'text-ink-700 hover:bg-ink-50')
-                }
-                onClick={() => setOpen(false)}
-              >
-                <span className={active ? 'text-white' : 'text-ink-400'}>{item.icon}</span>
-                {item.label}
-              </a>
-            );
-          })}
+    <>
+      {groups.map((group, gi) => (
+        <div key={group.label || `g${gi}`} className={gi === 0 ? 'mb-1' : 'mb-1 mt-4'}>
+          {group.label && (
+            <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+              {group.label}
+            </div>
+          )}
+          <div className="space-y-0.5">
+            {group.items.map((item) => {
+              const active = currentPath === item.href
+                || (item.href !== '/dashboard' && currentPath.startsWith(item.href + '/'));
+              const count = badges?.[item.navKey] || 0;
+              return (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  onClick={onNavigate}
+                  aria-current={active ? 'page' : undefined}
+                  className={cn(
+                    'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors',
+                    active ? 'bg-ink-900 font-medium text-white' : 'text-ink-700 hover:bg-ink-100/70',
+                  )}
+                >
+                  <span className={active ? 'text-white' : 'text-ink-400'}>{item.icon}</span>
+                  <span className="truncate">{(isEmployee && item.employeeLabel) || item.label}</span>
+                  {count > 0 && (
+                    <span
+                      className={cn(
+                        'ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold leading-none',
+                        active ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800',
+                      )}
+                    >
+                      {count > 99 ? '99+' : count}
+                    </span>
+                  )}
+                </a>
+              );
+            })}
+          </div>
         </div>
-      )}
-    </div>
+      ))}
+    </>
   );
 }
 
