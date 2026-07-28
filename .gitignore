@@ -52,7 +52,18 @@ packages/*/.prisma/
 /ticket-flow-diagram.*
 /AssetMon-Admin-Panel-Feature-Report.pdf
 
-# ...except the run-book scripts referenced in the docs — keep these visible.
-!/hold-backend.sh
-!/rebuild-api-local.sh
-!/check-stack.sh
+# Local run-book scripts — useful day to day, but machine-specific, so they stay
+# out of the shared repo.
+/hold-backend.sh
+/rebuild-api-local.sh
+
+# Local agent / editor tooling config
+.agents/
+.claude/
+
+# Research and one-off reports kept locally. Listed by name on purpose: build
+# specs under docs/ are still expected to be committed with their slice, so this
+# must not become a blanket docs/ rule.
+/docs/admin-panel-slice7b-build.md
+/docs/deployment-fly-vs-aws.md
+/docs/snipeit-analysis-report.md
