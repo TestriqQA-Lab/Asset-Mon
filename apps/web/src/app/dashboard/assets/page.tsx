@@ -12,8 +12,8 @@ import {
   MobileCard, MobileCardRow,
 } from '@/components/ui';
 
-type Filter = { q: string; status: string; categoryId: string; locationId: string; departmentId: string; parentId: string; onlyTopLevel: boolean };
-const EMPTY_FILTER: Filter = { q: '', status: '', categoryId: '', locationId: '', departmentId: '', parentId: '', onlyTopLevel: false };
+type Filter = { q: string; status: string; categoryId: string; departmentId: string; parentId: string; onlyTopLevel: boolean };
+const EMPTY_FILTER: Filter = { q: '', status: '', categoryId: '', departmentId: '', parentId: '', onlyTopLevel: false };
 
 export default function AssetsPage() {
   const router = useRouter();
@@ -24,7 +24,6 @@ export default function AssetsPage() {
     q: searchParams?.get('q') || '',
     status: searchParams?.get('status') || '',
     categoryId: searchParams?.get('categoryId') || '',
-    locationId: searchParams?.get('locationId') || '',
     departmentId: searchParams?.get('departmentId') || '',
     parentId: searchParams?.get('parentId') || '',
     onlyTopLevel: searchParams?.get('onlyTopLevel') === '1',
@@ -32,7 +31,6 @@ export default function AssetsPage() {
   const [activeViewId, setActiveViewId] = useState<string>('');
 
   const categories = useQuery({ queryKey: ['categories'], queryFn: () => api('/categories') });
-  const locations = useQuery({ queryKey: ['locations'], queryFn: () => api('/locations') });
   const departments = useQuery({ queryKey: ['departments'], queryFn: () => api('/departments') });
   const statusDefs = useQuery({ queryKey: ['status-defs'], queryFn: () => api('/asset-status-defs') });
   const savedViews = useQuery({ queryKey: ['saved-views', 'assets'], queryFn: () => api('/saved-views?kind=assets') });
@@ -41,7 +39,6 @@ export default function AssetsPage() {
   if (filter.q) params.set('q', filter.q);
   if (filter.status) params.set('status', filter.status);
   if (filter.categoryId) params.set('categoryId', filter.categoryId);
-  if (filter.locationId) params.set('locationId', filter.locationId);
   if (filter.departmentId) params.set('departmentId', filter.departmentId);
   if (filter.parentId) params.set('parentId', filter.parentId);
   if (filter.onlyTopLevel) params.set('onlyTopLevel', '1');
@@ -60,7 +57,7 @@ export default function AssetsPage() {
   };
   const EMPTY_FORM = {
     name: '', assetTag: '', serialNumber: '', model: '', status: '', statusDefId: '',
-    categoryId: '', departmentId: '', locationId: '',
+    categoryId: '', departmentId: '',
     purchaseDate: '', purchaseCost: '', warrantyEnd: '', orderNumber: '', notes: '',
     requestable: false, imageFile: null as File | null, _showExtra: false,
   };
@@ -76,7 +73,6 @@ export default function AssetsPage() {
       statusDefId: a.statusDefId || '',
       categoryId: a.categoryId || '',
       departmentId: a.departmentId || '',
-      locationId: a.locationId || '',
       purchaseDate: a.purchaseDate ? new Date(a.purchaseDate).toISOString().slice(0, 10) : '',
       purchaseCost: a.purchaseCost ?? '',
       warrantyEnd: a.warrantyEnd ? new Date(a.warrantyEnd).toISOString().slice(0, 10) : '',
@@ -116,7 +112,9 @@ export default function AssetsPage() {
       // Remove client-only state
       delete body.imageFile;
       delete body._showExtra;
-      ['locationId', 'categoryId', 'departmentId', 'statusDefId'].forEach((k) => { if (!body[k]) body[k] = null; });
+      // NOTE: locationId is deliberately absent — Location was removed from the UI, and
+      // including it here would null out each asset's stored location on every save.
+      ['categoryId', 'departmentId', 'statusDefId'].forEach((k) => { if (!body[k]) body[k] = null; });
       // Strip optional empty strings — class-validator @IsOptional only skips undefined/null,
       // so '' falls through to @IsISO8601 / @IsNumber and fails with a confusing 400.
       ['purchaseDate', 'warrantyEnd', 'serialNumber', 'model', 'notes', 'orderNumber', 'status'].forEach((k) => {
@@ -160,7 +158,9 @@ export default function AssetsPage() {
       const body: any = { ...form };
       delete body.imageFile;
       delete body._showExtra;
-      ['locationId', 'categoryId', 'departmentId', 'statusDefId'].forEach((k) => { if (!body[k]) body[k] = null; });
+      // NOTE: locationId is deliberately absent — Location was removed from the UI, and
+      // including it here would null out each asset's stored location on every save.
+      ['categoryId', 'departmentId', 'statusDefId'].forEach((k) => { if (!body[k]) body[k] = null; });
       ['purchaseDate', 'warrantyEnd', 'serialNumber', 'model', 'notes', 'orderNumber', 'status'].forEach((k) => {
         if (body[k] === '' || body[k] === undefined) delete body[k];
       });
@@ -274,10 +274,6 @@ export default function AssetsPage() {
             <option value="">All categories</option>
             {categories.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          <select className={selectClass + ' md:w-44'} value={filter.locationId} onChange={(e) => setFilter({ ...filter, locationId: e.target.value })}>
-            <option value="">All locations</option>
-            {locations.data?.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
           <select className={selectClass + ' md:w-44'} value={filter.departmentId} onChange={(e) => setFilter({ ...filter, departmentId: e.target.value })}>
             <option value="">All departments</option>
             {departments.data?.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -312,15 +308,6 @@ export default function AssetsPage() {
                   >
                     <option value="" disabled>Set status…</option>
                     {(statusDefs.data || []).map((d: any) => <option key={d.id} value={d.mapsTo}>{d.label}</option>)}
-                  </select>
-                  <select
-                    className="h-8 rounded-md border border-ink-200 bg-white px-2 text-xs"
-                    onChange={(e) => { if (e.target.value) bulkUpdate.mutate({ locationId: e.target.value === '__none' ? null : e.target.value }); e.target.value = ''; }}
-                    defaultValue=""
-                  >
-                    <option value="" disabled>Set location…</option>
-                    <option value="__none">— None —</option>
-                    {locations.data?.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
                   </select>
                   <Button variant="secondary" size="sm" icon={<Archive className="h-3.5 w-3.5" />} onClick={() => bulkUpdate.mutate({ status: 'ARCHIVED' })}>Archive</Button>
                   <Button variant="danger" size="sm" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => { if (confirm(`Delete ${selected.size} assets?`)) bulkDelete.mutate(); }}>Delete</Button>
@@ -514,12 +501,6 @@ export default function AssetsPage() {
                 {(statusDefs.data || []).map((d: any) => <option key={d.id} value={d.id}>{d.label}</option>)}
               </select>
             </Field>
-            <Field label="Location" hint="optional">
-              <select className={selectClass} value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })}>
-                <option value="">— None —</option>
-                {locations.data?.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </select>
-            </Field>
           </div>
           <Field label="Notes" hint="optional"><textarea className={textareaClass} rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
           <label className="flex items-center gap-2.5 cursor-pointer select-none">
@@ -627,12 +608,6 @@ export default function AssetsPage() {
               }}>
                 <option value="">— Default (Available) —</option>
                 {(statusDefs.data || []).map((d: any) => <option key={d.id} value={d.id}>{d.label}</option>)}
-              </select>
-            </Field>
-            <Field label="Location">
-              <select className={selectClass} value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })}>
-                <option value="">— None —</option>
-                {locations.data?.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </Field>
           </div>

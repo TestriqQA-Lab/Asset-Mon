@@ -184,7 +184,10 @@ export const NAV_LABELS: Record<NavKey, string> = {
 /** Grouping used in both the dashboard nav and the permissions matrix. */
 export const NAV_GROUPS: Array<{ label: string; keys: NavKey[] }> = [
   { label: 'Overview',  keys: ['dashboard', 'reports', 'data-quality'] },
-  { label: 'Inventory', keys: ['assets', 'categories', 'locations', 'departments', 'software', 'licenses'] },
+  // 'locations' intentionally omitted — Location was removed from the UI, so it should
+  // not appear in the nav or the permissions matrix. The NavKey itself is kept so any
+  // previously-stored tenant permission entries stay valid.
+  { label: 'Inventory', keys: ['assets', 'categories', 'departments', 'software', 'licenses'] },
   { label: 'Lifecycle', keys: ['tickets', 'maintenance', 'reservations', 'audit-sessions', 'asset-requests'] },
   { label: 'Finance',   keys: ['purchase-requests', 'purchase-orders', 'depreciation'] },
   { label: 'Settings',  keys: [

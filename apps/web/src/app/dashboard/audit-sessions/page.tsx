@@ -10,12 +10,11 @@ export default function AuditSessionsPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ['audit-sessions'], queryFn: () => api('/audit-sessions') });
-  const locations = useQuery({ queryKey: ['locations'], queryFn: () => api('/locations') });
   const departments = useQuery({ queryKey: ['departments'], queryFn: () => api('/departments') });
   const categories = useQuery({ queryKey: ['categories'], queryFn: () => api('/categories') });
 
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<any>({ name: '', scheduledAt: '', locationId: '', departmentId: '', categoryId: '' });
+  const [form, setForm] = useState<any>({ name: '', scheduledAt: '', departmentId: '', categoryId: '' });
   const create = useMutation({
     mutationFn: () => api('/audit-sessions', {
       method: 'POST',
@@ -23,7 +22,6 @@ export default function AuditSessionsPage() {
         name: form.name,
         scheduledAt: form.scheduledAt ? new Date(form.scheduledAt).toISOString() : undefined,
         scope: {
-          locationId: form.locationId || undefined,
           departmentId: form.departmentId || undefined,
           categoryId: form.categoryId || undefined,
         },
@@ -36,7 +34,7 @@ export default function AuditSessionsPage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-semibold sm:text-2xl">Physical audit sessions</h1>
-        <button className={btnPrimary + ' sm:self-start'} onClick={() => { setForm({ name: '', scheduledAt: '', locationId: '', departmentId: '', categoryId: '' }); setOpen(true); }}>New session</button>
+        <button className={btnPrimary + ' sm:self-start'} onClick={() => { setForm({ name: '', scheduledAt: '', departmentId: '', categoryId: '' }); setOpen(true); }}>New session</button>
       </div>
 
       <div className="overflow-x-auto rounded-lg border bg-white"><table className="w-full text-sm">
@@ -81,13 +79,7 @@ export default function AuditSessionsPage() {
           <Field label="Scheduled at"><input className={inputClass} type="datetime-local" value={form.scheduledAt} onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })} /></Field>
           <div className="rounded-md bg-gray-50 p-3">
             <div className="mb-2 text-xs uppercase text-gray-500">Scope (optional — filters expected assets)</div>
-            <div className="grid grid-cols-3 gap-2">
-              <Field label="Location">
-                <select className={inputClass} value={form.locationId} onChange={(e) => setForm({ ...form, locationId: e.target.value })}>
-                  <option value="">All</option>
-                  {locations.data?.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                </select>
-              </Field>
+            <div className="grid grid-cols-2 gap-2">
               <Field label="Department">
                 <select className={inputClass} value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })}>
                   <option value="">All</option>

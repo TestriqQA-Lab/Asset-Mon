@@ -31,7 +31,6 @@ export default function AssetDetailPage() {
   const depreciation = useQuery({ queryKey: ['asset-dep', id], queryFn: () => api(`/depreciation/${id}`), enabled: depreciationOn });
   const users = useQuery({ queryKey: ['users'], queryFn: () => api('/users') });
   const categories = useQuery({ queryKey: ['categories'], queryFn: () => api('/categories') });
-  const locations = useQuery({ queryKey: ['locations'], queryFn: () => api('/locations') });
   const departments = useQuery({ queryKey: ['departments'], queryFn: () => api('/departments') });
   const vendors = useQuery({ queryKey: ['vendors'], queryFn: () => api('/vendors') });
   const statusDefs = useQuery({ queryKey: ['status-defs'], queryFn: () => api('/asset-status-defs') });
@@ -107,7 +106,7 @@ export default function AssetDetailPage() {
     setDraft({
       name: a.name, assetTag: a.assetTag, serialNumber: a.serialNumber || '', model: a.model || '',
       status: a.status, notes: a.notes || '',
-      categoryId: a.categoryId, locationId: a.locationId || '', departmentId: a.departmentId || '', vendorId: a.vendorId || '',
+      categoryId: a.categoryId, departmentId: a.departmentId || '', vendorId: a.vendorId || '',
       parentId: a.parentId || '',
       purchaseDate: a.purchaseDate ? a.purchaseDate.slice(0, 10) : '',
       purchaseCost: a.purchaseCost || '',
@@ -122,7 +121,9 @@ export default function AssetDetailPage() {
 
   const saveEdit = () => {
     const body = { ...draft };
-    ['locationId', 'departmentId', 'vendorId', 'parentId'].forEach((k) => { if (!body[k]) body[k] = null; });
+    // locationId omitted on purpose — Location is removed from the UI; sending it would
+    // clear each asset's stored location on every save.
+    ['departmentId', 'vendorId', 'parentId'].forEach((k) => { if (!body[k]) body[k] = null; });
     if (body.purchaseCost === '') body.purchaseCost = null;
     else if (body.purchaseCost) body.purchaseCost = Number(body.purchaseCost);
     if (body.salvageValue === '') body.salvageValue = null;
@@ -210,13 +211,6 @@ export default function AssetDetailPage() {
           <Row label="Model">
             {!editing ? (a.model || '—') :
               <input className={inputClass} value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} />}
-          </Row>
-          <Row label="Location">
-            {!editing ? (a.location?.name || '—') :
-              <select className={inputClass} value={draft.locationId} onChange={(e) => setDraft({ ...draft, locationId: e.target.value })}>
-                <option value="">— None —</option>
-                {locations.data?.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </select>}
           </Row>
           <Row label="Department">
             {!editing ? (a.department?.name || '—') :

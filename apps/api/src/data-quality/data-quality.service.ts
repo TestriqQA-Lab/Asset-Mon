@@ -18,21 +18,19 @@ export class DataQualityService {
 
     // `any` on the where objects avoids enum-literal widening friction while keeping
     // each clause defined once (used for both count + sample).
-    const noLocation: any = { status: { notIn: ['ARCHIVED', 'LOST_STOLEN'] }, locationId: null };
+    // The "assets with no location" check was dropped along with the Location UI —
+    // with no way to set a location it would flag every asset.
     const noOwner: any = { status: 'ASSIGNED', assignments: { none: { returnedAt: null } } };
     const overdueMaint: any = { active: true, nextDueAt: { lt: now } };
     const expLic: any = { expiresAt: { not: null, lte: in30 } };
     const staleTicket: any = { status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING_VENDOR'] }, updatedAt: { lt: staleBefore } };
 
     const [
-      noLocCount, noLocSample,
       noOwnerCount, noOwnerSample,
       maintCount, maintSample,
       licCount, licSample,
       ticketCount, ticketSample,
     ] = await Promise.all([
-      db.asset.count({ where: noLocation }),
-      db.asset.findMany({ where: noLocation, select: { id: true, assetTag: true, name: true }, orderBy: { assetTag: 'asc' }, take: 8 }),
       db.asset.count({ where: noOwner }),
       db.asset.findMany({ where: noOwner, select: { id: true, assetTag: true, name: true }, orderBy: { assetTag: 'asc' }, take: 8 }),
       db.maintenanceSchedule.count({ where: overdueMaint }),
@@ -47,10 +45,6 @@ export class DataQualityService {
 
     return {
       checks: [
-        {
-          key: 'assets-no-location', label: 'Assets with no location', count: noLocCount, href: '/dashboard/assets',
-          sample: noLocSample.map((a: any) => ({ id: a.id, primary: a.assetTag, secondary: a.name })),
-        },
         {
           key: 'assets-no-owner', label: 'Assigned but unowned', count: noOwnerCount, href: '/dashboard/assets',
           sample: noOwnerSample.map((a: any) => ({ id: a.id, primary: a.assetTag, secondary: a.name })),

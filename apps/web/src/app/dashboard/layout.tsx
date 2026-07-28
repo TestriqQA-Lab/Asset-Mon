@@ -11,7 +11,7 @@ import { THEME_PRESETS, tokensToCss } from '@/lib/themes';
 import type { NavKey } from '@/lib/permissions';
 import { EmptyState } from '@/components/ui';
 import {
-  LayoutDashboard, Package, Tag, MapPin, Building2,
+  LayoutDashboard, Package, Tag, Building2,
   Wrench, CalendarClock, ShoppingCart, FileText, TrendingDown,
   AppWindow, KeyRound, ClipboardCheck, BarChart3, ListChecks,
   Users, Webhook, ScrollText, Settings, LogOut, ChevronDown, Search,
@@ -38,7 +38,8 @@ const NAV: NavGroup[] = [
     items: [
       { href: '/dashboard/assets', label: 'Assets', icon: <Package className="h-4 w-4" />, navKey: 'assets' },
       { href: '/dashboard/categories', label: 'Categories', icon: <Tag className="h-4 w-4" />, navKey: 'categories' },
-      { href: '/dashboard/locations', label: 'Locations', icon: <MapPin className="h-4 w-4" />, navKey: 'locations' },
+      // Locations is hidden from the Inventory menu. The page + API still exist and
+      // assets keep their location field — restore the nav item to re-expose it.
       { href: '/dashboard/departments', label: 'Departments', icon: <Building2 className="h-4 w-4" />, navKey: 'departments' },
       { href: '/dashboard/software', label: 'Software', icon: <AppWindow className="h-4 w-4" />, navKey: 'software', module: 'software' },
       { href: '/dashboard/licenses', label: 'Licenses', icon: <KeyRound className="h-4 w-4" />, navKey: 'licenses', module: 'software' },
