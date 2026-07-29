@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { cn } from '@/components/ui';
 import { usePermissions, useSettings } from '@/lib/settings';
-import { SETTINGS_GROUPS } from '@/lib/settings-nav';
+import { SETTINGS_GROUPS, SETTINGS_ITEMS } from '@/lib/settings-nav';
 
 /**
  * Sub-navigation for the settings area. Without it, opening a settings page from the
@@ -22,6 +22,13 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 
   const isHub = path === '/dashboard/settings';
 
+  // Sharing the /dashboard/settings/* URL prefix does not make a page part of the
+  // settings area. Asset statuses belongs to the Assets function in the sidebar, and
+  // security is personal, reached from the avatar menu — showing the workspace settings
+  // rail on either put two competing navigations on screen at once. Only pages that are
+  // genuinely listed in the hub get the rail.
+  const isHubPage = SETTINGS_ITEMS.some((i) => path === i.href || path.startsWith(i.href + '/'));
+
   const groups = SETTINGS_GROUPS
     .map((g) => ({
       ...g,
@@ -29,7 +36,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
     }))
     .filter((g) => g.items.length > 0);
 
-  if (isHub || groups.length === 0) return <>{children}</>;
+  if (isHub || !isHubPage || groups.length === 0) return <>{children}</>;
 
   return (
     <div className="flex gap-6">
