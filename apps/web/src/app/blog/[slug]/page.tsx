@@ -11,8 +11,11 @@ export function generateStaticParams() {
   return POSTS.map((p) => ({ slug: p.slug }));
 }
 
-export function generateMetadata({ params }: { params: { slug: string } }) {
-  const post = getPost(params.slug);
+// Next 15 makes `params` a promise so the route can start rendering before the
+// segment is resolved. The values are the same; only the await is new.
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const post = getPost(slug);
   if (!post) return pageMetadata({ title: 'Not found', path: '/blog' });
   return pageMetadata({
     title: post.title,
@@ -26,8 +29,9 @@ export function generateMetadata({ params }: { params: { slug: string } }) {
   });
 }
 
-export default function BlogPostPage({ params }: { params: { slug: string } }) {
-  const post = getPost(params.slug);
+export default async function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const post = getPost(slug);
   if (!post) notFound();
   const faqs = post.body.flatMap((b) => b.faq || []);
   const related = relatedPosts(post.slug, 3);

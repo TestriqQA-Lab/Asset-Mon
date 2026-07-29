@@ -19,7 +19,7 @@
     "@nestjs/core": "^11.1.28",
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/platform-express": "^11.1.28",
-    "@nestjs/swagger": "^11.4.5",
+    "@nestjs/swagger": "11.4.5",
     "@nestjs/throttler": "^6.2.1",
     "bcryptjs": "^2.4.3",
     "class-transformer": "^0.5.1",

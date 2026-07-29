@@ -8,8 +8,9 @@ import { GLOSSARY, getGlossaryEntry } from '@/lib/glossary';
 
 export function generateStaticParams() { return GLOSSARY.map((g) => ({ slug: g.slug })); }
 
-export function generateMetadata({ params }: { params: { slug: string } }) {
-  const g = getGlossaryEntry(params.slug);
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const g = getGlossaryEntry(slug);
   if (!g) return pageMetadata({ title: 'Not found', path: '/glossary' });
   return pageMetadata({
     title: `${g.term} — Glossary`,
@@ -19,8 +20,9 @@ export function generateMetadata({ params }: { params: { slug: string } }) {
   });
 }
 
-export default function GlossaryEntryPage({ params }: { params: { slug: string } }) {
-  const g = getGlossaryEntry(params.slug);
+export default async function GlossaryEntryPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const g = getGlossaryEntry(slug);
   if (!g) notFound();
   const related = (g.related || []).map(getGlossaryEntry).filter(Boolean) as typeof GLOSSARY;
 

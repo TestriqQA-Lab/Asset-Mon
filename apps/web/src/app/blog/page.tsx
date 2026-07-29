@@ -13,9 +13,10 @@ export const metadata = pageMetadata({
 
 const CATEGORIES = ['All', 'ITAM', 'Operations', 'Security', 'Finance', 'How-to', 'Industry'] as const;
 
-export default function BlogIndexPage({ searchParams }: { searchParams: { category?: string } }) {
-  const filter = searchParams.category && (CATEGORIES as readonly string[]).includes(searchParams.category)
-    ? searchParams.category : 'All';
+// Next 15 makes `searchParams` a promise, same as `params`.
+export default async function BlogIndexPage({ searchParams }: { searchParams: Promise<{ category?: string }> }) {
+  const { category } = await searchParams;
+  const filter = category && (CATEGORIES as readonly string[]).includes(category) ? category : 'All';
   const sorted = [...POSTS].sort((a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt));
   const posts = filter === 'All' ? sorted : sorted.filter((p) => p.category === filter);
   const featured = sorted[0];
