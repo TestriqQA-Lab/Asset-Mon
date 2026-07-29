@@ -210,19 +210,41 @@ export function DataTable({ children, className }: { children: React.ReactNode; 
 export function MobileCard({
   onClick, children, className,
 }: { onClick?: () => void; children: React.ReactNode; className?: string }) {
-  const Tag: any = onClick ? 'button' : 'div';
+  // A clickable card is deliberately NOT a <button>, even though it behaves
+  // like one. Several of these cards carry their own Edit/Delete buttons
+  // (assets, licenses), and a <button> inside a <button> is invalid HTML — the
+  // browser silently restructures the DOM to repair it, which then no longer
+  // matches what React rendered and breaks hydration.
+  //
+  // A div with role/tabIndex/keyboard handling is operable exactly the same way
+  // and can legally contain the nested controls. Classes are unchanged so
+  // nothing moves.
+  const classes = cn(
+    'w-full rounded-xl border border-ink-200 bg-white p-3.5 text-left shadow-card',
+    onClick && 'cursor-pointer transition-colors active:bg-ink-50 hover:border-ink-300',
+    className,
+  );
+
+  if (!onClick) return <div className={classes}>{children}</div>;
+
   return (
-    <Tag
-      type={onClick ? 'button' : undefined}
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
-      className={cn(
-        'w-full rounded-xl border border-ink-200 bg-white p-3.5 text-left shadow-card',
-        onClick && 'transition-colors active:bg-ink-50 hover:border-ink-300',
-        className,
-      )}
+      onKeyDown={(e) => {
+        // Only act when the card itself has focus. A nested Edit/Delete button
+        // keeps its own Enter/Space behaviour instead of also opening the card.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className={classes}
     >
       {children}
-    </Tag>
+    </div>
   );
 }
 
