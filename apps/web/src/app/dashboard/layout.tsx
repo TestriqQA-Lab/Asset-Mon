@@ -10,8 +10,6 @@ import { AnnouncementBanner } from '@/components/AnnouncementBanner';
 import { THEME_PRESETS, tokensToCss } from '@/lib/themes';
 import type { NavKey } from '@/lib/permissions';
 import { SETTINGS_ITEMS } from '@/lib/settings-nav';
-import { isAssetsAreaPath, ASSETS_TABS } from '@/lib/assets-nav';
-import { AssetsTabs } from '@/components/AssetsTabs';
 import { EmptyState, cn } from '@/components/ui';
 import {
   LayoutDashboard, Package,
@@ -22,69 +20,107 @@ import {
   HandHelping,
 } from 'lucide-react';
 
-type NavItem = {
+/** A page. Leaf of the nav tree. */
+type NavLeaf = {
   href: string;
   label: string;
-  icon: React.ReactNode;
   navKey: NavKey;
   module?: ModuleKey;
   /** Shown to employees instead of `label` — they meet this app rarely and think in
    *  plain words, not system nouns ("Get help", not "Service tickets"). */
   employeeLabel?: string;
 };
-/** An empty `label` renders the items with no section heading (used for Dashboard). */
-type NavGroup = { label: string; items: NavItem[] };
 
 /**
- * Sidebar navigation, ordered by how often a person actually needs each thing rather
- * than by how the data is modelled. Work queues sit at the top; records and insights
- * below. Assets is a single entry because its sub-pages are tabs (see lib/assets-nav),
- * and workspace settings are not here at all — they live behind the gear icon.
+ * A function. Either a direct link (no children) or a parent that expands to reveal
+ * its pages. A parent left with a single visible child after permission filtering is
+ * rendered as a direct link — a dropdown that opens to show one item is just friction.
  */
-const NAV: NavGroup[] = [
+type NavFunction = {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  employeeLabel?: string;
+  children: NavLeaf[];
+};
+
+/**
+ * Sidebar navigation as functions with their pages beneath them, ordered by how often
+ * something is needed rather than by how the data is modelled. Workspace settings are
+ * not here — they live behind the gear icon.
+ */
+const NAV: NavFunction[] = [
   {
-    label: '',
-    items: [
-      { href: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" />, navKey: 'dashboard', employeeLabel: 'Home' },
+    id: 'dashboard',
+    label: 'Dashboard',
+    icon: <LayoutDashboard className="h-4 w-4" />,
+    employeeLabel: 'Home',
+    children: [
+      { href: '/dashboard', label: 'Dashboard', navKey: 'dashboard', employeeLabel: 'Home' },
     ],
   },
   {
-    label: 'Work',
-    items: [
-      { href: '/dashboard/asset-requests', label: 'Asset requests', icon: <HandHelping className="h-4 w-4" />, navKey: 'asset-requests', employeeLabel: 'Ask for something' },
-      { href: '/dashboard/purchase-requests', label: 'Purchase requests', icon: <FileText className="h-4 w-4" />, navKey: 'purchase-requests', module: 'procurement' },
-      { href: '/dashboard/tickets', label: 'Service tickets', icon: <Wrench className="h-4 w-4" />, navKey: 'tickets', module: 'tickets', employeeLabel: 'Get help' },
-      { href: '/dashboard/maintenance', label: 'Maintenance', icon: <CalendarClock className="h-4 w-4" />, navKey: 'maintenance', module: 'maintenance' },
-      { href: '/dashboard/reservations', label: 'Reservations', icon: <CalendarClock className="h-4 w-4" />, navKey: 'reservations', module: 'reservations', employeeLabel: 'Bookings' },
-      { href: '/dashboard/audit-sessions', label: 'Physical audits', icon: <ClipboardCheck className="h-4 w-4" />, navKey: 'audit-sessions', module: 'audits' },
+    id: 'requests',
+    label: 'Requests',
+    icon: <HandHelping className="h-4 w-4" />,
+    employeeLabel: 'Ask for something',
+    children: [
+      { href: '/dashboard/asset-requests', label: 'Asset requests', navKey: 'asset-requests', employeeLabel: 'Ask for something' },
+      { href: '/dashboard/purchase-requests', label: 'Purchase requests', navKey: 'purchase-requests', module: 'procurement' },
     ],
   },
   {
-    label: 'Records',
-    items: [
-      // Assets is one destination with a tab strip (ASSETS_TABS): categories,
-      // departments, statuses, software and licences classify or configure assets
-      // rather than sitting beside them. They are still fed into the page-level access
-      // gate below. Locations was removed from the product UI entirely.
-      { href: '/dashboard/assets', label: 'Assets', icon: <Package className="h-4 w-4" />, navKey: 'assets', employeeLabel: 'My equipment' },
-      { href: '/dashboard/purchase-orders', label: 'Purchase orders', icon: <ShoppingCart className="h-4 w-4" />, navKey: 'purchase-orders', module: 'procurement' },
-      { href: '/dashboard/depreciation', label: 'Depreciation', icon: <TrendingDown className="h-4 w-4" />, navKey: 'depreciation', module: 'depreciation' },
+    id: 'servicing',
+    label: 'Servicing',
+    icon: <Wrench className="h-4 w-4" />,
+    employeeLabel: 'Help & bookings',
+    children: [
+      { href: '/dashboard/tickets', label: 'Service tickets', navKey: 'tickets', module: 'tickets', employeeLabel: 'Get help' },
+      { href: '/dashboard/maintenance', label: 'Maintenance', navKey: 'maintenance', module: 'maintenance' },
+      { href: '/dashboard/reservations', label: 'Reservations', navKey: 'reservations', module: 'reservations', employeeLabel: 'Bookings' },
+      { href: '/dashboard/audit-sessions', label: 'Physical audits', navKey: 'audit-sessions', module: 'audits' },
     ],
   },
   {
+    id: 'assets',
+    label: 'Assets',
+    icon: <Package className="h-4 w-4" />,
+    employeeLabel: 'My equipment',
+    children: [
+      // Categories, departments, statuses, software and licences classify or configure
+      // assets, so they are pages *within* the Assets function rather than peers of it.
+      // Locations was removed from the product UI entirely.
+      { href: '/dashboard/assets', label: 'All assets', navKey: 'assets', employeeLabel: 'My equipment' },
+      { href: '/dashboard/categories', label: 'Categories', navKey: 'categories' },
+      { href: '/dashboard/departments', label: 'Departments', navKey: 'departments' },
+      { href: '/dashboard/settings/statuses', label: 'Statuses', navKey: 'settings:statuses' },
+      { href: '/dashboard/software', label: 'Software', navKey: 'software', module: 'software' },
+      { href: '/dashboard/licenses', label: 'Licences', navKey: 'licenses', module: 'software' },
+    ],
+  },
+  {
+    id: 'finance',
+    label: 'Finance',
+    icon: <ShoppingCart className="h-4 w-4" />,
+    children: [
+      { href: '/dashboard/purchase-orders', label: 'Purchase orders', navKey: 'purchase-orders', module: 'procurement' },
+      { href: '/dashboard/depreciation', label: 'Depreciation', navKey: 'depreciation', module: 'depreciation' },
+    ],
+  },
+  {
+    id: 'insights',
     label: 'Insights',
-    items: [
-      { href: '/dashboard/reports', label: 'Reports', icon: <BarChart3 className="h-4 w-4" />, navKey: 'reports', module: 'reports' },
-      { href: '/dashboard/data-quality', label: 'Data quality', icon: <ListChecks className="h-4 w-4" />, navKey: 'data-quality' },
+    icon: <BarChart3 className="h-4 w-4" />,
+    children: [
+      { href: '/dashboard/reports', label: 'Reports', navKey: 'reports', module: 'reports' },
+      { href: '/dashboard/data-quality', label: 'Data quality', navKey: 'data-quality' },
     ],
   },
-  // NOTE: neither 'Get help' nor 'Settings' is a nav group.
-  //   - Get help is a help icon in the top-right utility area (a dropdown holding a
-  //     single link is pure friction).
-  //   - Workspace configuration moved to its own area at /dashboard/settings, reached
-  //     from the gear icon. It was a nine-item catch-all competing with daily work.
-  //     Those items live in `SETTINGS_GROUPS` (lib/settings-nav) and are still folded
-  //     into the page-level access gate below via SETTINGS_ITEMS.
+  // NOTE: neither 'Get help' nor 'Settings' is a nav function.
+  //   - Get help is a help icon in the top-right utility area.
+  //   - Workspace configuration lives at /dashboard/settings behind the gear icon;
+  //     those items are in SETTINGS_GROUPS (lib/settings-nav) and are still folded into
+  //     the page-level access gate below via SETTINGS_ITEMS.
 ];
 
 // Server-render the `default` preset's CSS variables on `:root` so the first
@@ -184,19 +220,19 @@ function Shell({ children }: { children: React.ReactNode }) {
 
   const perms = usePermissions();
   // Role-based nav filter:
-  //   - drop items the user's role can't see (per the tenant permissions matrix)
-  //   - drop items whose backing module is disabled
-  //   - drop empty groups
+  //   - drop pages the user's role can't see (per the tenant permissions matrix)
+  //   - drop pages whose backing module is disabled
+  //   - drop functions left with no pages
   const visibleNav = useMemo(() => {
     return NAV
-      .map((group) => ({
-        ...group,
-        items: group.items.filter((item) => {
-          if (item.module && !settings.modules[item.module]) return false;
-          return perms.canSee(item.navKey);
+      .map((fn) => ({
+        ...fn,
+        children: fn.children.filter((c) => {
+          if (c.module && !settings.modules[c.module]) return false;
+          return perms.canSee(c.navKey);
         }),
       }))
-      .filter((group) => group.items.length > 0);
+      .filter((fn) => fn.children.length > 0);
   }, [perms, settings.modules]);
 
   // The gear only appears if the role can actually open something in there.
@@ -237,7 +273,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     let best: { href: string; navKey: NavKey } | undefined;
     // Settings items are no longer part of NAV, but they must still be gated — omitting
     // them here would leave every settings page ungated on a direct URL visit.
-    const candidates = [...NAV.flatMap((g) => g.items), ...SETTINGS_ITEMS, ...ASSETS_TABS];
+    const candidates = [...NAV.flatMap((fn) => fn.children), ...SETTINGS_ITEMS];
     for (const item of candidates) {
       if (p === item.href || p.startsWith(item.href + '/')) {
         if (!best || item.href.length > best.href.length) best = item;
@@ -433,7 +469,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           </div>
           <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Mobile">
             <NavList
-              groups={visibleNav}
+              functions={visibleNav}
               currentPath={path || ''}
               isEmployee={perms.role === 'EMPLOYEE'}
               badges={navBadges}
@@ -486,11 +522,12 @@ function Shell({ children }: { children: React.ReactNode }) {
             </div>
             <div id="primary-nav-list" className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
               <NavList
-                groups={visibleNav}
+                functions={visibleNav}
                 currentPath={path || ''}
                 isEmployee={perms.role === 'EMPLOYEE'}
                 badges={navBadges}
                 collapsed={navCollapsed}
+                onExpandRail={() => { setNavCollapsed(false); try { localStorage.setItem('am.navCollapsed', '0'); } catch {} }}
               />
             </div>
           </div>
@@ -505,14 +542,7 @@ function Shell({ children }: { children: React.ReactNode }) {
               description="Your role doesn't have access to this page. Ask a workspace admin if you need it."
             />
           </div>
-        ) : (
-          <>
-            {/* Rendered here rather than in each page so every route in the Assets
-                area gets the same strip without repeating markup. */}
-            {isAssetsAreaPath(path || '') && <AssetsTabs />}
-            {children}
-          </>
-        )}
+        ) : children}
       </main>
       </div>
     </div>
@@ -524,76 +554,169 @@ function Shell({ children }: { children: React.ReactNode }) {
  * never drift apart. Counts come from `badges`, keyed by navKey.
  */
 function NavList({
-  groups, currentPath, isEmployee, badges, onNavigate, collapsed = false,
+  functions, currentPath, isEmployee, badges, onNavigate, collapsed = false, onExpandRail,
 }: {
-  groups: NavGroup[];
+  functions: NavFunction[];
   currentPath: string;
   isEmployee: boolean;
   badges?: Partial<Record<NavKey, number>>;
   onNavigate?: () => void;
   /** Icon-only rail. Labels become tooltips and counts shrink to a dot. */
   collapsed?: boolean;
+  /** Called when a parent is clicked while the rail is collapsed — there is no room to
+   *  show children, so the rail opens rather than doing nothing. */
+  onExpandRail?: () => void;
+}) {
+  const isActive = (href: string) =>
+    currentPath === href || (href !== '/dashboard' && currentPath.startsWith(href + '/'));
+
+  // Which parents are open. Seeded from the route so the section containing the current
+  // page is expanded on arrival, and thereafter driven by the user's clicks.
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    const owner = functions.find((fn) => fn.children.some((c) => isActive(c.href)));
+    if (owner) setOpen((o) => (o[owner.id] ? o : { ...o, [owner.id]: true }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPath, functions.length]);
+
+  return (
+    <div className="space-y-0.5">
+      {functions.map((fn) => {
+        const label = (isEmployee && fn.employeeLabel) || fn.label;
+        const childCount = fn.children.reduce((n, c) => n + (badges?.[c.navKey] || 0), 0);
+        const anyChildActive = fn.children.some((c) => isActive(c.href));
+
+        // One page left after filtering → a direct link. A dropdown revealing a single
+        // item is pure friction, so the function collapses into its only page.
+        if (fn.children.length === 1) {
+          const only = fn.children[0];
+          const leafLabel = (isEmployee && (only.employeeLabel || fn.employeeLabel)) || fn.label;
+          return (
+            <NavRow
+              key={fn.id}
+              href={only.href}
+              label={leafLabel}
+              icon={fn.icon}
+              active={isActive(only.href)}
+              count={badges?.[only.navKey] || 0}
+              collapsed={collapsed}
+              onNavigate={onNavigate}
+            />
+          );
+        }
+
+        const isOpen = !collapsed && !!open[fn.id];
+        return (
+          <div key={fn.id}>
+            <button
+              type="button"
+              onClick={() => {
+                if (collapsed) { onExpandRail?.(); setOpen((o) => ({ ...o, [fn.id]: true })); return; }
+                setOpen((o) => ({ ...o, [fn.id]: !o[fn.id] }));
+              }}
+              aria-expanded={isOpen}
+              title={collapsed ? (childCount > 0 ? `${label} (${childCount})` : label) : undefined}
+              className={cn(
+                'group relative flex w-full items-center rounded-lg text-sm transition-colors',
+                collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-3 py-2',
+                anyChildActive && !isOpen
+                  ? 'bg-ink-100 font-medium text-ink-900'
+                  : 'text-ink-700 hover:bg-ink-100/70 hover:text-ink-900',
+              )}
+            >
+              {anyChildActive && collapsed && (
+                <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-brand-500" aria-hidden />
+              )}
+              <span className={cn('text-ink-400 transition-colors group-hover:text-ink-600', anyChildActive && 'text-ink-700')}>
+                {fn.icon}
+              </span>
+              {!collapsed && <span className="truncate">{label}</span>}
+              {!collapsed && (
+                <ChevronDown className={cn('ml-auto h-3.5 w-3.5 text-ink-400 transition-transform', isOpen && 'rotate-180')} />
+              )}
+              {collapsed && childCount > 0 && (
+                <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" />
+              )}
+              {!collapsed && !isOpen && childCount > 0 && (
+                <span className="mr-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-[10px] font-semibold leading-none text-amber-800">
+                  {childCount > 99 ? '99+' : childCount}
+                </span>
+              )}
+            </button>
+
+            {isOpen && (
+              // Indented, with a rule tying the pages to their parent.
+              <div className="ml-[1.4rem] mt-0.5 space-y-0.5 border-l border-ink-200 pl-2">
+                {fn.children.map((c) => (
+                  <NavRow
+                    key={c.href}
+                    href={c.href}
+                    label={(isEmployee && c.employeeLabel) || c.label}
+                    active={isActive(c.href)}
+                    count={badges?.[c.navKey] || 0}
+                    collapsed={false}
+                    onNavigate={onNavigate}
+                    child
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A single navigable row — a function with no children, or a page under one. */
+function NavRow({
+  href, label, icon, active, count, collapsed, onNavigate, child = false,
+}: {
+  href: string;
+  label: string;
+  icon?: React.ReactNode;
+  active: boolean;
+  count: number;
+  collapsed: boolean;
+  onNavigate?: () => void;
+  child?: boolean;
 }) {
   return (
-    <>
-      {groups.map((group, gi) => (
-        <div key={group.label || `g${gi}`} className={gi === 0 ? 'mb-1' : 'mb-1 mt-4'}>
-          {group.label && (collapsed ? (
-            // A rule keeps the grouping legible once the headings are gone.
-            <div className="mx-2 mb-1 border-t border-ink-200" aria-hidden />
-          ) : (
-            <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
-              {group.label}
-            </div>
-          ))}
-          <div className="space-y-0.5">
-            {group.items.map((item) => {
-              const active = currentPath === item.href
-                || (item.href !== '/dashboard' && currentPath.startsWith(item.href + '/'));
-              const count = badges?.[item.navKey] || 0;
-              const label = (isEmployee && item.employeeLabel) || item.label;
-              return (
-                <a
-                  key={item.href}
-                  href={item.href}
-                  onClick={onNavigate}
-                  aria-current={active ? 'page' : undefined}
-                  title={collapsed ? (count > 0 ? `${label} (${count})` : label) : undefined}
-                  aria-label={collapsed ? label : undefined}
-                  className={cn(
-                    'group relative flex items-center rounded-lg text-sm transition-colors',
-                    collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-3 py-2',
-                    active
-                      ? 'bg-ink-900 font-medium text-white'
-                      : 'text-ink-700 hover:bg-ink-100/70 hover:text-ink-900',
-                  )}
-                >
-                  {/* A left marker keeps the current item obvious even when collapsed,
-                      where the label is gone. */}
-                  {active && collapsed && (
-                    <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-brand-500" aria-hidden />
-                  )}
-                  <span className={cn(active ? 'text-white' : 'text-ink-400 transition-colors group-hover:text-ink-600')}>{item.icon}</span>
-                  {!collapsed && <span className="truncate">{label}</span>}
-                  {count > 0 && (collapsed ? (
-                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" />
-                  ) : (
-                    <span
-                      className={cn(
-                        'ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold leading-none',
-                        active ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800',
-                      )}
-                    >
-                      {count > 99 ? '99+' : count}
-                    </span>
-                  ))}
-                </a>
-              );
-            })}
-          </div>
-        </div>
+    <a
+      href={href}
+      onClick={onNavigate}
+      aria-current={active ? 'page' : undefined}
+      title={collapsed ? (count > 0 ? `${label} (${count})` : label) : undefined}
+      aria-label={collapsed ? label : undefined}
+      className={cn(
+        'group relative flex items-center rounded-lg transition-colors',
+        collapsed ? 'justify-center px-0 py-2.5 text-sm' : 'gap-2.5 px-3 py-2',
+        child ? 'text-[13px]' : 'text-sm',
+        active
+          ? 'bg-ink-900 font-medium text-white'
+          : 'text-ink-700 hover:bg-ink-100/70 hover:text-ink-900',
+      )}
+    >
+      {active && collapsed && (
+        <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-brand-500" aria-hidden />
+      )}
+      {icon && (
+        <span className={cn(active ? 'text-white' : 'text-ink-400 transition-colors group-hover:text-ink-600')}>{icon}</span>
+      )}
+      {!collapsed && <span className="truncate">{label}</span>}
+      {count > 0 && (collapsed ? (
+        <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" />
+      ) : (
+        <span
+          className={cn(
+            'ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold leading-none',
+            active ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800',
+          )}
+        >
+          {count > 99 ? '99+' : count}
+        </span>
       ))}
-    </>
+    </a>
   );
 }
 

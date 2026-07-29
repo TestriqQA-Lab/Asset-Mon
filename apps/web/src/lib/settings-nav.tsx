@@ -41,7 +41,7 @@ export const SETTINGS_GROUPS: SettingsNavGroup[] = [
       { href: '/dashboard/settings/branding', label: 'Branding', description: 'Logo, colours and workspace name', icon: <Palette className="h-4 w-4" />, navKey: 'settings:branding' },
       { href: '/dashboard/settings/modules', label: 'Modules', description: 'Turn features on or off', icon: <Sliders className="h-4 w-4" />, navKey: 'settings:modules' },
       // Asset statuses is deliberately absent — it configures assets, so it lives as a
-      // tab in the Assets area (see lib/assets-nav). The URL is unchanged.
+      // page under the Assets function in the sidebar. The URL is unchanged.
     ],
   },
   {
