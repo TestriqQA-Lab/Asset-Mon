@@ -26,7 +26,15 @@ export const viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={inter.variable}>
+    // suppressHydrationWarning is required, not cosmetic. ThemeBootstrap below
+    // writes the cached palette onto <html> BEFORE React hydrates, so the
+    // client always has a `style` attribute the server could not have known
+    // about — the theme lives in localStorage. React would otherwise report a
+    // mismatch on every themed page load and drown out real ones.
+    //
+    // This suppresses only <html>'s own attributes, one level deep. Mismatches
+    // inside the page are still reported.
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
       <head>
         {/* Read the cached theme out of localStorage and apply the resolved CSS
             variables onto :root BEFORE React hydrates. Stops dashboards loading
