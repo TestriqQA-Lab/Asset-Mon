@@ -26,12 +26,16 @@ class UpdateLocationDto {
 export class LocationsController {
   constructor(private readonly svc: LocationsService) {}
 
+  // Location was removed from the product UI and is not part of the employee asset
+  // view, so these remain for managers and integrations only.
   @Get()
+  @Roles('ADMIN', 'ASSET_MANAGER')
   list() {
     return this.svc.list();
   }
 
   @Get('tree')
+  @Roles('ADMIN', 'ASSET_MANAGER')
   tree() {
     return this.svc.tree();
   }

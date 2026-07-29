@@ -22,7 +22,10 @@ class UpdateDepartmentDto {
 export class DepartmentsController {
   constructor(private readonly svc: DepartmentsService) {}
 
+  // Employees have no department page and their asset view carries no department, so
+  // there is nothing for them to do with this list — it is workspace structure.
   @Get()
+  @Roles('ADMIN', 'ASSET_MANAGER')
   list() {
     return this.svc.list();
   }

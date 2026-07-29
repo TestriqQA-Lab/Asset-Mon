@@ -32,8 +32,11 @@ export default function AssetsPage() {
   }));
   const [activeViewId, setActiveViewId] = useState<string>('');
 
+  const isManager = getSession()?.user?.role !== 'EMPLOYEE';
+  // Categories stay — employees' asset rows show a category name (the endpoint returns
+  // identity only for them). Departments are manager-only, so don't ask for them.
   const categories = useQuery({ queryKey: ['categories'], queryFn: () => api('/categories') });
-  const departments = useQuery({ queryKey: ['departments'], queryFn: () => api('/departments') });
+  const departments = useQuery({ queryKey: ['departments'], queryFn: () => api('/departments'), enabled: isManager });
   const statusDefs = useQuery({ queryKey: ['status-defs'], queryFn: () => api('/asset-status-defs') });
   const savedViews = useQuery({ queryKey: ['saved-views', 'assets'], queryFn: () => api('/saved-views?kind=assets') });
 
@@ -241,8 +244,6 @@ export default function AssetsPage() {
     setFilter((f) => ({ ...EMPTY_FILTER, ...(v.filters || {}), assignedToMe: f.assignedToMe }));
   };
 
-  const isManager = getSession()?.user?.role !== 'EMPLOYEE';
-
   // Employees can ask for equipment they don't hold, so the action column belongs on
   // the browse view only — requesting something already assigned to you makes no sense.
   const showRequestActions = !isManager && !filter.assignedToMe;
@@ -358,10 +359,14 @@ export default function AssetsPage() {
             <option value="">All categories</option>
             {categories.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
+          {/* Employees' assets carry no department, so filtering by one offered nothing
+              to filter on. */}
+          {isManager && (
           <select className={selectClass + ' md:w-44'} value={filter.departmentId} onChange={(e) => setFilter({ ...filter, departmentId: e.target.value })}>
             <option value="">All departments</option>
             {departments.data?.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
+          )}
           <label className="inline-flex items-center gap-1.5 text-xs text-ink-600 sm:col-span-2">
             <input type="checkbox" checked={filter.onlyTopLevel} onChange={(e) => setFilter({ ...filter, onlyTopLevel: e.target.checked, parentId: '' })} />
             Top-level only

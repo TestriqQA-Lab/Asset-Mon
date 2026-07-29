@@ -306,7 +306,9 @@ function Shell({ children }: { children: React.ReactNode }) {
       </div>
 
       <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[70] focus:rounded-md focus:bg-ink-900 focus:px-3 focus:py-1.5 focus:text-sm focus:font-medium focus:text-white">Skip to main content</a>
-      <CommandPalette />
+      {/* The ⌘K shortcut works with or without the button above, so the palette itself
+          is gated too — otherwise employees still reach a search that refuses them. */}
+      {!isEmployee && <CommandPalette />}
 
       <header className="sticky top-0 z-40 border-b border-ink-200 bg-white/85 backdrop-blur-md">
         <div className="flex h-14 items-center gap-3 px-4 lg:px-6">
@@ -333,6 +335,10 @@ function Shell({ children }: { children: React.ReactNode }) {
           </a>
 
           <div className="ml-auto flex items-center gap-2">
+            {/* Search is manager+ on the server. Showing employees the box meant they
+                could type into a control that always came back empty, because the
+                rejection was swallowed rather than surfaced. */}
+            {!isEmployee && (
             <button
               onClick={() => { const ev = new KeyboardEvent('keydown', { key: 'k', metaKey: true }); window.dispatchEvent(ev); }}
               className="hidden items-center gap-2 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-400 transition hover:border-ink-300 hover:bg-ink-50 md:flex"
@@ -342,6 +348,7 @@ function Shell({ children }: { children: React.ReactNode }) {
               <span>Search…</span>
               <span className="ml-2 rounded border border-ink-200 px-1.5 py-0.5 text-[10px] text-ink-500">⌘K</span>
             </button>
+            )}
             {/* Settings — an icon, not a nav group. Only rendered when the role can
                 actually open at least one settings page. */}
             {canSeeAnySetting && (

@@ -19,6 +19,18 @@ export class CategoriesService {
   /** List categories with a LIVE count of assets in each (self-updating "quantity"). */
   async list() {
     const db = this.ctx.prisma();
+    // Employees have no categories page, but their asset list renders category names,
+    // so this endpoint has to stay readable to them. It returns identity only — the
+    // description, custom-field configuration, image and workspace asset counts are
+    // manager information and are withheld, matching how assets themselves are trimmed
+    // for employees.
+    if (this.ctx.role === 'EMPLOYEE') {
+      const cats = await db.category.findMany({
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      });
+      return cats;
+    }
     const [cats, counts] = await Promise.all([
       db.category.findMany({ orderBy: { name: 'asc' } }),
       db.asset.groupBy({ by: ['categoryId'], _count: { _all: true } }),

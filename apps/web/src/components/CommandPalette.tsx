@@ -36,6 +36,7 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [data, setData] = useState<Result>({});
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
 
   useEffect(() => {
@@ -57,7 +58,11 @@ export function CommandPalette() {
     if (!q || q.length < 2) { setData({}); return; }
     const ctl = new AbortController();
     const t = setTimeout(() => {
-      api<Result>(`/search?q=${encodeURIComponent(q)}`).then(setData).catch(() => {});
+      // Don't discard failures. Swallowing them made a rejected search look identical
+      // to a search that genuinely found nothing.
+      api<Result>(`/search?q=${encodeURIComponent(q)}`)
+        .then((r) => { setData(r); setSearchError(null); })
+        .catch((e: any) => { setData({}); setSearchError(e?.message || 'Search is unavailable right now.'); });
     }, 150);
     return () => { ctl.abort(); clearTimeout(t); };
   }, [q]);
@@ -104,7 +109,9 @@ export function CommandPalette() {
         <div className="max-h-[60vh] overflow-y-auto py-2">
           {items.length === 0 && (
             <div className="px-4 py-10 text-center text-sm text-ink-500">
-              {q.length >= 2 ? 'No matches yet.' : 'Type at least 2 characters, or jump to a page.'}
+              {searchError
+                ? <span className="text-red-600">{searchError}</span>
+                : q.length >= 2 ? 'No matches yet.' : 'Type at least 2 characters, or jump to a page.'}
             </div>
           )}
           {(['Assets', 'Tickets', 'People', 'Navigate'] as const).map((group) => {
