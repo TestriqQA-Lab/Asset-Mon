@@ -19,8 +19,31 @@ function stableStringify(value: any): string {
 }
 
 /**
+ * The recipe new entries are written with. See `computeEntryHash` for why it changed.
+ */
+export const AUDIT_HASH_VERSION = 2;
+
+/** Key used to snapshot the asset's identity inside the (hashed) detail blob. */
+export const AUDIT_ASSET_SNAPSHOT_KEY = 'assetId';
+
+/**
  * Compute a stable hash for an audit-log entry.
  * Each new entry chains the previous entry's hash so any tampering is detectable.
+ *
+ * Recipe versions
+ * ---------------
+ * v1 folded the `assetId` *column* into the hash. That column is mutable: deleting an
+ * asset rewrites it to NULL on the asset's existing audit rows so the history survives
+ * the cascade. Rewriting a hashed input invalidated those rows — and because the entries
+ * are chained, every entry after the first one failed too. Ordinary deletions therefore
+ * reported as tampering, which is precisely the signal this chain exists to give.
+ *
+ * v2 removes the column from the payload. The asset's identity is instead snapshotted
+ * into `detail`, which is hashed and never rewritten, so the reference is still covered
+ * by the chain while the mutable column is free to change.
+ *
+ * Rows keep the version they were written with, so entries created before the change
+ * continue to verify against v1.
  */
 export function computeEntryHash(input: {
   prevHash: string | null;
@@ -29,16 +52,19 @@ export function computeEntryHash(input: {
   performedById: string | null;
   detail: any;
   createdAt: Date;
+  hashVersion?: number | null;
 }): string {
-  const payload = stableStringify({
+  const base: Record<string, any> = {
     prev: input.prevHash || '',
     action: input.action,
-    assetId: input.assetId || '',
     by: input.performedById || '',
     detail: input.detail ?? null,
     at: input.createdAt.toISOString(),
-  });
-  return crypto.createHash('sha256').update(payload).digest('hex');
+  };
+  // v1 also covered the mutable column. `stableStringify` sorts keys, so adding it back
+  // reproduces the original v1 payload byte-for-byte.
+  if ((input.hashVersion ?? 1) < 2) base.assetId = input.assetId || '';
+  return crypto.createHash('sha256').update(stableStringify(base)).digest('hex');
 }
 
 /**
@@ -63,10 +89,24 @@ export async function writeAuditEntry(
   // are unmistakable. We deliberately fold the marker into `detail` so the
   // chained hash also covers it — an impersonation tag cannot be retroactively
   // removed without invalidating the chain.
-  const mergedDetail = data.impersonatedBy
+  let mergedDetail = data.impersonatedBy
     ? { ...(typeof data.detail === 'object' && data.detail !== null ? data.detail : { value: data.detail }), impersonatedBy: data.impersonatedBy }
     : (data.detail ?? null);
+
+  // Snapshot the asset reference into the hashed detail (v2). The `assetId` column is
+  // rewritten when an asset is deleted, so it cannot carry the reference in a way the
+  // chain can vouch for; this copy is never rewritten. Only added when there is an
+  // asset, and never clobbering a caller-supplied key of the same name.
+  if (data.assetId) {
+    const base = (typeof mergedDetail === 'object' && mergedDetail !== null)
+      ? mergedDetail
+      : (mergedDetail == null ? {} : { value: mergedDetail });
+    if (!(AUDIT_ASSET_SNAPSHOT_KEY in base)) {
+      mergedDetail = { ...base, [AUDIT_ASSET_SNAPSHOT_KEY]: data.assetId };
+    }
+  }
   data = { ...data, detail: mergedDetail };
+
   const doIt = async (tx: any) => {
     const last = await tx.auditLog.findFirst({ orderBy: { seq: 'desc' }, select: { entryHash: true } });
     const createdAt = new Date();
@@ -77,6 +117,7 @@ export async function writeAuditEntry(
       performedById: data.performedById || null,
       detail: data.detail ?? null,
       createdAt,
+      hashVersion: AUDIT_HASH_VERSION,
     });
     return tx.auditLog.create({
       data: {
@@ -86,6 +127,7 @@ export async function writeAuditEntry(
         performedById: data.performedById || null,
         prevHash: last?.entryHash || null,
         entryHash,
+        hashVersion: AUDIT_HASH_VERSION,
         createdAt,
       },
     });

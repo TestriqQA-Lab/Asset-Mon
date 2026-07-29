@@ -625,6 +625,10 @@ model AuditLog {
   // Tamper-evidence: each entry hashes (prevHash, fields…) — verifiable end-to-end.
   prevHash      String?
   entryHash     String?
+  // Which hash recipe produced entryHash. v1 hashed the mutable assetId column; v2
+  // hashes a snapshot inside `detail` instead, so deleting an asset cannot break the
+  // chain. Verification uses the recipe each row was written with.
+  hashVersion   Int      @default(1)
   seq           Int      @default(autoincrement())
   createdAt    DateTime @default(now())
 
