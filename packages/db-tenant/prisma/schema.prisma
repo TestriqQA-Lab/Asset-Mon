@@ -192,7 +192,7 @@ model Asset {
   auditScans    AuditScan[]
   // Parent / accessory relationships — e.g. laptop has charger, dock, sleeve.
   parentId      String?
-  parent        Asset?        @relation("AssetParent", fields: [parentId], references: [id])
+  parent        Asset?        @relation("AssetParent", fields: [parentId], references: [id], onDelete: SetNull)
   children      Asset[]       @relation("AssetParent")
   attachments   AssetAttachment[]
   // Optional custom status display (system status enum stays canonical for business logic).
@@ -433,7 +433,7 @@ model SoftwareAssignment {
   userId       String?
   user         User?    @relation(fields: [userId], references: [id])
   assetId      String?
-  asset        Asset?   @relation(fields: [assetId], references: [id])
+  asset        Asset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
   assignedAt   DateTime @default(now())
   returnedAt   DateTime?
   notes        String?
@@ -501,7 +501,7 @@ model AuditScan {
   sessionId    String
   session      AuditSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   assetId      String?
-  asset        Asset?        @relation(fields: [assetId], references: [id])
+  asset        Asset?        @relation(fields: [assetId], references: [id], onDelete: SetNull)
   rawTag       String?       // tag scanned but not matched to an asset
   scannedById  String?
   scannedBy    User?         @relation("ScannedBy", fields: [scannedById], references: [id])
@@ -743,7 +743,7 @@ model AssetRequest {
   escalationNote   String?
   // If approved → the manager assigns a specific asset
   fulfilledAssetId String?
-  fulfilledAsset   Asset?           @relation("FulfilledRequests", fields: [fulfilledAssetId], references: [id])
+  fulfilledAsset   Asset?           @relation("FulfilledRequests", fields: [fulfilledAssetId], references: [id], onDelete: SetNull)
   fulfilledAt      DateTime?
   // v2 (asset-requests redesign): request mode, scheduling, per-device lines, one-way manager note
   mode          RequestMode        @default(CATEGORY)
@@ -766,7 +766,7 @@ model AssetRequestItem {
   requestId String
   request   AssetRequest      @relation(fields: [requestId], references: [id], onDelete: Cascade)
   assetId   String
-  asset     Asset             @relation("RequestedAssets", fields: [assetId], references: [id])
+  asset     Asset             @relation("RequestedAssets", fields: [assetId], references: [id], onDelete: Cascade)
   status    RequestItemStatus @default(REQUESTED)
   createdAt DateTime          @default(now())
 

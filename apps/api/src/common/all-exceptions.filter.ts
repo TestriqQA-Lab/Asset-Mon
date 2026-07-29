@@ -71,11 +71,35 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     if (exception?.code === 'P2003' || exception?.code === 'P2016' || exception?.code === 'P2014') {
-      res.status(HttpStatus.BAD_REQUEST).json({
-        statusCode: HttpStatus.BAD_REQUEST,
-        error: 'Bad Request',
-        message: 'Invalid reference',
-      });
+      // A foreign-key violation happens in two opposite directions, and "Invalid
+      // reference" described neither:
+      //   · on a delete  — something else still points at the row being removed
+      //   · on write     — the row being saved points at something that isn't there
+      // The HTTP method tells them apart. Prisma reports the constraint as
+      // "Table_column_fkey", so the column names the offending field on a write and the
+      // related table names the blocker on a delete.
+      // Prisma reports e.g. `Asset_categoryId_fkey (index)` — drop the trailing
+      // qualifier and the _fkey suffix before splitting, or the last segment is noise.
+      const raw = String(exception?.meta?.field_name ?? exception?.meta?.target ?? '')
+        .replace(/\s*\(.*\)\s*$/, '')
+        .replace(/_fkey$/, '');
+      const parts = raw.split(/[_.]/).filter(Boolean);
+      const table = parts[0] || '';
+      const column = parts.length > 1 ? parts[parts.length - 1] : '';
+      const spaced = (s: string) => s.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+      const isDelete = String(req?.method || '').toUpperCase() === 'DELETE';
+
+      let message: string;
+      if (isDelete) {
+        message = table
+          ? `Can't delete this while ${spaced(table)} records still refer to it. Remove those first.`
+          : 'Can\'t delete this while other records still refer to it.';
+      } else {
+        message = column
+          ? `The ${spaced(column).replace(/ id$/, '')} you selected no longer exists. Pick another and try again.`
+          : 'One of the linked items you selected no longer exists.';
+      }
+      res.status(HttpStatus.BAD_REQUEST).json({ statusCode: HttpStatus.BAD_REQUEST, error: 'Bad Request', message });
       return;
     }
 
