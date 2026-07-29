@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { api, getSession, logout } from '@/lib/api';
@@ -159,13 +159,28 @@ function Shell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try { setNavCollapsed(localStorage.getItem('am.navCollapsed') === '1'); } catch {}
   }, []);
-  const toggleNav = () => {
+  const toggleNav = useCallback(() => {
     setNavCollapsed((v) => {
       const next = !v;
       try { localStorage.setItem('am.navCollapsed', next ? '1' : '0'); } catch {}
       return next;
     });
-  };
+  }, []);
+
+  // Cmd/Ctrl+B — the shortcut people already know from VS Code and Slack.
+  const [shortcutHint, setShortcutHint] = useState('Ctrl+');
+  useEffect(() => {
+    const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
+    setShortcutHint(mac ? '⌘' : 'Ctrl+');
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleNav();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleNav]);
 
   const perms = usePermissions();
   // Role-based nav filter:
@@ -446,7 +461,30 @@ function Shell({ children }: { children: React.ReactNode }) {
           aria-label="Primary"
         >
           <div className="flex h-full flex-col">
-            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+            {/* Toggle sits at the top so it is visible without scrolling. */}
+            <div
+              className={cn(
+                'mb-2 flex shrink-0 items-center',
+                navCollapsed ? 'justify-center' : 'justify-between pl-3',
+              )}
+            >
+              {!navCollapsed && (
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-400">Menu</span>
+              )}
+              <button
+                onClick={toggleNav}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-400 transition hover:bg-ink-100/70 hover:text-ink-800"
+                aria-label={navCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+                title={`${navCollapsed ? 'Expand' : 'Collapse'} sidebar  (${shortcutHint}B)`}
+                aria-expanded={!navCollapsed}
+                aria-controls="primary-nav-list"
+              >
+                <PanelLeftClose
+                  className={cn('h-4 w-4 transition-transform duration-200', navCollapsed && 'rotate-180')}
+                />
+              </button>
+            </div>
+            <div id="primary-nav-list" className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
               <NavList
                 groups={visibleNav}
                 currentPath={path || ''}
@@ -455,21 +493,6 @@ function Shell({ children }: { children: React.ReactNode }) {
                 collapsed={navCollapsed}
               />
             </div>
-            <button
-              onClick={toggleNav}
-              className={cn(
-                'mt-2 flex shrink-0 items-center gap-2 rounded-lg py-2 text-xs text-ink-500 transition hover:bg-ink-100/70 hover:text-ink-800',
-                navCollapsed ? 'justify-center px-0' : 'px-3',
-              )}
-              aria-label={navCollapsed ? 'Expand navigation' : 'Collapse navigation'}
-              title={navCollapsed ? 'Expand' : 'Collapse'}
-              aria-expanded={!navCollapsed}
-            >
-              <PanelLeftClose
-                className={cn('h-4 w-4 transition-transform duration-200', navCollapsed && 'rotate-180')}
-              />
-              {!navCollapsed && <span>Collapse</span>}
-            </button>
           </div>
         </aside>
 
@@ -538,12 +561,19 @@ function NavList({
                   title={collapsed ? (count > 0 ? `${label} (${count})` : label) : undefined}
                   aria-label={collapsed ? label : undefined}
                   className={cn(
-                    'relative flex items-center rounded-lg text-sm transition-colors',
+                    'group relative flex items-center rounded-lg text-sm transition-colors',
                     collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-3 py-2',
-                    active ? 'bg-ink-900 font-medium text-white' : 'text-ink-700 hover:bg-ink-100/70',
+                    active
+                      ? 'bg-ink-900 font-medium text-white'
+                      : 'text-ink-700 hover:bg-ink-100/70 hover:text-ink-900',
                   )}
                 >
-                  <span className={active ? 'text-white' : 'text-ink-400'}>{item.icon}</span>
+                  {/* A left marker keeps the current item obvious even when collapsed,
+                      where the label is gone. */}
+                  {active && collapsed && (
+                    <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-brand-500" aria-hidden />
+                  )}
+                  <span className={cn(active ? 'text-white' : 'text-ink-400 transition-colors group-hover:text-ink-600')}>{item.icon}</span>
                   {!collapsed && <span className="truncate">{label}</span>}
                   {count > 0 && (collapsed ? (
                     <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" />
