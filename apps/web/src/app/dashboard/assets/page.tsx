@@ -37,6 +37,15 @@ export default function AssetsPage() {
   const statusDefs = useQuery({ queryKey: ['status-defs'], queryFn: () => api('/asset-status-defs') });
   const savedViews = useQuery({ queryKey: ['saved-views', 'assets'], queryFn: () => api('/saved-views?kind=assets') });
 
+  // Keep the "assigned to me" filter tied to the URL for the whole life of the page,
+  // not just the first mount. The initial state above only runs once, so a navigation
+  // that reuses this component (soft nav, history restore) would otherwise leave
+  // "My assets" showing every asset — the filter would silently be off.
+  const assignedToMeParam = searchParams?.get('assignedToMe') === '1';
+  useEffect(() => {
+    setFilter((f) => (f.assignedToMe === assignedToMeParam ? f : { ...f, assignedToMe: assignedToMeParam }));
+  }, [assignedToMeParam]);
+
   const PAGE_SIZE = 25;
   const [page, setPage] = useState(1);
   // Any filter change puts you back on page 1 — staying on page 4 of a narrower result
@@ -227,7 +236,9 @@ export default function AssetsPage() {
 
   const applyView = (v: any) => {
     setActiveViewId(v.id);
-    setFilter({ ...EMPTY_FILTER, ...(v.filters || {}) });
+    // assignedToMe comes from the URL, not from the saved view — resetting it here
+    // would turn "My assets" into the full list while the page still claims otherwise.
+    setFilter((f) => ({ ...EMPTY_FILTER, ...(v.filters || {}), assignedToMe: f.assignedToMe }));
   };
 
   const isManager = getSession()?.user?.role !== 'EMPLOYEE';
