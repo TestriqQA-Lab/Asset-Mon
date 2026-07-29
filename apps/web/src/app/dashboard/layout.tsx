@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { api, getSession, logout } from '@/lib/api';
 import { SettingsProvider, useSettings, usePermissions, type ModuleKey } from '@/lib/settings';
@@ -29,6 +29,8 @@ type NavLeaf = {
   /** Shown to employees instead of `label` — they meet this app rarely and think in
    *  plain words, not system nouns ("Get help", not "Service tickets"). */
   employeeLabel?: string;
+  /** Rendered only for employees (e.g. "My assets", which managers don't need). */
+  employeeOnly?: boolean;
 };
 
 /**
@@ -85,12 +87,14 @@ const NAV: NavFunction[] = [
     id: 'assets',
     label: 'Assets',
     icon: <Package className="h-4 w-4" />,
-    employeeLabel: 'My equipment',
     children: [
       // Categories, departments, statuses, software and licences classify or configure
       // assets, so they are pages *within* the Assets function rather than peers of it.
       // Locations was removed from the product UI entirely.
-      { href: '/dashboard/assets', label: 'All assets', navKey: 'assets', employeeLabel: 'My equipment' },
+      { href: '/dashboard/assets', label: 'All assets', navKey: 'assets' },
+      // Employee-only: the same page filtered to what they hold. Managers already have
+      // richer filtering, so this would be noise for them.
+      { href: '/dashboard/assets?assignedToMe=1', label: 'My assets', navKey: 'assets', employeeOnly: true },
       { href: '/dashboard/categories', label: 'Categories', navKey: 'categories' },
       { href: '/dashboard/departments', label: 'Departments', navKey: 'departments' },
       { href: '/dashboard/settings/statuses', label: 'Statuses', navKey: 'settings:statuses' },
@@ -152,6 +156,8 @@ export default function DashboardLayoutOuter({ children }: { children: React.Rea
 function Shell({ children }: { children: React.ReactNode }) {
   const r = useRouter();
   const path = usePathname();
+  const searchParams = useSearchParams();
+  const currentQuery = searchParams?.toString() || '';
   const session = getSession();
   const settings = useSettings();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -229,6 +235,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         ...fn,
         children: fn.children.filter((c) => {
           if (c.module && !settings.modules[c.module]) return false;
+          if (c.employeeOnly && perms.role !== 'EMPLOYEE') return false;
           return perms.canSee(c.navKey);
         }),
       }))
@@ -471,6 +478,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             <NavList
               functions={visibleNav}
               currentPath={path || ''}
+              currentQuery={currentQuery}
               isEmployee={perms.role === 'EMPLOYEE'}
               badges={navBadges}
               onNavigate={() => setMobileOpen(false)}
@@ -524,6 +532,7 @@ function Shell({ children }: { children: React.ReactNode }) {
               <NavList
                 functions={visibleNav}
                 currentPath={path || ''}
+                currentQuery={currentQuery}
                 isEmployee={perms.role === 'EMPLOYEE'}
                 badges={navBadges}
                 collapsed={navCollapsed}
@@ -554,10 +563,12 @@ function Shell({ children }: { children: React.ReactNode }) {
  * never drift apart. Counts come from `badges`, keyed by navKey.
  */
 function NavList({
-  functions, currentPath, isEmployee, badges, onNavigate, collapsed = false, onExpandRail,
+  functions, currentPath, currentQuery, isEmployee, badges, onNavigate, collapsed = false, onExpandRail,
 }: {
   functions: NavFunction[];
   currentPath: string;
+  /** Raw query string, used to tell same-path siblings apart. */
+  currentQuery?: string;
   isEmployee: boolean;
   badges?: Partial<Record<NavKey, number>>;
   onNavigate?: () => void;
@@ -567,8 +578,18 @@ function NavList({
    *  show children, so the rail opens rather than doing nothing. */
   onExpandRail?: () => void;
 }) {
-  const isActive = (href: string) =>
-    currentPath === href || (href !== '/dashboard' && currentPath.startsWith(href + '/'));
+  // Two children can share a path and differ only by query string ("All assets" vs
+  // "My assets"), so the query is part of the comparison.
+  const isActive = (href: string) => {
+    const [hrefPath, hrefQuery] = href.split('?');
+    const pathMatches = currentPath === hrefPath
+      || (hrefPath !== '/dashboard' && currentPath.startsWith(hrefPath + '/'));
+    if (!pathMatches) return false;
+    const sameHrefPathSiblings = functions.some((fn) =>
+      fn.children.filter((c) => c.href.split('?')[0] === hrefPath).length > 1);
+    if (!sameHrefPathSiblings) return true;
+    return (hrefQuery || '') === (currentQuery || '');
+  };
 
   // Which parents are open. Seeded from the route so the section containing the current
   // page is expanded on arrival, and thereafter driven by the user's clicks.

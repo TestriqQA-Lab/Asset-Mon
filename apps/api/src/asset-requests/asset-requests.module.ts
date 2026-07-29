@@ -66,7 +66,9 @@ class AssetRequestsService {
         assignedTo: { select: { id: true, firstName: true, lastName: true } },
         category: { select: { id: true, name: true } },
         fulfilledAsset: { select: { id: true, assetTag: true, name: true, status: true } },
-        items: { select: { id: true, status: true } },
+        // assetId is needed so a caller can tell which assets a request covers — the
+        // employee asset list uses it to show Request vs Cancel per row.
+        items: { select: { id: true, assetId: true, status: true } },
       },
     });
 

@@ -63,7 +63,9 @@ export class AssetsService {
     const [items, total] = await Promise.all([
       db.asset.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        // `id` breaks ties on createdAt. Without it the sort is unstable and rows with
+        // the same timestamp can appear on two pages (or on none) as you page through.
+        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
@@ -144,12 +146,16 @@ export class AssetsService {
   // custom fields / vendor / location, and never the holder's email/id.
   private toEmployeeAssetView(a: any) {
     const open = (a.assignments || []).find((x: any) => !x.returnedAt) || null;
+    // Photo is included (as a short-lived signed URL, same as the manager view) so
+    // people can recognise equipment visually. It carries no sensitive data.
+    const signed = this.withSignedPhoto({ photoUrl: a.photoUrl }, this.ctx.tenantId);
     return {
       id: a.id,
       assetTag: a.assetTag,
       name: a.name,
       model: a.model ?? null,
       serialNumber: a.serialNumber ?? null,
+      photoUrl: signed.photoUrl ?? null,
       status: a.status,
       statusDef: a.statusDef ?? null,
       categoryId: a.categoryId,

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -37,6 +37,12 @@ export default function AssetsPage() {
   const statusDefs = useQuery({ queryKey: ['status-defs'], queryFn: () => api('/asset-status-defs') });
   const savedViews = useQuery({ queryKey: ['saved-views', 'assets'], queryFn: () => api('/saved-views?kind=assets') });
 
+  const PAGE_SIZE = 25;
+  const [page, setPage] = useState(1);
+  // Any filter change puts you back on page 1 — staying on page 4 of a narrower result
+  // set usually shows an empty table.
+  useEffect(() => { setPage(1); }, [filter]);
+
   const params = new URLSearchParams();
   if (filter.q) params.set('q', filter.q);
   if (filter.status) params.set('status', filter.status);
@@ -45,10 +51,17 @@ export default function AssetsPage() {
   if (filter.parentId) params.set('parentId', filter.parentId);
   if (filter.onlyTopLevel) params.set('onlyTopLevel', '1');
   if (filter.assignedToMe) params.set('assignedToMe', '1');
+  params.set('page', String(page));
+  params.set('pageSize', String(PAGE_SIZE));
   const list = useQuery({
-    queryKey: ['assets', filter],
+    queryKey: ['assets', filter, page],
     queryFn: () => api(`/assets?${params.toString()}`),
+    placeholderData: (prev: any) => prev,
   });
+
+  const totalPages = Math.max(1, Math.ceil((list.data?.total || 0) / PAGE_SIZE));
+  const rangeFrom = (list.data?.total || 0) === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeTo = Math.min(page * PAGE_SIZE, list.data?.total || 0);
 
   const [open, setOpen] = useState(false);
   const [savedViewModal, setSavedViewModal] = useState(false);
@@ -219,11 +232,68 @@ export default function AssetsPage() {
 
   const isManager = getSession()?.user?.role !== 'EMPLOYEE';
 
+  // Employees can ask for equipment they don't hold, so the action column belongs on
+  // the browse view only — requesting something already assigned to you makes no sense.
+  const showRequestActions = !isManager && !filter.assignedToMe;
+
+  // The caller's own open requests, used to decide Request vs Cancel per row. The list
+  // endpoint is already scoped to the caller, so this shows only their own activity.
+  const myRequests = useQuery({
+    queryKey: ['my-asset-requests'],
+    queryFn: () => api('/asset-requests'),
+    enabled: showRequestActions,
+    staleTime: 30_000,
+  });
+
+  /** assetId -> id of the caller's still-open request covering it. */
+  const openRequestByAsset = useMemo(() => {
+    const rows = Array.isArray(myRequests.data) ? myRequests.data : (myRequests.data?.items || []);
+    const map: Record<string, string> = {};
+    for (const r of rows) {
+      // Only PENDING counts as cancellable — a decided request is history, and its
+      // asset should be requestable again.
+      if (r.status !== 'PENDING') continue;
+      for (const it of r.items || []) if (it.assetId) map[it.assetId] = r.id;
+    }
+    return map;
+  }, [myRequests.data]);
+
+  const requestAsset = useMutation({
+    mutationFn: (asset: any) => api('/asset-requests', {
+      method: 'POST',
+      body: JSON.stringify({
+        mode: 'SPECIFIC',
+        title: asset.name,
+        categoryId: asset.categoryId || undefined,
+        assetIds: [asset.id],
+        urgency: 'NORMAL',
+      }),
+    }),
+    onSuccess: (_d, asset: any) => {
+      toast.success(`Requested ${asset.assetTag || asset.name}`);
+      qc.invalidateQueries({ queryKey: ['my-asset-requests'] });
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const cancelRequest = useMutation({
+    mutationFn: (requestId: string) => api(`/asset-requests/${requestId}/cancel`, { method: 'POST' }),
+    onSuccess: () => {
+      toast.success('Request cancelled');
+      qc.invalidateQueries({ queryKey: ['my-asset-requests'] });
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   return (
     <div className="space-y-5">
       <SectionHeader
-        title="Assets"
-        subtitle={list.data?.total != null ? `${list.data.total} assets total` : 'All hardware, peripherals and equipment'}
+        title={!isManager && filter.assignedToMe ? 'My assets' : 'Assets'}
+        subtitle={list.data?.total != null
+          ? (!isManager && filter.assignedToMe
+              ? `${list.data.total} assigned to you`
+              : `${list.data.total} assets total`)
+          : 'All hardware, peripherals and equipment'}
         action={isManager ? (
           <>
             <ImportCsvButton onDone={() => qc.invalidateQueries({ queryKey: ['assets'] })} />
@@ -336,15 +406,18 @@ export default function AssetsPage() {
                   {/* Photo, cost and purchase date are stripped from the EMPLOYEE payload
                       by toEmployeeAssetView() — rendering them for employees produced
                       permanently-empty columns. */}
-                  {isManager && <TH className="w-12"></TH>}
+                  <TH className="w-12"></TH>
                   <TH>Serial No</TH>
                   <TH>Model</TH>
                   <TH>Category</TH>
                   <TH>Status</TH>
-                  <TH>Assigned To</TH>
+                  {/* Who holds an asset is manager information; employees browsing the
+                      catalogue don't need a column of other people's names. */}
+                  {isManager && <TH>Assigned To</TH>}
                   {isManager && <TH className="text-right">Cost</TH>}
                   {isManager && <TH>Purchased</TH>}
                   {isManager && <TH className="text-right pr-4">Actions</TH>}
+                  {showRequestActions && <TH className="text-right pr-4">Action</TH>}
                 </THead>
                 <TBody>
                   {list.data.items.map((a: any) => {
@@ -371,7 +444,6 @@ export default function AssetsPage() {
                         {a.parent && <span className="mr-1 text-ink-400">↳</span>}
                         {a.name}
                       </TD>
-                      {isManager && (
                       <TD className="w-12" onClick={(e: any) => e.stopPropagation()}>
                         {photoSrc ? (
                           <img src={photoSrc} alt={a.name} className="h-8 w-8 rounded object-cover" />
@@ -379,14 +451,15 @@ export default function AssetsPage() {
                           <div className="h-8 w-8 rounded bg-ink-100 flex items-center justify-center text-ink-400 text-[10px]">N/A</div>
                         )}
                       </TD>
-                      )}
                       <TD className="text-ink-600 text-xs whitespace-nowrap">{a.serialNumber || '—'}</TD>
                       <TD className="text-ink-600 text-xs">{a.model || '—'}</TD>
                       <TD className="text-ink-600">{a.category?.name || '—'}</TD>
                       <TD><AssetStatusPill s={a.status} def={a.statusDef} /></TD>
+                      {isManager && (
                       <TD className="text-ink-600">
                         {assignee ? `${assignee.firstName} ${assignee.lastName}` : '—'}
                       </TD>
+                      )}
                       {isManager && (
                       <TD className="text-right text-ink-600 whitespace-nowrap">
                         {a.purchaseCost != null ? `$${Number(a.purchaseCost).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
@@ -415,6 +488,18 @@ export default function AssetsPage() {
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </div>
+                      </TD>
+                      )}
+                      {showRequestActions && (
+                      <TD className="text-right pr-4" onClick={(e: any) => e.stopPropagation()}>
+                        <RequestAction
+                          assetId={a.id}
+                          assetName={a.name}
+                          openRequestId={openRequestByAsset[a.id]}
+                          onRequest={() => requestAsset.mutate(a)}
+                          onCancel={(id) => cancelRequest.mutate(id)}
+                          busy={requestAsset.isPending || cancelRequest.isPending}
+                        />
                       </TD>
                       )}
                     </TR>
@@ -466,6 +551,35 @@ export default function AssetsPage() {
                 );
               })}
             </ul>
+
+            {/* Pagination. The API has always supported page/pageSize; the UI never
+                exposed it, so every list was capped at the first page. */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between gap-3 border-t border-ink-100 px-3 py-2.5 text-sm">
+                <span className="text-xs text-ink-500">
+                  {rangeFrom}–{rangeTo} of {list.data.total}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setPage(page - 1)}
+                    disabled={page <= 1}
+                  >
+                    Previous
+                  </Button>
+                  <span className="px-2 text-xs text-ink-500">Page {page} of {totalPages}</span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setPage(page + 1)}
+                    disabled={page >= totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </Card>
@@ -764,3 +878,47 @@ function ExportCsvButton() {
   );
 }
 
+
+/**
+ * Request / Cancel for a single asset, shown to employees on the browse view.
+ *
+ * The flow deliberately has one control at a time: if the caller has no open request
+ * covering this asset they can Request it; once they do, that button becomes Cancel
+ * for the request they just made. A request that has been decided (approved, declined,
+ * fulfilled or already cancelled) is history, so the asset becomes requestable again
+ * rather than leaving a Cancel button that would fail.
+ */
+function RequestAction({
+  assetId, assetName, openRequestId, onRequest, onCancel, busy,
+}: {
+  assetId: string;
+  assetName: string;
+  openRequestId?: string;
+  onRequest: () => void;
+  onCancel: (requestId: string) => void;
+  busy: boolean;
+}) {
+  if (openRequestId) {
+    return (
+      <Button
+        variant="secondary"
+        size="sm"
+        disabled={busy}
+        title={`Cancel your pending request for ${assetName}`}
+        onClick={() => { if (confirm(`Cancel your request for "${assetName}"?`)) onCancel(openRequestId); }}
+      >
+        Cancel
+      </Button>
+    );
+  }
+  return (
+    <Button
+      size="sm"
+      disabled={busy}
+      title={`Request ${assetName}`}
+      onClick={onRequest}
+    >
+      Request
+    </Button>
+  );
+}
