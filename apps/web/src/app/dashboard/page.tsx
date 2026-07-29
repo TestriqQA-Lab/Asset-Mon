@@ -19,12 +19,24 @@ const escapeHtml = (v: any) => String(v ?? '').replace(/[&<>"']/g, (c) => (
 )[c]);
 
 export default function DashboardHome() {
-  const me = useQuery({ queryKey: ['me'], queryFn: () => api('/me') });
-  const stats = useQuery({ queryKey: ['stats'], queryFn: () => api('/dashboard/stats') });
-  const alerts = useQuery({ queryKey: ['alerts'], queryFn: () => api('/dashboard/alerts') });
-  const categories = useQuery({ queryKey: ['categories'], queryFn: () => api('/categories') });
   const perms = usePermissions();
   const isEmployee = perms.role === 'EMPLOYEE';
+
+  const me = useQuery({ queryKey: ['me'], queryFn: () => api('/me') });
+  const stats = useQuery({ queryKey: ['stats'], queryFn: () => api('/dashboard/stats') });
+  // /dashboard/alerts is manager-only. Firing it as an employee produced a rejected
+  // request on every dashboard load, then five permanently-empty alert cards.
+  const alerts = useQuery({
+    queryKey: ['alerts'],
+    queryFn: () => api('/dashboard/alerts'),
+    enabled: !isEmployee,
+  });
+  // The category breakdown is workspace inventory reporting — not an employee concern.
+  const categories = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => api('/categories'),
+    enabled: !isEmployee,
+  });
   // Employee-specific: count pending asset requests
   const myRequests = useQuery({
     queryKey: ['my-asset-requests-pending'],
@@ -273,14 +285,17 @@ export default function DashboardHome() {
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-3">
+      {/* Employees get a single-column layout: no category breakdown and no alert
+          column, so the activity panel shouldn't be squeezed into two thirds. */}
+      <div className={isEmployee ? 'grid gap-5' : 'grid gap-5 lg:grid-cols-3'}>
         {/* Left: by-category + recent activity */}
-        <div className="space-y-5 lg:col-span-2">
+        <div className={isEmployee ? 'space-y-5' : 'space-y-5 lg:col-span-2'}>
           {/* Expanded backdrop — rendered OUTSIDE the Card so z-index stacking works */}
-          {catExpanded && (
+          {catExpanded && !isEmployee && (
             <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setCatExpanded(false)} />
           )}
 
+          {!isEmployee && (
           <Card
             ref={catPanelRef}
             padded={false}
@@ -374,6 +389,7 @@ export default function DashboardHome() {
               <Pagination totalItems={displayedCategories.length} page={catPage} onPageChange={setCatPage} />
             )}
           </Card>
+          )}
 
           {/* Expanded activity backdrop */}
           {actExpanded && (
@@ -393,7 +409,9 @@ export default function DashboardHome() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-ink-100 bg-ink-50/50 shrink-0">
               <div className="flex items-center gap-2">
                 <Activity className="h-4 w-4 text-ink-500" />
-                <h2 className="text-sm font-semibold text-ink-900">Recent Activity</h2>
+                <h2 className="text-sm font-semibold text-ink-900">
+                  {isEmployee ? 'Your recent activity' : 'Recent Activity'}
+                </h2>
               </div>
               {actExpanded && (
                 <span className="text-xs text-ink-400">{displayedActivity.length} entries</span>
@@ -493,7 +511,10 @@ export default function DashboardHome() {
           </Card>
         </div>
 
-        {/* Right: Alerts */}
+        {/* Right: Alerts — manager+ only. These are workspace operations (warranties,
+            overdue check-outs, maintenance) and the endpoint behind them is manager-only,
+            so for an employee they were five permanently-empty cards. */}
+        {!isEmployee && (
         <div className="space-y-4">
           <AlertGroup
             icon={<FileWarning className="h-4 w-4" />}
@@ -551,6 +572,7 @@ export default function DashboardHome() {
             }))}
           />
         </div>
+        )}
       </div>
     </div>
   );

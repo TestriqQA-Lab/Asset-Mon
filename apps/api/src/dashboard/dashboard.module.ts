@@ -12,7 +12,8 @@ class DashboardService {
 
   async stats(uid: string, role?: string) {
     const db = this.ctx.prisma();
-    const [total, byStatusRows, byCategoryRows, openAssignments, warrantyExpiringSoon, openTickets, dueMaintenance, licensesExpiringSoon, recentActivity, myOpenTickets, myAssignedAssets, totalTickets, totalUsers, totalLicenses] = await Promise.all([
+    const isEmployee = role === 'EMPLOYEE';
+    const [total, byStatusRows, byCategoryRows, openAssignments, warrantyExpiringSoon, openTickets, dueMaintenance, licensesExpiringSoon, recentActivity, myOpenTickets, myAssignedAssets, totalTickets, totalUsers, totalLicenses, myActivity] = await Promise.all([
       db.asset.count(),
       db.asset.groupBy({ by: ['status'], _count: { _all: true } }),
       db.asset.groupBy({ by: ['categoryId'], _count: { _all: true } }),
@@ -40,6 +41,20 @@ class DashboardService {
       db.serviceTicket.count(),
       db.user.count(),
       db.softwareLicense.count(),
+      // The caller's OWN audit trail. Employees get this instead of the workspace feed:
+      // "what did I do" is useful to them and is their own data, whereas "what did
+      // everyone do" is manager information. Skipped for managers, who get the full feed.
+      isEmployee
+        ? db.auditLog.findMany({
+            where: { performedById: uid },
+            orderBy: { createdAt: 'desc' },
+            take: 10,
+            include: {
+              asset: { select: { id: true, assetTag: true, name: true } },
+              performedBy: { select: { firstName: true, lastName: true } },
+            },
+          })
+        : Promise.resolve([]),
     ]);
 
     const cats = await db.category.findMany({ select: { id: true, name: true } });
@@ -54,9 +69,9 @@ class DashboardService {
       openTickets,
       dueMaintenance,
       licensesExpiringSoon,
-      // Workspace-wide "who did what" is manager+ information — employees see only
-      // their own tiles, so it is withheld from their payload.
-      recentActivity: role === 'EMPLOYEE' ? [] : recentActivity,
+      // Workspace-wide "who did what" is manager+ information. Employees get their own
+      // trail instead of an empty list, which is useful to them and is their own data.
+      recentActivity: isEmployee ? myActivity : recentActivity,
       myOpenTickets,
       myAssignedAssets,
       // Workspace-wide aggregate counts are manager+ information; withheld from the
