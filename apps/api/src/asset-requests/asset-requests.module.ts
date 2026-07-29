@@ -20,6 +20,23 @@ const URGENCIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
 const STATUSES = ['PENDING', 'APPROVED', 'DECLINED', 'FULFILLED', 'CANCELLED'] as const;
 const MODES = ['CATEGORY', 'SPECIFIC'] as const;
 
+/**
+ * Asset statuses that cannot be handed to anyone, so requesting one could never be
+ * granted. ASSIGNED is deliberately absent — asking for a device someone currently holds
+ * is a legitimate queue, and the manager decides at review time. PENDING is absent too:
+ * it usually means stock still being onboarded, which is reasonable to ask for ahead of
+ * time.
+ */
+export const NON_REQUESTABLE_STATUSES = ['OUT_OF_SERVICE', 'OUT_FOR_REPAIR', 'LOST_STOLEN', 'ARCHIVED'];
+
+/** Plain wording for the statuses above, used in the message people actually read. */
+const STATUS_WORDING: Record<string, string> = {
+  OUT_OF_SERVICE: 'out of service',
+  OUT_FOR_REPAIR: 'out for repair',
+  LOST_STOLEN: 'lost or stolen',
+  ARCHIVED: 'retired',
+};
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -180,9 +197,24 @@ class AssetRequestsService {
       if (assetIds.length === 0) {
         throw new BadRequestException('Pick at least one device for a specific-device request');
       }
-      const found = await db.asset.findMany({ where: { id: { in: assetIds } }, select: { id: true } });
+      const found = await db.asset.findMany({
+        where: { id: { in: assetIds } },
+        select: { id: true, assetTag: true, name: true, status: true },
+      });
       if (found.length !== assetIds.length) {
         throw new BadRequestException('One or more selected devices no longer exist');
+      }
+      // Availability is deliberately not checked — an ASSIGNED device can be requested,
+      // and the manager decides at review time. But these statuses mean the device
+      // cannot be handed to anyone at all, so a request for one could never be granted.
+      const unusable = found.filter((a: any) => NON_REQUESTABLE_STATUSES.includes(a.status));
+      if (unusable.length > 0) {
+        const names = unusable.map((a: any) => `${a.assetTag} (${STATUS_WORDING[a.status] ?? a.status})`).join(', ');
+        throw new BadRequestException(
+          unusable.length === 1
+            ? `${names} isn't available to request.`
+            : `These aren't available to request: ${names}.`,
+        );
       }
       title = data.title?.trim() || `${assetIds.length} specific device${assetIds.length === 1 ? '' : 's'}`;
       // categoryId stays null — a specific pick can span categories.

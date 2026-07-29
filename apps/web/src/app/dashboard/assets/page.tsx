@@ -511,6 +511,7 @@ export default function AssetsPage() {
                         <RequestAction
                           assetId={a.id}
                           assetName={a.name}
+                          status={a.status}
                           openRequestId={openRequestByAsset[a.id]}
                           onRequest={() => requestAsset.mutate(a)}
                           onCancel={(id) => cancelRequest.mutate(id)}
@@ -905,15 +906,28 @@ function ExportCsvButton() {
  * rather than leaving a Cancel button that would fail.
  */
 function RequestAction({
-  assetId, assetName, openRequestId, onRequest, onCancel, busy,
+  assetId, assetName, status, openRequestId, onRequest, onCancel, busy,
 }: {
   assetId: string;
   assetName: string;
+  status?: string;
   openRequestId?: string;
   onRequest: () => void;
   onCancel: (requestId: string) => void;
   busy: boolean;
 }) {
+  // A device that is broken, away being repaired, missing or retired cannot be handed to
+  // anyone, so it is not offered. Mirrors NON_REQUESTABLE_STATUSES on the server, which
+  // is the actual guard — this just avoids showing a button that would fail.
+  const unavailable: Record<string, string> = {
+    OUT_OF_SERVICE: 'Out of service',
+    OUT_FOR_REPAIR: 'Being repaired',
+    LOST_STOLEN: 'Lost or stolen',
+    ARCHIVED: 'Retired',
+  };
+  if (status && unavailable[status] && !openRequestId) {
+    return <span className="text-xs text-ink-400" title={`${assetName} can't be requested`}>{unavailable[status]}</span>;
+  }
   if (openRequestId) {
     return (
       <Button
