@@ -43,7 +43,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             no-ops when no cached theme exists. */}
         <ThemeBootstrap />
       </head>
-      <body className="min-h-screen bg-ink-50 text-ink-900 antialiased">
+      {/* Browser extensions routinely inject attributes into <body> before
+          React loads (password managers, writing assistants, tab tools), which
+          React then reports as a hydration mismatch on the developer's machine
+          only. We render <body> with a fixed className and set nothing on it
+          dynamically — the scroll locks elsewhere touch style.overflow inside
+          useEffect, which runs after hydration and is never compared — so there
+          is no real mismatch this could hide. */}
+      <body className="min-h-screen bg-ink-50 text-ink-900 antialiased" suppressHydrationWarning>
         <Providers>
           {children}
           <Toaster richColors closeButton position="top-right" />
