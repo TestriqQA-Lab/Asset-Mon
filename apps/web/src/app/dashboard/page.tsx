@@ -160,6 +160,34 @@ export default function DashboardHome() {
   const prettifyAction = (action: string) =>
     action.replace(/[_.]/g, ' ').toLowerCase();
 
+  /**
+   * Employee-facing phrasing for their own activity. Every entry in their feed is
+   * something they did, so it reads in the second person. Anything not listed falls
+   * back to the tidied raw action rather than showing nothing.
+   */
+  const MY_ACTION_LABELS: Record<string, string> = {
+    'asset_request.created': 'You asked for an item',
+    'asset_request.cancel': 'You cancelled a request',
+    'asset_request.cancelled': 'You cancelled a request',
+    'asset_request.approved': 'Your request was approved',
+    'asset_request.declined': 'Your request was declined',
+    'asset_request.fulfilled': 'Your request was fulfilled',
+    'asset_request.escalated': 'Your request was escalated',
+    'asset_request.note': 'You added a note to a request',
+    'ticket.opened': 'You reported a problem',
+    'ticket.status_changed': 'Your ticket changed status',
+    'ticket.assigned': 'Your ticket was assigned',
+    TICKET_OPENED: 'You reported a problem',
+    TICKET_UPDATED: 'Your ticket was updated',
+    CHECKED_OUT: 'You received an item',
+    CHECKED_IN: 'You returned an item',
+    'purchase_request.submitted': 'You submitted a purchase request',
+    'purchase_request.approved': 'Your purchase request was approved',
+    'purchase_request.rejected': 'Your purchase request was rejected',
+  };
+  const describeAction = (action: string) =>
+    (isEmployee && MY_ACTION_LABELS[action]) || prettifyAction(action);
+
   // Performer display: firstName + lastName → fallback email → —
   const performerName = (p: any) => {
     if (!p) return '—';
@@ -195,7 +223,7 @@ export default function DashboardHome() {
     const csvRows = rows.map((e: any) => {
       const d = new Date(e.createdAt);
       return [
-        prettifyAction(e.action),
+        describeAction(e.action),
         e.asset ? `${e.asset.assetTag} · ${e.asset.name}` : '',
         performerName(e.performedBy),
         d.toLocaleDateString(),
@@ -232,7 +260,7 @@ export default function DashboardHome() {
               ${rows.map((e: any) => {
                 const d = new Date(e.createdAt);
                 const asset = e.asset ? `${e.asset.assetTag} · ${e.asset.name}` : '—';
-                return `<tr><td>${escapeHtml(prettifyAction(e.action))}</td><td>${escapeHtml(asset)}</td><td>${escapeHtml(performerName(e.performedBy))}</td><td>${escapeHtml(d.toLocaleDateString() + ' ' + d.toLocaleTimeString())}</td></tr>`;
+                return `<tr><td>${escapeHtml(describeAction(e.action))}</td><td>${escapeHtml(asset)}</td><td>${escapeHtml(performerName(e.performedBy))}</td><td>${escapeHtml(d.toLocaleDateString() + ' ' + d.toLocaleTimeString())}</td></tr>`;
               }).join('')}
             </tbody>
           </table>
@@ -469,7 +497,9 @@ export default function DashboardHome() {
                     <tr>
                       <th className="px-4 py-3 border-b border-ink-100 font-medium bg-ink-50">Action</th>
                       <th className="px-4 py-3 border-b border-ink-100 font-medium bg-ink-50">Asset</th>
-                      <th className="px-4 py-3 border-b border-ink-100 font-medium bg-ink-50">Performed By</th>
+                      {/* Every row in an employee's feed is their own doing, and the
+                          label already says "You …" — the column would repeat their name. */}
+                      {!isEmployee && <th className="px-4 py-3 border-b border-ink-100 font-medium bg-ink-50">Performed By</th>}
                       <th className="px-4 py-3 border-b border-ink-100 font-medium bg-ink-50">When</th>
                     </tr>
                   </thead>
@@ -477,7 +507,7 @@ export default function DashboardHome() {
                     {(actExpanded ? paginate(displayedActivity, actPage) : displayedActivity).map((e: any) => (
                       <tr key={e.id} className="hover:bg-ink-50 transition-colors">
                         <td className="px-4 py-2.5">
-                          <Pill tone="neutral">{prettifyAction(e.action)}</Pill>
+                          <Pill tone="neutral">{describeAction(e.action)}</Pill>
                         </td>
                         <td className="px-4 py-2.5">
                           {e.asset ? (
@@ -488,7 +518,7 @@ export default function DashboardHome() {
                             <span className="text-ink-400">—</span>
                           )}
                         </td>
-                        <td className="px-4 py-2.5 text-ink-600 text-xs">{performerName(e.performedBy)}</td>
+                        {!isEmployee && <td className="px-4 py-2.5 text-ink-600 text-xs">{performerName(e.performedBy)}</td>}
                         <td className="px-4 py-2.5 text-ink-400 text-xs">
                           {new Date(e.createdAt).toLocaleDateString()} {new Date(e.createdAt).toLocaleTimeString()}
                         </td>
