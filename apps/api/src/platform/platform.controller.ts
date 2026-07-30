@@ -60,6 +60,11 @@ export class PlatformController {
   @Get('metrics')
   metrics() { return this.tenants.metrics(); }
 
+  @Get('tenants/attention-count')
+  attentionCount() {
+    return this.tenants.attentionCount().then((count) => ({ count }));
+  }
+
   @Get('plans')
   plans() {
     return Object.values(PLANS).map((p) => ({
@@ -223,6 +228,11 @@ export class PlatformController {
 
   // Governed 4-eyes peer MFA reset — a super-admin opens a request to reset
   // another operator's MFA (needs >=3 super-admins; otherwise use the CLI).
+  @Get('admins/reset-mfa/pending')
+  listPendingResets() {
+    return this.mfa.listPendingResets();
+  }
+
   @Post('admins/:id/reset-mfa')
   requestPeerReset(@Req() req: any, @Param('id') id: string, @Body() dto: PeerResetRequestDto) {
     return this.mfa.requestPeerReset(req.platformUser, id, dto.incidentRef, req);

@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { papi, getPlatformSession } from '@/lib/platform-api';
 import { Card, Pill, QueryState, Button, inputClass, selectClass, Field, MobileCard, MobileCardRow } from '@/components/ui';
 import { Modal } from '@/components/Modal';
-import { Plus, KeyRound, Trash2, Shield } from 'lucide-react';
+import { Plus, KeyRound, Trash2, Shield, ShieldAlert, CheckCircle, XCircle } from 'lucide-react';
 
 export default function PlatformAdminsPage() {
   const qc = useQueryClient();
@@ -14,6 +14,27 @@ export default function PlatformAdminsPage() {
     queryKey: ['platform-admins'],
     queryFn: () => papi<any[]>('/platform/admins'),
   });
+
+  const pendingResets = useQuery({
+    queryKey: ['platform-mfa-pending-resets'],
+    queryFn: () => papi<any[]>('/platform/admins/reset-mfa/pending'),
+  });
+
+  const approveReset = useMutation({
+    mutationFn: ({ requestId, totpCode }: { requestId: string; totpCode: string }) =>
+      papi(`/platform/admins/reset-mfa/${requestId}/approve`, { method: 'POST', body: JSON.stringify({ totpCode }) }),
+    onSuccess: () => {
+      toast.success('MFA reset approved and executed');
+      qc.invalidateQueries({ queryKey: ['platform-mfa-pending-resets'] });
+      qc.invalidateQueries({ queryKey: ['platform-admins'] });
+      setApproveTarget(null);
+      setApproveCode('');
+    },
+    onError: (e: any) => toast.error(e?.message || 'Approval failed'),
+  });
+
+  const [approveTarget, setApproveTarget] = useState<any | null>(null);
+  const [approveCode, setApproveCode] = useState('');
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ email: '', firstName: '', lastName: '', password: '', role: 'SUPPORT' });
@@ -52,6 +73,8 @@ export default function PlatformAdminsPage() {
     },
   });
 
+  const pendingCount = pendingResets.data?.length || 0;
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -63,6 +86,47 @@ export default function PlatformAdminsPage() {
           Add platform admin
         </Button>
       </div>
+
+      {/* Pending MFA reset requests */}
+      {pendingCount > 0 && (
+        <Card padded={false}>
+          <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-5 py-3">
+            <ShieldAlert className="h-4 w-4 text-amber-600" />
+            <h3 className="text-sm font-semibold text-amber-900">
+              Pending MFA resets ({pendingCount})
+            </h3>
+          </div>
+          <div className="divide-y divide-ink-100">
+            {pendingResets.data?.map((r: any) => (
+              <div key={r.id} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0 text-sm">
+                  <div className="text-ink-900">
+                    <span className="font-medium">{r.requester?.firstName} {r.requester?.lastName}</span>
+                    <span className="text-ink-500"> requested reset for </span>
+                    <span className="font-medium">{r.target?.firstName} {r.target?.lastName}</span>
+                    <span className="text-ink-400"> ({r.target?.email})</span>
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-ink-500">
+                    <span>Ref: <span className="font-mono">{r.incidentRef}</span></span>
+                    <span>Expires: {new Date(r.expiresAt).toLocaleTimeString()}</span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<CheckCircle className="h-3.5 w-3.5" />}
+                    onClick={() => setApproveTarget(r)}
+                    disabled={me?.id === r.requesterId}
+                  >
+                    Approve
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <QueryState query={list}>
         {(rows: any[]) => (
@@ -233,6 +297,44 @@ export default function PlatformAdminsPage() {
           <p className="text-sm text-ink-500">All of this admin's active sessions will be invalidated.</p>
           <Field label="New password" hint="At least 8 characters">
             <input className={inputClass} type="text" value={resetPwd} onChange={(e) => setResetPwd(e.target.value)} autoFocus />
+          </Field>
+        </div>
+      </Modal>
+      <Modal
+        open={!!approveTarget}
+        onClose={() => { setApproveTarget(null); setApproveCode(''); }}
+        title="Approve MFA reset"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => { setApproveTarget(null); setApproveCode(''); }}>Cancel</Button>
+            <Button
+              onClick={() => approveTarget && approveReset.mutate({ requestId: approveTarget.id, totpCode: approveCode })}
+              loading={approveReset.isPending}
+              disabled={approveCode.length !== 6}
+            >
+              Approve and reset
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-ink-700">
+            You are approving an MFA reset for <strong>{approveTarget?.target?.email}</strong> requested by <strong>{approveTarget?.requester?.email}</strong> (Ref: <span className="font-mono">{approveTarget?.incidentRef}</span>).
+          </p>
+          <p className="text-sm text-ink-700">
+            This action requires a step-up authentication. Please enter your current authenticator code to proceed.
+          </p>
+          <Field label="Your authenticator code" hint="6 digits from your authenticator app">
+            <input
+              className={inputClass}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              value={approveCode}
+              onChange={(e) => setApproveCode(e.target.value.replace(/\D/g, ''))}
+              autoFocus
+            />
           </Field>
         </div>
       </Modal>

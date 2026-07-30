@@ -31,9 +31,9 @@ export default function PlatformOverviewPage() {
         {(d: any) => {
           const cards: Array<{ label: string; value: string | number; icon: React.ReactNode; href?: string; tone?: 'brand' | 'green' | 'amber' | 'red' }> = [
             { label: 'Total tenants', value: d.tenants.total, icon: <Building2 className="h-5 w-5" />, href: '/platform/tenants', tone: 'brand' },
-            { label: 'Active users', value: d.users, icon: <Users className="h-5 w-5" />, tone: 'green' },
-            { label: 'Tracked assets', value: d.assets, icon: <Package className="h-5 w-5" />, tone: 'amber' },
-            { label: 'Read errors', value: d.readErrors, icon: <AlertTriangle className="h-5 w-5" />, tone: d.readErrors ? 'red' : 'green' },
+            { label: 'Active users', value: d.users, icon: <Users className="h-5 w-5" />, href: '/platform/tenants', tone: 'green' },
+            { label: 'Tracked assets', value: d.assets, icon: <Package className="h-5 w-5" />, href: '/platform/tenants', tone: 'amber' },
+            { label: 'Read errors', value: d.readErrors, icon: <AlertTriangle className="h-5 w-5" />, href: '/platform/tenants', tone: d.readErrors ? 'red' : 'green' },
           ];
           return (
             <>
@@ -42,7 +42,7 @@ export default function PlatformOverviewPage() {
                   <button
                     key={c.label}
                     onClick={() => c.href && router.push(c.href)}
-                    className={'group flex items-start justify-between gap-3 rounded-xl border border-ink-200 bg-white p-5 text-left shadow-card transition hover:border-violet-300 ' + (c.href ? 'cursor-pointer' : 'cursor-default')}
+                    className={'group flex items-start justify-between gap-3 rounded-xl border border-ink-200 bg-white p-5 text-left shadow-card transition hover:border-violet-300 ' + (c.href ? 'cursor-pointer hover:bg-violet-50/30' : 'cursor-default')}
                   >
                     <div>
                       <div className="text-xs font-medium uppercase tracking-wider text-ink-500">{c.label}</div>
@@ -60,10 +60,14 @@ export default function PlatformOverviewPage() {
                   <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-500">Tenants by status</h3>
                   <div className="space-y-2">
                     {Object.entries(d.tenants.byStatus || {}).map(([status, count]: any) => (
-                      <div key={status} className="flex items-center justify-between rounded-lg border border-ink-100 px-3 py-2">
+                      <button
+                        key={status}
+                        onClick={() => router.push(`/platform/tenants?status=${status}`)}
+                        className="flex w-full cursor-pointer items-center justify-between rounded-lg border border-ink-100 px-3 py-2 text-left hover:border-violet-300 hover:bg-violet-50/30 transition"
+                      >
                         <Pill tone={STATUS_TONES[status] || 'gray'} dot>{status}</Pill>
                         <span className="font-mono text-sm text-ink-700">{count}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </Card>
@@ -72,10 +76,14 @@ export default function PlatformOverviewPage() {
                   <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-500">Tenants by plan</h3>
                   <div className="space-y-2">
                     {Object.entries(d.tenants.byPlan || {}).map(([plan, count]: any) => (
-                      <div key={plan} className="flex items-center justify-between rounded-lg border border-ink-100 px-3 py-2">
+                      <button
+                        key={plan}
+                        onClick={() => router.push(`/platform/tenants?plan=${plan}`)}
+                        className="flex w-full cursor-pointer items-center justify-between rounded-lg border border-ink-100 px-3 py-2 text-left hover:border-violet-300 hover:bg-violet-50/30 transition"
+                      >
                         <span className="text-sm capitalize text-ink-700">{plan}</span>
                         <span className="font-mono text-sm text-ink-700">{count}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </Card>

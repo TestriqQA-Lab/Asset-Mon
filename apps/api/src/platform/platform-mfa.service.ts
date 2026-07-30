@@ -308,6 +308,18 @@ export class PlatformMfaService {
     return admins.filter((a) => mfaSetupComplete(a));
   }
 
+  /** List all PENDING MFA reset requests (for the approval queue UI). */
+  async listPendingResets() {
+    return this.catalog.platformMfaResetRequest.findMany({
+      where: { status: 'PENDING', expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        requester: { select: { id: true, email: true, firstName: true, lastName: true } },
+        target: { select: { id: true, email: true, firstName: true, lastName: true } },
+      },
+    });
+  }
+
   /** A super-admin requests a peer reset of another operator's MFA. */
   async requestPeerReset(actor: { id: string; email: string; role?: string }, targetId: string, incidentRef: string, req?: any) {
     assertSuperAdmin(actor);

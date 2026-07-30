@@ -1,12 +1,13 @@
 'use client';
 // NOTE: mobile responsiveness for `apps/web/src/app/platform/login/page.tsx`
 // is being handled in a separate worker pass — leave that file alone.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { getPlatformSession, platformLogout, papi } from '@/lib/platform-api';
 import {
   ShieldCheck, LayoutDashboard, Building2, Users, ScrollText, ChevronDown, LogOut, KeyRound,
-  Menu, X, LifeBuoy, Megaphone,
+  Menu, X, LifeBuoy, Megaphone, PanelLeftClose,
 } from 'lucide-react';
 import { THEME_PRESETS, themeToRootCss } from '@/lib/themes';
 import { applyThemeTokens, resetThemeTokens } from '@/lib/theme';
@@ -32,7 +33,12 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
   const [ready, setReady] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  
+  // Badge counts
   const [supportUnread, setSupportUnread] = useState(0);
+  const [pendingResets, setPendingResets] = useState(0);
+  const [tenantsAttention, setTenantsAttention] = useState(0);
+  
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -41,13 +47,18 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
     setReady(true);
   }, [path, r]);
 
-  // Poll the operator support-inbox unread count for the nav badge.
+  // Poll for sidebar badge counts.
   useEffect(() => {
     if (path.startsWith('/platform/login') || !getPlatformSession()) return;
     let alive = true;
-    const load = () => papi<{ count: number }>('/platform/support/unread-count')
-      .then((d) => { if (alive) setSupportUnread(d.count || 0); })
-      .catch(() => {});
+    const load = () => {
+      papi<{ count: number }>('/platform/support/unread-count')
+        .then((d) => { if (alive) setSupportUnread(d.count || 0); }).catch(() => {});
+      papi<any[]>('/platform/admins/reset-mfa/pending')
+        .then((d) => { if (alive) setPendingResets(d.length || 0); }).catch(() => {});
+      papi<{ count: number }>('/platform/tenants/attention-count')
+        .then((d) => { if (alive) setTenantsAttention(d.count || 0); }).catch(() => {});
+    };
     load();
     const t = setInterval(load, 30_000);
     return () => { alive = false; clearInterval(t); };
@@ -82,6 +93,35 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
     return () => { document.body.style.overflow = prev; };
   }, [drawerOpen]);
 
+  // Sidebar collapse. Persisted so the choice survives navigation and reloads.
+  // Separate key from the dashboard's `am.navCollapsed`.
+  const [navCollapsed, setNavCollapsed] = useState(false);
+  useEffect(() => {
+    try { setNavCollapsed(localStorage.getItem('am.platformNavCollapsed') === '1'); } catch {}
+  }, []);
+  const toggleNav = useCallback(() => {
+    setNavCollapsed((v) => {
+      const next = !v;
+      try { localStorage.setItem('am.platformNavCollapsed', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  }, []);
+
+  // Cmd/Ctrl+B — the shortcut people already know from VS Code and Slack.
+  const [shortcutHint, setShortcutHint] = useState('Ctrl+');
+  useEffect(() => {
+    const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
+    setShortcutHint(mac ? '⌘' : 'Ctrl+');
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleNav();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleNav]);
+
   if (path.startsWith('/platform/login')) return <>{children}</>;
   if (!ready) return null;
   const session = getPlatformSession();
@@ -103,7 +143,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
       >
         <header className="sticky top-0 z-40 border-b border-violet-200/60 bg-gradient-to-r from-violet-50 via-am-surface to-violet-50 backdrop-blur">
           <div className="flex h-14 items-center gap-3 px-4 lg:px-6">
-            <a href="/platform" className="flex items-center gap-2.5">
+            <Link href="/platform" className="flex items-center gap-2.5">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-indigo-700 text-white shadow-sm">
                 <ShieldCheck className="h-4 w-4" />
               </div>
@@ -115,34 +155,12 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
               <span className="ml-2 hidden rounded-full border border-violet-300/70 bg-violet-100/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-800 sm:inline-flex">
                 Platform
               </span>
-            </a>
-
-            <nav className="ml-3 hidden flex-1 items-center gap-1 md:flex" aria-label="Platform">
-              {NAV.map((item) => {
-                const isActive = isActiveItem(item);
-                return (
-                  <a
-                    key={item.href}
-                    href={item.href}
-                    className={
-                      'flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors ' +
-                      (isActive ? 'bg-violet-900 text-white' : 'text-am-text hover:bg-violet-100')
-                    }
-                  >
-                    {item.icon}
-                    {item.label}
-                    {item.href === '/platform/support' && supportUnread > 0 && (
-                      <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">{supportUnread > 9 ? '9+' : supportUnread}</span>
-                    )}
-                  </a>
-                );
-              })}
-            </nav>
+            </Link>
 
             <div className="ml-auto flex items-center gap-2">
-              <a href="/dashboard" className="hidden rounded-lg border border-am-border bg-am-surface px-3 py-1.5 text-xs text-am-text-muted hover:bg-am-surface-muted lg:block">
+              <Link href="/dashboard" className="hidden rounded-lg border border-am-border bg-am-surface px-3 py-1.5 text-xs text-am-text-muted hover:bg-am-surface-muted lg:block">
                 Tenant view →
-              </a>
+              </Link>
               <div className="relative" ref={menuRef}>
                 <button
                   onClick={() => setMenuOpen((v) => !v)}
@@ -164,19 +182,19 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                       <div className="truncate font-medium text-am-text">{session?.user.email}</div>
                     </div>
                     <div className="my-1 border-t border-am-border" />
-                    <a
+                    <Link
                       href="/platform/account"
                       className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-am-text hover:bg-am-surface-muted"
                       onClick={() => setMenuOpen(false)}
                     >
                       <KeyRound className="h-4 w-4" /> Change password
-                    </a>
-                    <a
+                    </Link>
+                    <Link
                       href="/dashboard"
                       className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-am-text hover:bg-am-surface-muted lg:hidden"
                     >
                       Tenant view →
-                    </a>
+                    </Link>
                     <div className="my-1 border-t border-am-border" />
                     <button
                       onClick={async () => { await platformLogout(); r.replace('/platform/login'); }}
@@ -188,7 +206,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                 )}
               </div>
               <button
-                className="ml-1 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-violet-200 bg-am-surface text-am-text hover:bg-violet-50 md:hidden"
+                className="ml-1 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-violet-200 bg-am-surface text-am-text hover:bg-violet-50 lg:hidden"
                 onClick={() => setDrawerOpen((v) => !v)}
                 aria-label="Toggle navigation"
                 aria-expanded={drawerOpen}
@@ -199,10 +217,10 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
           </div>
         </header>
 
-        {/* Mobile drawer (md:hidden). */}
+        {/* Mobile drawer (lg:hidden). */}
         <div
           className={
-            'fixed inset-0 z-50 md:hidden ' +
+            'fixed inset-0 z-50 lg:hidden ' +
             (drawerOpen ? 'pointer-events-auto' : 'pointer-events-none')
           }
           aria-hidden={!drawerOpen}
@@ -236,8 +254,12 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
             <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-3" aria-label="Mobile">
               {NAV.map((item) => {
                 const isActive = isActiveItem(item);
+                let badge = 0;
+                if (item.href === '/platform/support') badge = supportUnread;
+                else if (item.href === '/platform/admins') badge = pendingResets;
+                else if (item.href === '/platform/tenants') badge = tenantsAttention;
                 return (
-                  <a
+                  <Link
                     key={item.href}
                     href={item.href}
                     className={
@@ -247,19 +269,19 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
                   >
                     {item.icon}
                     {item.label}
-                    {item.href === '/platform/support' && supportUnread > 0 && (
-                      <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">{supportUnread > 9 ? '9+' : supportUnread}</span>
+                    {badge > 0 && (
+                      <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">{badge > 9 ? '9+' : badge}</span>
                     )}
-                  </a>
+                  </Link>
                 );
               })}
               <div className="mt-3 border-t border-am-border pt-3">
-                <a
+                <Link
                   href="/dashboard"
                   className="flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-am-text hover:bg-am-surface-muted"
                 >
                   Tenant view →
-                </a>
+                </Link>
               </div>
             </nav>
             <div className="shrink-0 border-t border-violet-100 px-3 py-2 text-[11px] text-am-text-muted">
@@ -268,7 +290,89 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
           </aside>
         </div>
 
-        <main className="flex-1 px-4 py-5 sm:py-6 lg:px-6">{children}</main>
+        <div className="relative z-10 flex flex-1">
+          {/* Persistent sidebar. Matches the dashboard pattern: collapsible,
+              flat list (no nested dropdowns — every destination is a single page),
+              violet accent to distinguish from the tenant dashboard. */}
+          <aside
+            className="sticky top-14 hidden h-[calc(100vh-3.5rem)] shrink-0 overflow-hidden border-r border-violet-200/60 bg-violet-50/30 px-2 py-3 lg:block"
+            style={{ width: navCollapsed ? '4rem' : '14rem' }}
+            aria-label="Primary"
+          >
+            <div className="flex h-full flex-col">
+              {/* Toggle sits at the top so it is visible without scrolling. */}
+              <div
+                className={
+                  'mb-2 flex shrink-0 items-center ' +
+                  (navCollapsed ? 'justify-center' : 'justify-between pl-3')
+                }
+              >
+                {!navCollapsed && (
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-violet-500">Menu</span>
+                )}
+                <button
+                  onClick={toggleNav}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-violet-400 transition hover:bg-violet-100/70 hover:text-violet-800"
+                  aria-label={navCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+                  title={`${navCollapsed ? 'Expand' : 'Collapse'} sidebar  (${shortcutHint}B)`}
+                  aria-expanded={!navCollapsed}
+                  aria-controls="platform-nav-list"
+                >
+                  <PanelLeftClose
+                    className={'h-4 w-4 transition-transform duration-200' + (navCollapsed ? ' rotate-180' : '')}
+                  />
+                </button>
+              </div>
+              <div id="platform-nav-list" className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden">
+                {NAV.map((item) => {
+                  const isActive = isActiveItem(item);
+                  let badge = 0;
+                  if (item.href === '/platform/support') badge = supportUnread;
+                  else if (item.href === '/platform/admins') badge = pendingResets;
+                  else if (item.href === '/platform/tenants') badge = tenantsAttention;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      aria-current={isActive ? 'page' : undefined}
+                      title={navCollapsed ? (badge > 0 ? `${item.label} (${badge})` : item.label) : undefined}
+                      aria-label={navCollapsed ? item.label : undefined}
+                      className={
+                        'group relative flex items-center rounded-lg transition-colors ' +
+                        (navCollapsed ? 'justify-center px-0 py-2.5 text-sm' : 'gap-2.5 px-3 py-2 text-sm') + ' ' +
+                        (isActive
+                          ? 'bg-violet-900 font-medium text-white'
+                          : 'text-am-text hover:bg-violet-100/70 hover:text-violet-900')
+                      }
+                    >
+                      {isActive && navCollapsed && (
+                        <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-violet-500" aria-hidden />
+                      )}
+                      <span className={isActive ? 'text-white' : 'text-violet-500 transition-colors group-hover:text-violet-700'}>
+                        {item.icon}
+                      </span>
+                      {!navCollapsed && <span className="truncate">{item.label}</span>}
+                      {badge > 0 && (navCollapsed ? (
+                        <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-violet-50/30" />
+                      ) : (
+                        <span
+                          className={
+                            'ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold leading-none ' +
+                            (isActive ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-700')
+                          }
+                        >
+                          {badge > 99 ? '99+' : badge}
+                        </span>
+                      ))}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+
+          <main className="min-w-0 flex-1 px-4 py-5 sm:py-6 lg:px-6">{children}</main>
+        </div>
       </div>
     </>
   );

@@ -73,6 +73,20 @@ export class PlatformTenantsService {
     return enriched;
   }
 
+  /** Count of tenants needing attention (suspended or expiring in <= 7 days) */
+  async attentionCount() {
+    const nextWeek = new Date();
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    return this.catalog.tenant.count({
+      where: {
+        OR: [
+          { status: 'SUSPENDED' },
+          { trialEndsAt: { lte: nextWeek }, status: 'ACTIVE' },
+        ],
+      },
+    });
+  }
+
   async getById(id: string) {
     const t = await this.catalog.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
