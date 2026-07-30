@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -409,9 +410,9 @@ export default function DashboardHome() {
             </div>
             
             {!catExpanded && (
-              <a href="/dashboard/categories" className="block w-full text-center bg-brand-50 hover:bg-brand-100 text-brand-700 py-2.5 text-sm font-medium transition-colors border-t border-ink-100 shrink-0">
+              <Link href="/dashboard/categories" className="block w-full text-center bg-brand-50 hover:bg-brand-100 text-brand-700 py-2.5 text-sm font-medium transition-colors border-t border-ink-100 shrink-0">
                 View All
-              </a>
+              </Link>
             )}
             {catExpanded && (
               <Pagination totalItems={displayedCategories.length} page={catPage} onPageChange={setCatPage} />
@@ -531,9 +532,9 @@ export default function DashboardHome() {
 
             {/* Footer: View All — admin only, when audit-log is visible */}
             {!actExpanded && canSeeAudit && (
-              <a href="/dashboard/audit" className="block w-full text-center bg-brand-50 hover:bg-brand-100 text-brand-700 py-2.5 text-sm font-medium transition-colors border-t border-ink-100 shrink-0">
+              <Link href="/dashboard/audit" className="block w-full text-center bg-brand-50 hover:bg-brand-100 text-brand-700 py-2.5 text-sm font-medium transition-colors border-t border-ink-100 shrink-0">
                 View All
-              </a>
+              </Link>
             )}
             {actExpanded && (
               <Pagination totalItems={displayedActivity.length} page={actPage} onPageChange={setActPage} />

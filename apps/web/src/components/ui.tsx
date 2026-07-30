@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 
 /* ----------------------- helpers ----------------------- */
@@ -324,6 +325,16 @@ export function StatCard({
   );
 
   if (href) {
+    // Every dashboard stat tile is a link into the app. A raw <a> would reload
+    // the whole bundle and re-authenticate on each click; Link navigates on the
+    // client. External URLs still fall back to <a>.
+    if (href.startsWith('/')) {
+      return (
+        <Link href={href} aria-label={`${label}: ${value}`} className={containerClass}>
+          {body}
+        </Link>
+      );
+    }
     return (
       <a href={href} aria-label={`${label}: ${value}`} className={containerClass}>
         {body}

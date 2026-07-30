@@ -3,6 +3,7 @@ import { LegalShell, LegalSection } from '@/components/marketing/Legal';
 import { pageMetadata, breadcrumbLd } from '@/lib/seo';
 import { JsonLd } from '@/components/seo/JsonLd';
 import { SITE } from '@/lib/site';
+import Link from 'next/link';
 
 export const metadata = pageMetadata({
   title: 'Terms of Service',
@@ -50,7 +51,7 @@ export default function TermsPage() {
           <p>Paid plans are billed monthly or annually in advance. The {SITE.trial.headline} requires no credit card. After the trial, your workspace pauses for 14 days unless you pick a plan. Refunds are issued for annual plans on a prorated basis within 30 days of charge.</p>
         </LegalSection>
         <LegalSection id="data" title="Your data">
-          <p>You own your workspace data. We act as the data processor; you are the data controller (see our DPA on the <a className="text-brand-700 hover:underline" href="/security#dpa">Security page</a>). You can export your data via CSV / API at any time. We delete workspace data within 30 days of cancellation.</p>
+          <p>You own your workspace data. We act as the data processor; you are the data controller (see our DPA on the <Link className="text-brand-700 hover:underline" href="/security#dpa">Security page</Link>). You can export your data via CSV / API at any time. We delete workspace data within 30 days of cancellation.</p>
         </LegalSection>
         <LegalSection id="ip" title="Intellectual property">
           <p>AssetMon and the AssetMon logo are our trademarks. The software, content and design are owned by us or our licensors. You retain all rights in your workspace data.</p>

@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { api, getSession, logout } from '@/lib/api';
@@ -312,7 +313,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
       <header className="sticky top-0 z-40 border-b border-ink-200 bg-white/85 backdrop-blur-md">
         <div className="flex h-14 items-center gap-3 px-4 lg:px-6">
-          <a href="/dashboard" className="flex items-center gap-2.5">
+          <Link href="/dashboard" className="flex items-center gap-2.5">
             {logoUrl ? (
               <img src={logoUrl} alt="logo" className="h-7 max-w-[120px] object-contain" />
             ) : (
@@ -332,7 +333,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                 </div>
               </>
             )}
-          </a>
+          </Link>
 
           <div className="ml-auto flex items-center gap-2">
             {/* Search is manager+ on the server. Showing employees the box meant they
@@ -352,7 +353,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             {/* Settings — an icon, not a nav group. Only rendered when the role can
                 actually open at least one settings page. */}
             {canSeeAnySetting && (
-              <a
+              <Link
                 href="/dashboard/settings"
                 className={cn(
                   'flex h-9 w-9 items-center justify-center rounded-lg border border-transparent transition hover:border-ink-200 hover:bg-ink-50',
@@ -362,12 +363,12 @@ function Shell({ children }: { children: React.ReactNode }) {
                 title="Settings"
               >
                 <Settings className="h-4 w-4" />
-              </a>
+              </Link>
             )}
             {/* Get help — an icon, not a nav group. Visible on mobile too, since the
                 mobile drawer no longer carries a Support section. */}
             {perms.canSee('get-help') && (
-              <a
+              <Link
                 href="/dashboard/get-help"
                 className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-transparent text-ink-500 transition hover:border-ink-200 hover:bg-ink-50 hover:text-ink-700"
                 aria-label={supportUnread > 0 ? `Get help (${supportUnread} unread)` : 'Get help'}
@@ -379,7 +380,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                     {supportUnread > 9 ? '9+' : supportUnread}
                   </span>
                 )}
-              </a>
+              </Link>
             )}
             <NotificationsBell />
             <div className="relative" ref={userMenuRef}>
@@ -403,19 +404,19 @@ function Shell({ children }: { children: React.ReactNode }) {
                     <div className="mt-0.5 text-[10px] uppercase tracking-wider text-ink-400">{session?.user.role}</div>
                   </div>
                   {perms.canSee('settings:security') && (
-                    <a href="/dashboard/settings/security" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-700 hover:bg-ink-50">
+                    <Link href="/dashboard/settings/security" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-700 hover:bg-ink-50">
                       <ShieldCheck className="h-4 w-4" /> Security (2FA)
-                    </a>
+                    </Link>
                   )}
                   {perms.canSee('settings:branding') && (
-                    <a href="/dashboard/settings/branding" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-700 hover:bg-ink-50">
+                    <Link href="/dashboard/settings/branding" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-700 hover:bg-ink-50">
                       <Palette className="h-4 w-4" /> Branding
-                    </a>
+                    </Link>
                   )}
                   {perms.canSee('settings:permissions') && (
-                    <a href="/dashboard/settings/permissions" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-700 hover:bg-ink-50">
+                    <Link href="/dashboard/settings/permissions" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-700 hover:bg-ink-50">
                       <Lock className="h-4 w-4" /> Permissions
-                    </a>
+                    </Link>
                   )}
                   {perms.canSee('api-keys') && (
                     <a href={`${process.env.NEXT_PUBLIC_API_URL}/docs`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-700 hover:bg-ink-50">
@@ -710,7 +711,9 @@ function NavRow({
   child?: boolean;
 }) {
   return (
-    <a
+    // Link, not <a>: this is every sidebar row, so a raw anchor meant a full
+    // bundle reload on every single navigation in the dashboard.
+    <Link
       href={href}
       onClick={onNavigate}
       aria-current={active ? 'page' : undefined}
@@ -744,7 +747,7 @@ function NavRow({
           {count > 99 ? '99+' : count}
         </span>
       ))}
-    </a>
+    </Link>
   );
 }
 
@@ -763,7 +766,7 @@ function TrialBanner({ isAdmin }: { isAdmin: boolean }) {
         You're on a free trial. <b>{days} {days === 1 ? 'day' : 'days'} remaining.</b> No credit card on file —
         upgrade any time to keep your workspace active.
       </p>
-      {isAdmin && <a href="/dashboard/settings/billing" className="font-semibold underline">Manage plan →</a>}
+      {isAdmin && <Link href="/dashboard/settings/billing" className="font-semibold underline">Manage plan →</Link>}
     </div>
   );
 }

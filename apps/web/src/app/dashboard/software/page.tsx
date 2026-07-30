@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { Modal } from '@/components/Modal';
 import { Field, inputClass, btnPrimary, btnSecondary } from '@/components/Field';
+import Link from 'next/link';
 
 export default function SoftwarePage() {
   const router = useRouter();
@@ -28,7 +29,7 @@ export default function SoftwarePage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-semibold sm:text-2xl">Software</h1>
         <div className="flex flex-wrap gap-2">
-          <a className={btnSecondary} href="/dashboard/licenses">All licenses</a>
+          <Link className={btnSecondary} href="/dashboard/licenses">All licenses</Link>
           <button className={btnPrimary} onClick={() => { setForm({ name: '', publisher: '', description: '' }); setOpen(true); }}>New software</button>
         </div>
       </div>

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { cn } from '@/components/ui';
@@ -41,13 +42,13 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   return (
     <div className="flex gap-6">
       <aside className="hidden w-52 shrink-0 lg:block" aria-label="Settings sections">
-        <a
+        <Link
           href="/dashboard/settings"
           className="mb-3 flex items-center gap-1.5 px-3 text-xs text-ink-500 transition hover:text-ink-800"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           All settings
-        </a>
+        </Link>
         {groups.map((group) => (
           <div key={group.label} className="mb-3">
             <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
@@ -57,7 +58,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
               {group.items.map((item) => {
                 const active = path === item.href || path.startsWith(item.href + '/');
                 return (
-                  <a
+                  <Link
                     key={item.href}
                     href={item.href}
                     aria-current={active ? 'page' : undefined}
@@ -68,7 +69,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                   >
                     <span className={active ? 'text-white' : 'text-ink-400'}>{item.icon}</span>
                     <span className="truncate">{item.label}</span>
-                  </a>
+                  </Link>
                 );
               })}
             </div>

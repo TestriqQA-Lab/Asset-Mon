@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useParams } from 'next/navigation';
@@ -140,9 +141,9 @@ export default function AssetRequestDetailPage() {
 
   return (
     <div className="space-y-6">
-      <a href="/dashboard/asset-requests" className="inline-flex items-center gap-1 text-sm text-brand-600 hover:underline mb-2">
+      <Link href="/dashboard/asset-requests" className="inline-flex items-center gap-1 text-sm text-brand-600 hover:underline mb-2">
         ← Asset requests
-      </a>
+      </Link>
       <SectionHeader
         title={r.title}
         subtitle={`Request ${r.number}`}

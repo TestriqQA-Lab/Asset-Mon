@@ -3,6 +3,7 @@ import { LegalShell, LegalSection } from '@/components/marketing/Legal';
 import { pageMetadata, breadcrumbLd } from '@/lib/seo';
 import { JsonLd } from '@/components/seo/JsonLd';
 import { SITE } from '@/lib/site';
+import Link from 'next/link';
 
 export const metadata = pageMetadata({
   title: 'Privacy Policy',
@@ -58,10 +59,10 @@ export default function PrivacyPage() {
           <p>If you are in the EU, UK, India (under DPDP Act 2023) or California, you have rights to: access your data, correct inaccuracies, request deletion, port data in machine-readable form, restrict processing and object to processing. Email <a className="text-brand-700 hover:underline" href={`mailto:${SITE.supportEmail}`}>{SITE.supportEmail}</a> and we will respond within 30 days.</p>
         </LegalSection>
         <LegalSection id="cookies" title="Cookies">
-          <p>We use a minimal set of first-party cookies for authentication and CSRF protection. We do not use third-party advertising cookies. See our <a className="text-brand-700 hover:underline" href="/cookies">Cookie policy</a> for details.</p>
+          <p>We use a minimal set of first-party cookies for authentication and CSRF protection. We do not use third-party advertising cookies. See our <Link className="text-brand-700 hover:underline" href="/cookies">Cookie policy</Link> for details.</p>
         </LegalSection>
         <LegalSection id="security" title="Security">
-          <p>See the full breakdown on our <a className="text-brand-700 hover:underline" href="/security">Security page</a>. Highlights: database-per-tenant isolation, encryption at rest and in transit, helmet HTTP security headers, immutable audit log, rate limiting, HMAC-signed webhooks.</p>
+          <p>See the full breakdown on our <Link className="text-brand-700 hover:underline" href="/security">Security page</Link>. Highlights: database-per-tenant isolation, encryption at rest and in transit, helmet HTTP security headers, immutable audit log, rate limiting, HMAC-signed webhooks.</p>
         </LegalSection>
         <LegalSection id="contact" title="Contact">
           <p>Questions, complaints or DSARs: <a className="text-brand-700 hover:underline" href={`mailto:${SITE.supportEmail}`}>{SITE.supportEmail}</a>.</p>

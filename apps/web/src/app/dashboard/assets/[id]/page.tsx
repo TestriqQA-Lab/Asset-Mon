@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { api, getSession } from '@/lib/api';
 import { btnDanger, btnPrimary, btnSecondary, inputClass } from '@/components/Field';
 import { useModuleEnabled } from '@/lib/settings';
+import Link from 'next/link';
 
 export default function AssetDetailPage() {
   const params = useParams() as { id: string };
@@ -74,7 +75,7 @@ export default function AssetDetailPage() {
   if (isEmployee) {
     return (
       <div className="space-y-6">
-        <a href="/dashboard/assets" className="inline-flex items-center gap-1 text-sm text-brand-600 hover:underline">← Assets</a>
+        <Link href="/dashboard/assets" className="inline-flex items-center gap-1 text-sm text-brand-600 hover:underline">← Assets</Link>
         <div className="min-w-0">
           <div className="font-mono text-xs text-gray-500">{a.assetTag}</div>
           <h1 className="truncate text-xl font-semibold sm:text-2xl">{a.name}</h1>
@@ -321,7 +322,7 @@ export default function AssetDetailPage() {
           <div className="rounded-lg border bg-white p-4">
             <div className="mb-2 flex items-center justify-between text-sm font-medium">
               <span>Service tickets</span>
-              <a className="text-xs text-brand-600 hover:underline" href="/dashboard/tickets">Open all</a>
+              <Link className="text-xs text-brand-600 hover:underline" href="/dashboard/tickets">Open all</Link>
             </div>
             <ul className="space-y-1 text-sm">
               {tickets.data?.slice(0, 5).map((t: any) => (
