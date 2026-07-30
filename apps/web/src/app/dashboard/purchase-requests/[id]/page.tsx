@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -87,7 +88,7 @@ export default function PRDetail() {
               <div className="text-xs uppercase text-gray-500">Purchase orders</div>
               <ul>
                 {p.purchaseOrders.map((po: any) => (
-                  <li key={po.id}><a className="text-brand-600 hover:underline" href={`/dashboard/purchase-orders/${po.id}`}>{po.poNumber}</a> · {po.status}</li>
+                  <li key={po.id}><Link className="text-brand-600 hover:underline" href={`/dashboard/purchase-orders/${po.id}`}>{po.poNumber}</Link> · {po.status}</li>
                 ))}
               </ul>
             </div>

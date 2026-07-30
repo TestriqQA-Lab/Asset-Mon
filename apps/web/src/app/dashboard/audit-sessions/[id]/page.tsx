@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
@@ -119,7 +120,7 @@ export default function AuditSessionDetail() {
             <ul className="space-y-1 text-sm">
               {discrepancies.data.missing.map((a: any) => (
                 <li key={a.id}>
-                  <a className="text-brand-600 hover:underline" href={`/dashboard/assets/${a.id}`}>{a.assetTag}</a>
+                  <Link className="text-brand-600 hover:underline" href={`/dashboard/assets/${a.id}`}>{a.assetTag}</Link>
                   <span className="ml-2">{a.name}</span>
                   <span className="ml-2 text-xs text-gray-500">{a.status}</span>
                 </li>
@@ -157,7 +158,7 @@ export default function AuditSessionDetail() {
             {s.scans.map((sc: any) => (
               <tr key={sc.id} className="border-t">
                 <td className="py-2 text-xs text-gray-500">{new Date(sc.createdAt).toLocaleString()}</td>
-                <td>{sc.asset ? <a className="text-brand-600 hover:underline" href={`/dashboard/assets/${sc.asset.id}`}>{sc.asset.assetTag} · {sc.asset.name}</a> : <span className="font-mono text-xs text-red-600">unmatched: {sc.rawTag}</span>}</td>
+                <td>{sc.asset ? <Link className="text-brand-600 hover:underline" href={`/dashboard/assets/${sc.asset.id}`}>{sc.asset.assetTag} · {sc.asset.name}</Link> : <span className="font-mono text-xs text-red-600">unmatched: {sc.rawTag}</span>}</td>
                 <td className="text-gray-500">{sc.scannedBy ? `${sc.scannedBy.firstName} ${sc.scannedBy.lastName}` : '—'}</td>
               </tr>
             ))}

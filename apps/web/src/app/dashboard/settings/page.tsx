@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 
 import { SectionHeader, Card, EmptyState } from '@/components/ui';
 import { Settings as SettingsIcon, ChevronRight } from 'lucide-react';
@@ -46,7 +47,7 @@ export default function SettingsHomePage() {
             </h2>
             <div className="grid gap-2 sm:grid-cols-2">
               {group.items.map((item) => (
-                <a key={item.href} href={item.href} className="group block">
+                <Link key={item.href} href={item.href} className="group block">
                   <Card padded={false} className="flex items-center gap-3 p-3.5 transition hover:border-brand-200 hover:shadow-pop">
                     <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-ink-50 text-ink-500 transition group-hover:bg-brand-50 group-hover:text-brand-600">
                       {item.icon}
@@ -57,7 +58,7 @@ export default function SettingsHomePage() {
                     </div>
                     <ChevronRight className="h-4 w-4 flex-shrink-0 text-ink-300 transition group-hover:text-brand-500" />
                   </Card>
-                </a>
+                </Link>
               ))}
             </div>
           </section>

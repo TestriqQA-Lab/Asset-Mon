@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -62,7 +63,7 @@ export default function TicketDetail() {
           <div className="mt-1 flex gap-2"><StatusBadge s={t.status} /><PriorityBadge p={t.priority} /></div>
         </div>
         <div className="flex gap-2">
-          <a className={btnSecondary} href={`/dashboard/assets/${t.asset.id}`}>View asset</a>
+          <Link className={btnSecondary} href={`/dashboard/assets/${t.asset.id}`}>View asset</Link>
           <button className={btnPrimary} onClick={() => update.mutate()}>Save</button>
           <button className={btnDanger} onClick={() => confirm('Delete?') && del.mutate()}>Delete</button>
         </div>

@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
@@ -74,7 +75,7 @@ export default function PODetail() {
               <ul className="text-sm">
                 {p.assets.map((a: any) => (
                   <li key={a.id}>
-                    <a className="text-brand-600 hover:underline" href={`/dashboard/assets/${a.id}`}>{a.assetTag}</a> · {a.name} · <span className="text-gray-500">{a.status}</span>
+                    <Link className="text-brand-600 hover:underline" href={`/dashboard/assets/${a.id}`}>{a.assetTag}</Link> · {a.name} · <span className="text-gray-500">{a.status}</span>
                   </li>
                 ))}
               </ul>
@@ -83,7 +84,7 @@ export default function PODetail() {
         </div>
         <div className="space-y-2 rounded-lg border bg-white p-5 text-sm">
           <Row k="Vendor" v={p.vendor?.name || '—'} />
-          <Row k="From PR" v={p.pr ? <a className="text-brand-600 hover:underline" href={`/dashboard/purchase-requests/${p.pr.id}`}>{p.pr.number}</a> : '—'} />
+          <Row k="From PR" v={p.pr ? <Link className="text-brand-600 hover:underline" href={`/dashboard/purchase-requests/${p.pr.id}`}>{p.pr.number}</Link> : '—'} />
           <Row k="Ordered at" v={p.orderedAt ? new Date(p.orderedAt).toLocaleString() : '—'} />
           <Row k="Received at" v={p.receivedAt ? new Date(p.receivedAt).toLocaleString() : '—'} />
           {p.notes && <div className="mt-2 border-t pt-2"><div className="text-xs uppercase text-gray-500">Notes</div><div>{p.notes}</div></div>}

@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -43,7 +44,7 @@ export default function DepreciationPage() {
         <tbody>
           {fleet.data?.items?.map((it: any) => (
             <tr key={it.id} className="border-t">
-              <td className="px-4 py-2 font-mono text-xs"><a className="text-brand-600 hover:underline" href={`/dashboard/assets/${it.id}`}>{it.assetTag}</a></td>
+              <td className="px-4 py-2 font-mono text-xs"><Link className="text-brand-600 hover:underline" href={`/dashboard/assets/${it.id}`}>{it.assetTag}</Link></td>
               <td className="px-4 py-2">{it.name}</td>
               <td className="px-4 py-2 text-gray-500">{it.category?.name || '—'}</td>
               <td className="px-4 py-2 text-xs">{it.depreciation.method}</td>

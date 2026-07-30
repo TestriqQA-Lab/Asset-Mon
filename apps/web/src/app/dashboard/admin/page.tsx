@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { api, getSession } from '@/lib/api';
 import { Card, Pill, QueryState, EmptyState, SectionHeader } from '@/components/ui';
@@ -50,9 +51,9 @@ function CardTitle({ icon, title, right }: { icon: React.ReactNode; title: strin
 
 function GoLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
-    <a href={href} className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
+    <Link href={href} className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
       {children} <ArrowRight className="h-3.5 w-3.5" />
-    </a>
+    </Link>
   );
 }
 
@@ -88,13 +89,13 @@ export default function AdminHomePage() {
 
       <div className="flex flex-wrap gap-2">
         {QUICK_ACTIONS.map((a) => (
-          <a
+          <Link
             key={a.href}
             href={a.href}
             className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-700 shadow-card transition hover:border-ink-300"
           >
             {a.label}
-          </a>
+          </Link>
         ))}
       </div>
 
@@ -232,7 +233,7 @@ export default function AdminHomePage() {
                   <ul className="mt-2 space-y-0.5 text-xs text-ink-600">
                     {issues.map((c) => (
                       <li key={c.key} className="flex justify-between gap-2">
-                        <a href={c.href} className="truncate hover:underline">{c.label}</a>
+                        <Link href={c.href} className="truncate hover:underline">{c.label}</Link>
                         <span className="font-medium text-ink-800">{c.count}</span>
                       </li>
                     ))}

@@ -184,11 +184,11 @@ export default function AssetDetailPage() {
           <Row label="Parent asset">
             {!editing ? (
               a.parent ? (
-                <a className="inline-flex items-center gap-1 text-brand-600 hover:underline" href={`/dashboard/assets/${a.parent.id}`}>
+                <Link className="inline-flex items-center gap-1 text-brand-600 hover:underline" href={`/dashboard/assets/${a.parent.id}`}>
                   <Link2 className="h-3.5 w-3.5" />
                   <span className="font-mono text-xs text-ink-500">{a.parent.assetTag}</span>
                   <span>{a.parent.name}</span>
-                </a>
+                </Link>
               ) : '—'
             ) : (
               <select className={inputClass} value={draft.parentId} onChange={(e) => setDraft({ ...draft, parentId: e.target.value })}>
@@ -327,7 +327,7 @@ export default function AssetDetailPage() {
             <ul className="space-y-1 text-sm">
               {tickets.data?.slice(0, 5).map((t: any) => (
                 <li key={t.id}>
-                  <a className="text-brand-600 hover:underline" href={`/dashboard/tickets/${t.id}`}>{t.ticketNumber}</a>
+                  <Link className="text-brand-600 hover:underline" href={`/dashboard/tickets/${t.id}`}>{t.ticketNumber}</Link>
                   <span className="ml-2">{t.title}</span>
                   <span className="ml-2 text-xs text-gray-500">{t.status}</span>
                 </li>
@@ -428,10 +428,10 @@ function ChildrenPanel({ asset }: { asset: any }) {
         <ul className="space-y-1.5 text-sm">
           {kids.map((c: any) => (
             <li key={c.id} className="flex items-center justify-between gap-2">
-              <a href={`/dashboard/assets/${c.id}`} className="flex-1 truncate hover:underline">
+              <Link href={`/dashboard/assets/${c.id}`} className="flex-1 truncate hover:underline">
                 <span className="font-mono text-xs text-ink-500">{c.assetTag}</span>
                 <span className="ml-2">{c.name}</span>
-              </a>
+              </Link>
               <span className="text-xs text-ink-500">{c.category?.name}</span>
               <StatusBadgeImpl s={c.status} />
             </li>

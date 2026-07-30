@@ -512,9 +512,9 @@ export default function DashboardHome() {
                         </td>
                         <td className="px-4 py-2.5">
                           {e.asset ? (
-                            <a className="font-mono text-xs text-ink-700 hover:text-brand-600" href={`/dashboard/assets/${e.asset.id}`}>
+                            <Link className="font-mono text-xs text-ink-700 hover:text-brand-600" href={`/dashboard/assets/${e.asset.id}`}>
                               {e.asset.assetTag} · <span className="font-sans text-ink-500">{e.asset.name}</span>
-                            </a>
+                            </Link>
                           ) : (
                             <span className="text-ink-400">—</span>
                           )}
@@ -632,10 +632,10 @@ function AlertGroup({
         <ul className="divide-y divide-ink-100 border-t border-ink-100">
           {items.slice(0, 4).map((it, i) => (
             <li key={i}>
-              <a href={it.href} className="flex items-center justify-between px-4 py-2.5 text-sm hover:bg-ink-50">
+              <Link href={it.href} className="flex items-center justify-between px-4 py-2.5 text-sm hover:bg-ink-50">
                 <span className="truncate text-ink-700">{it.primary}</span>
                 <span className="ml-3 shrink-0 text-xs text-ink-400">{it.secondary}</span>
-              </a>
+              </Link>
             </li>
           ))}
         </ul>

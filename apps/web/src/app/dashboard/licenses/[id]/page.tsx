@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
@@ -47,7 +48,7 @@ export default function LicenseDetail() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold">
-            <a className="text-brand-600 hover:underline" href={`/dashboard/software/${l.software.id}`}>{l.software.name}</a>
+            <Link className="text-brand-600 hover:underline" href={`/dashboard/software/${l.software.id}`}>{l.software.name}</Link>
             <span className="ml-3 rounded bg-gray-100 px-2 py-0.5 text-xs">{l.type}</span>
           </h1>
           <div className="mt-1 text-sm text-gray-500">
@@ -80,7 +81,7 @@ export default function LicenseDetail() {
               <tr key={a.id} className="border-t">
                 <td className="py-2">
                   {a.user ? `${a.user.firstName} ${a.user.lastName} (${a.user.email})` :
-                   a.asset ? <a className="text-brand-600 hover:underline" href={`/dashboard/assets/${a.asset.id}`}>{a.asset.assetTag} · {a.asset.name}</a> : '—'}
+                   a.asset ? <Link className="text-brand-600 hover:underline" href={`/dashboard/assets/${a.asset.id}`}>{a.asset.assetTag} · {a.asset.name}</Link> : '—'}
                 </td>
                 <td className="text-gray-500">{a.user ? 'user' : 'asset'}</td>
                 <td className="text-gray-500">{new Date(a.assignedAt).toLocaleDateString()}</td>

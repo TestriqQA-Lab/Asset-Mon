@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Card, Pill, QueryState, EmptyState } from '@/components/ui';
@@ -46,9 +47,9 @@ export default function DataQualityPage() {
                         ))}
                         {c.count > c.sample.length && <li className="text-ink-400">…and {c.count - c.sample.length} more</li>}
                       </ul>
-                      <a href={c.href} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
+                      <Link href={c.href} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline">
                         View all <ArrowRight className="h-3.5 w-3.5" />
-                      </a>
+                      </Link>
                     </>
                   )}
                 </Card>

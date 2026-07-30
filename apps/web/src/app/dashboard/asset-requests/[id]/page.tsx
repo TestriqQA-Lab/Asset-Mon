@@ -393,12 +393,12 @@ export default function AssetRequestDetailPage() {
                   <h3 className="text-sm font-semibold text-green-700">
                     {r.status === 'FULFILLED' ? 'Asset checked out' : 'Asset allocated'}
                   </h3>
-                  <a
+                  <Link
                     href={`/dashboard/assets/${r.fulfilledAsset.id}`}
                     className="mt-1 text-sm text-brand-600 hover:underline"
                   >
                     {r.fulfilledAsset.assetTag} · {r.fulfilledAsset.name}
-                  </a>
+                  </Link>
                   {r.fulfilledAt && (
                     <p className="text-xs text-ink-400 mt-1">Fulfilled {new Date(r.fulfilledAt).toLocaleString()}</p>
                   )}

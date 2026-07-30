@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, List, Calendar as CalIcon } from 'lucide-react';
@@ -91,7 +92,7 @@ export default function ReservationsPage() {
               {list.data?.map((r: any) => (
                 <tr key={r.id} className="border-t">
                   <td className="px-4 py-2">
-                    <a className="text-brand-600 hover:underline" href={`/dashboard/assets/${r.asset.id}`}>{r.asset.assetTag} · {r.asset.name}</a>
+                    <Link className="text-brand-600 hover:underline" href={`/dashboard/assets/${r.asset.id}`}>{r.asset.assetTag} · {r.asset.name}</Link>
                   </td>
                   <td className="px-4 py-2">{r.user.firstName} {r.user.lastName}</td>
                   <td className="px-4 py-2 text-xs text-gray-600">{new Date(r.startAt).toLocaleString()}</td>
@@ -221,14 +222,14 @@ function CalendarView({ reservations }: { reservations: any[] }) {
               </div>
               <div className="space-y-0.5">
                 {items.slice(0, 3).map((r: any) => (
-                  <a
+                  <Link
                     key={r.id}
                     href={`/dashboard/assets/${r.asset.id}`}
                     title={`${r.asset.assetTag} · ${r.user.firstName} ${r.user.lastName} (${r.status})`}
                     className={`block truncate rounded px-1 py-0.5 text-[10px] ${STATUS_BAR[r.status] || 'bg-ink-100 text-ink-700'}`}
                   >
                     {r.asset.assetTag} · {r.user.firstName}
-                  </a>
+                  </Link>
                 ))}
                 {items.length > 3 && <div className="text-[10px] text-ink-500">+{items.length - 3} more</div>}
               </div>

@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Bell, Check } from 'lucide-react';
@@ -72,7 +73,7 @@ export function NotificationsBell() {
                     <div className="flex items-start gap-2">
                       {!n.readAt && <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-600" />}
                       <div className="flex-1">
-                        {n.href ? <a href={n.href} className="font-medium text-ink-900 hover:underline">{n.title}</a> : <p className="font-medium text-ink-900">{n.title}</p>}
+                        {n.href ? <Link href={n.href} className="font-medium text-ink-900 hover:underline">{n.title}</Link> : <p className="font-medium text-ink-900">{n.title}</p>}
                         {n.body && <p className="mt-0.5 text-ink-600">{n.body}</p>}
                         <p className="mt-1 text-[10px] text-ink-400">{new Date(n.createdAt).toLocaleString()} · {n.kind}</p>
                       </div>
