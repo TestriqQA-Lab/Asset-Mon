@@ -31,9 +31,9 @@ export default function PlatformOverviewPage() {
         {(d: any) => {
           const cards: Array<{ label: string; value: string | number; icon: React.ReactNode; href?: string; tone?: 'brand' | 'green' | 'amber' | 'red' }> = [
             { label: 'Total tenants', value: d.tenants.total, icon: <Building2 className="h-5 w-5" />, href: '/platform/tenants', tone: 'brand' },
-            { label: 'Active users', value: d.users, icon: <Users className="h-5 w-5" />, href: '/platform/tenants', tone: 'green' },
-            { label: 'Tracked assets', value: d.assets, icon: <Package className="h-5 w-5" />, href: '/platform/tenants', tone: 'amber' },
-            { label: 'Read errors', value: d.readErrors, icon: <AlertTriangle className="h-5 w-5" />, href: '/platform/tenants', tone: d.readErrors ? 'red' : 'green' },
+            { label: 'Active users', value: d.users, icon: <Users className="h-5 w-5" />, tone: 'green' },
+            { label: 'Tracked assets', value: d.assets, icon: <Package className="h-5 w-5" />, tone: 'amber' },
+            { label: 'Read errors', value: d.readErrors, icon: <AlertTriangle className="h-5 w-5" />, tone: d.readErrors ? 'red' : 'green' },
           ];
           return (
             <>

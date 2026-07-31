@@ -308,16 +308,26 @@ export class PlatformMfaService {
     return admins.filter((a) => mfaSetupComplete(a));
   }
 
-  /** List all PENDING MFA reset requests (for the approval queue UI). */
   async listPendingResets() {
-    return this.catalog.platformMfaResetRequest.findMany({
+    const requests = await this.catalog.platformMfaResetRequest.findMany({
       where: { status: 'PENDING', expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
-      include: {
-        requester: { select: { id: true, email: true, firstName: true, lastName: true } },
-        target: { select: { id: true, email: true, firstName: true, lastName: true } },
-      },
     });
+    
+    // Manually fetch user details since they are FK-less
+    const userIds = [...new Set(requests.flatMap((r) => [r.requesterId, r.targetId]))];
+    const users = await this.catalog.platformUser.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, email: true, firstName: true, lastName: true },
+    });
+    
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    
+    return requests.map((r) => ({
+      ...r,
+      requester: userMap.get(r.requesterId) || null,
+      target: userMap.get(r.targetId) || null,
+    }));
   }
 
   /** A super-admin requests a peer reset of another operator's MFA. */
