@@ -54,7 +54,7 @@ $vendor = Hit 'POST' '/vendors' @{ name='QA Vendor'; email='vendor@qa.test' } -E
 $asset = Hit 'POST' '/assets' @{
   name='QA Laptop'; assetTag='QA-00001'; serialNumber='QA-S-1'
   categoryId=$laptopCatId; locationId=$loc.id; departmentId=$dept.id; vendorId=$vendor.id
-  status='IN_STOCK'; purchaseCost=1000; purchaseDate=(Get-Date).ToString('o'); warrantyEnd=(Get-Date).AddYears(1).ToString('o')
+  status='AVAILABLE'; purchaseCost=1000; purchaseDate=(Get-Date).ToString('o'); warrantyEnd=(Get-Date).AddYears(1).ToString('o')
 } -ExpectStatus 201 -Note 'create asset'
 Hit 'GET' '/assets' -ExpectStatus 200 -Note 'list assets' | Out-Null
 if ($asset) {
@@ -104,7 +104,7 @@ if ($asset -and $emp) {
 Hit 'GET' '/reservations' -ExpectStatus 200 -Note 'list reservations' | Out-Null
 
 # === Purchase requests + orders ===
-$pr = Hit 'POST' '/purchase-requests' @{ title='QA PR'; justification='QA test' } -ExpectStatus 201 -Note 'create PR'
+$pr = Hit 'POST' '/purchase-requests' @{ title='QA PR'; justification='QA test'; items=@(@{ description='QA line item'; quantity=2; unitPriceEstimate=250 }) } -ExpectStatus 201 -Note 'create PR'
 Hit 'GET' '/purchase-requests' -ExpectStatus 200 -Note 'list PRs' | Out-Null
 Hit 'GET' '/purchase-orders' -ExpectStatus 200 -Note 'list POs' | Out-Null
 
