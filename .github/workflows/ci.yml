@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # The Prisma client is gitignored and generated on demand; typecheck and the
+      # DMMF-backed tenancy test both need it to exist.
+      - name: Generate Prisma client
+        run: npm -w @assetmon/db run generate
+
+      # Guards the ways a query can escape tenant scoping (raw SQL, nested relation
+      # writes) and the Postgres-dialect SQL that the MySQL migration kept producing.
+      - name: Tenant-safety check
+        run: bash ci/check-tenant-safety.sh
+
+      - name: Typecheck (API)
+        run: npx tsc -p apps/api/tsconfig.json --noEmit
+
+      - name: Unit tests (API)
+        run: npx jest --config apps/api/jest.config.js

@@ -212,6 +212,14 @@ async function resetMfaFlow(args, email) {
   const prisma = new PrismaClient({ datasources: { db: { url: process.env.CATALOG_DATABASE_URL } } });
   try {
     await prisma.$connect();
+    
+    // Seed PlatformAuditCounter singleton if it doesn't exist
+    await prisma.platformAuditCounter.upsert({
+      where: { id: 'platform' },
+      update: {},
+      create: { id: 'platform', lastSeq: 0, lastHash: null }
+    }).catch(() => {});
+
     const cost = Number(process.env.BCRYPT_COST || 12);
     const passwordHash = await bcrypt.hash(password, cost);
 

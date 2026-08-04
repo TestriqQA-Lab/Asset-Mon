@@ -1,10 +1,37 @@
 services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    command:
+      # Tables are created with utf8mb4_0900_as_cs (case-sensitive); a handful of
+      # searchable columns are then relaxed to utf8mb4_general_ci by
+      # packages/db/post-migrate-collations.sql. Pinning the server default keeps a
+      # fresh container consistent with what `prisma migrate deploy` expects.
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_as_cs
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-assetmon}
+    volumes:
+      - mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Legacy source database — kept only to migrate data OUT of, not to serve the app.
+  # Not started by default; bring it up explicitly while running the consolidation:
+  #   docker compose --profile legacy up -d postgres
+  # Retire it (and the pgdata volume) once cutover is signed off.
   postgres:
     image: postgres:16
+    profiles: ["legacy"]
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-legacy_migration_only}
       POSTGRES_DB: assetmon_catalog
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -21,7 +48,7 @@ services:
     restart: unless-stopped
     env_file: .env
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
     volumes:
       - uploads:/app/uploads
@@ -40,6 +67,7 @@ services:
       - api
 
 volumes:
+  mysqldata:
   pgdata:
   uploads:
   caddy_data:
