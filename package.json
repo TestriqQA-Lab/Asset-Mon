@@ -7,6 +7,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "npm -w @assetmon/db run generate",
     "db:catalog:generate": "npm -w @assetmon/db-catalog run generate",
     "db:catalog:migrate": "npm -w @assetmon/db-catalog run migrate",
     "db:tenant:generate": "npm -w @assetmon/db-tenant run generate",

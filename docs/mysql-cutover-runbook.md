@@ -40,10 +40,11 @@ schema → consolidate → INTEGRITY CHECK → rebuild chains → verify chains 
       **11.8.8-MariaDB** on 2026-08-04. The schema deploys unchanged to that, to MariaDB
       10.11 and to MySQL 8 — see "MariaDB" below. Re-check only if the plan or host
       changes.
-- [ ] **Decide where the API runs.** A Hostinger Business plan is shared hosting: it
-      serves PHP and static files and will not run the container stack. The API needs a
-      VPS or another host, reaching MySQL over the network with Remote MySQL enabled and
-      the application server's IP allowlisted.
+- [ ] **Confirm the Node hosting can build this.** The API deploys to Hostinger's
+      Node.js app hosting, NOT as a container — docker-compose.yml is local tooling
+      only. Because API and database sit on the same host, `DATABASE_URL` is a plain
+      localhost connection: no Remote MySQL, no IP allowlist for the app. See
+      "Deploying to Hostinger Node hosting" below for what to check first.
 - [ ] `.env` populated from `.env.production.example`, with `DATABASE_URL` and
       `CATALOG_DATABASE_URL` pointing at the **same** database.
 - [ ] The source Postgres reachable from wherever you run the consolidation
@@ -116,9 +117,9 @@ Rehearsal: 22 already intact, 8 rebuilt, 0 failed.
 
 ## 5. Deploy the API
 
-Start the API against the new database and confirm it boots. `TenantProvisioningService`
-logging `no-op in shared-table mode` is expected — there are no per-tenant databases to
-create any more.
+Deploy the built API and confirm it boots. `TenantProvisioningService` logging
+`no-op in shared-table mode` is expected — there are no per-tenant databases to create
+any more. See "Deploying to Hostinger Node hosting" below for the specifics.
 
 ## 6. Acceptance
 
@@ -132,6 +133,41 @@ curl -s $API/api/audit/verify -H "Authorization: Bearer $TOKEN"
 **Do not run `tools/verify-tenant-isolation.sh` against production** — it provisions two
 throwaway workspaces and leaves them behind. Run it against staging or a rehearsal copy.
 It passed 36/36 against the rehearsed database.
+
+---
+
+## Deploying to Hostinger Node hosting
+
+The API runs as a managed Node process, not a container. `docker-compose.yml`,
+`docker-compose.local.yml`, the `Caddyfile` and `apps/api/Dockerfile` are **local
+development tooling** — nothing in production uses them. Hostinger fronts the app with
+its own web server and provides the MariaDB.
+
+**Unverified — check these before the first deploy.** This section is written from the
+shape of the app, not from a completed Hostinger deployment, and each of these could
+change the steps:
+
+- **Node version.** The app is developed against Node 20. Confirm the plan offers 20+
+  and pin it if the panel allows.
+- **npm workspaces.** This is a monorepo: the API imports `@assetmon/db` and
+  `@assetmon/shared` as workspace packages. If the Node hosting installs only a
+  subdirectory, the workspace links will not resolve and the app will not start. This
+  is the single most likely thing to bite.
+- **A build step.** `nest build` needs devDependencies. If the platform installs with
+  `--omit=dev` there is no `nest` and no `prisma` CLI. Either build locally and upload
+  `apps/api/dist` plus a production `node_modules`, or ensure the install includes dev
+  dependencies.
+- **The Prisma client is generated, not committed.** A `postinstall` in the root
+  `package.json` runs `npm -w @assetmon/db run generate`, which covers a normal
+  install — but it needs the `prisma` CLI present (a devDependency of `packages/db`).
+  If the platform strips dev dependencies, move `prisma` to `dependencies` there.
+- **Running one-off commands.** Steps 1 to 4 above are CLI scripts. They need shell
+  access to the host, or to be run from your machine against the database with Remote
+  MySQL temporarily enabled and your IP allowlisted. That allowlist is for the
+  *migration*, not for the running app.
+
+**Start command:** `node apps/api/dist/main.js` (`apps/api/package.json` exposes it as
+`npm start`). The app reads `.env` from the repo root — see `.env.production.example`.
 
 ---
 
@@ -202,7 +238,8 @@ mistaken bulk rebuild be repaired during development.
 
 ## Retire the legacy estate (only after step 6 holds)
 
-- `postgres` service in `docker-compose.yml` and the `pgdata` volume
+- the `postgres` service in `docker-compose.yml` and the `pgdata` volume (local tooling,
+  but it is the last thing keeping the old databases reachable)
 - the `pg` dependency in `apps/api/package.json`
 - `packages/db-tenant` and `packages/db-catalog`
 - `Tenant.dbName` — still required until this point, since `consolidate-data.ts` uses it

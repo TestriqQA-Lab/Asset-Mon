@@ -61,10 +61,12 @@ Prisma's DMMF and failing when the set drifts from the schema. Both run in CI.
 Phases 1–3 are complete and Phase 4 is rehearsed end to end (see
 [mysql-cutover-runbook.md](./mysql-cutover-runbook.md)). `npm run verify` is green,
 `tools/verify-tenant-isolation.sh` passes 36/36, all six concurrency scenarios in
-`apps/api/test-concurrency.ts` pass, `verify-deploy.sh` passes 27/27 against a freshly
-built production image, and the schema deploys unchanged to both MySQL 8.4 and
-MariaDB 10.11. What remains is not code: where the API runs, and provisioning the
-production database.
+`apps/api/test-concurrency.ts` pass, `qa-smoketest.ps1` covers 49 product endpoints
+49/49, and the schema deploys unchanged to MySQL 8.4.11, MariaDB 10.11.18 and MariaDB
+11.8.8 — the last being what Hostinger actually runs.
+
+What remains is not code: provisioning the production database, and confirming
+Hostinger's Node.js hosting can build a monorepo with a generated Prisma client.
 
 ---
 
@@ -199,13 +201,14 @@ itself an existence oracle. Now 404.
   migration damage — they fail against the Postgres source too. Without this pass,
   §11.3 ("run verify for each tenant, the chain must pass") fails on data that was never
   healthy.
-- **Decide where the API runs.** A Hostinger Business plan is shared hosting: it serves
-  PHP/static sites and will not run the container stack. The API needs a VPS or another
-  host, reaching MySQL over the network with Remote MySQL enabled and the app server's
-  IP allowlisted.
-- **Confirm the production engine is MySQL 8.0.1+, not MariaDB**, before the first
-  `prisma migrate deploy`. The schema's `utf8mb4_0900_as_cs` table defaults do not exist
-  on MariaDB and table creation will fail.
+- **Deploy the API to Hostinger's Node.js app hosting**, alongside the MariaDB the plan
+  provides. Docker is local tooling only — `docker-compose.yml`, the `Caddyfile` and
+  `apps/api/Dockerfile` play no part in production. API and database share a host, so
+  `DATABASE_URL` is a localhost connection needing no Remote MySQL or IP allowlist for
+  the app. The monorepo and build-step caveats that still need checking are listed under
+  "Deploying to Hostinger Node hosting" in the runbook.
+- **The production engine is MariaDB 11.8.8** (confirmed 2026-08-04). The schema deploys
+  to it unchanged — the table default is `utf8mb4_bin`, which both engines have.
 - **Then retire the legacy estate:** the `postgres` compose service and `pgdata` volume,
   the `pg` dependency, `packages/db-tenant` and `packages/db-catalog`, `Tenant.dbName`
   (still needed until then — `consolidate-data.ts` uses it to find each source database),
