@@ -36,9 +36,10 @@ schema → consolidate → INTEGRITY CHECK → rebuild chains → verify chains 
 
 ## Prerequisites
 
-- [ ] **Note the engine and version:** `SELECT VERSION(), @@version_comment;` The schema
-      deploys unchanged to MySQL 8 and MariaDB 10.11 alike — see "MariaDB" below for
-      what was verified and the one version caveat.
+- [ ] **Confirm the engine and version:** `SELECT VERSION();` Hostinger reported
+      **11.8.8-MariaDB** on 2026-08-04. The schema deploys unchanged to that, to MariaDB
+      10.11 and to MySQL 8 — see "MariaDB" below. Re-check only if the plan or host
+      changes.
 - [ ] **Decide where the API runs.** A Hostinger Business plan is shared hosting: it
       serves PHP and static files and will not run the container stack. The API needs a
       VPS or another host, reaching MySQL over the network with Remote MySQL enabled and
@@ -136,11 +137,9 @@ It passed 36/36 against the rehearsed database.
 
 ## MariaDB
 
-**Hostinger's shared Business plan runs MariaDB, not MySQL.** Per Hostinger's own
-in-panel assistant (Kodee, 2026-08-04), which also cautioned that the exact version
-varies — so treat the engine as settled and the version as still worth checking. The
-schema deploys to it unchanged — no patch, no separate
-variant, nothing to remember at cutover.
+**Hostinger's shared Business plan runs MariaDB 11.8.8**, not MySQL — confirmed by
+running `SELECT VERSION()` in phpMyAdmin on 2026-08-04. The schema deploys to it
+unchanged: no patch, no separate variant, nothing to remember at cutover.
 
 That took one change to arrange. The schema originally created tables
 `COLLATE utf8mb4_0900_as_cs`, a MySQL 8 UCA-9.0.0 collation that MariaDB does not have
