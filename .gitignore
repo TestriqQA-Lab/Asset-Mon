@@ -33,6 +33,15 @@ packages/*/.prisma/
 /verify-*.sh
 /verify-*.py
 /check-*.sh
+# Underscore-named siblings of the above. The hyphen patterns missed these, so a
+# batch of one-off psql helpers (check_users.sh, do_reset.sh, …) ended up committed
+# and then rotted when the database changed.
+/check_*.sh
+/reset_*.sh
+/do_*.sh
+/fetch_*.sh
+/get_*.js
+/unlock_*.sh
 /smoke-*.sh
 /setup-*.sh
 /seed-*.sh
