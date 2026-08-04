@@ -26,7 +26,9 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..');
 require('dotenv').config({ path: path.join(repoRoot, '.env') });
 
 const bcrypt = require('bcryptjs');
-const { PrismaClient } = require('@assetmon/db-catalog');
+// Catalog and tenant data share one MySQL database now; @assetmon/db-catalog
+// still declares provider="postgresql" and cannot talk to it.
+const { PrismaClient } = require('@assetmon/db');
 
 function parseArgs(argv) {
   const out = {};

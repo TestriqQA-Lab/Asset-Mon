@@ -76,3 +76,4 @@ packages/*/.prisma/
 /docs/admin-panel-slice7b-build.md
 /docs/deployment-fly-vs-aws.md
 /docs/snipeit-analysis-report.md
+verify-deploy.override.tmp.yml

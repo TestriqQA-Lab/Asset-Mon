@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==================================================================
-#  Run AssetMon locally: Docker backend (postgres + api).
+#  Run AssetMon locally: Docker backend (mysql + api).
 #  Run this in an Ubuntu (WSL) terminal and LEAVE THE WINDOW OPEN.
 #  Press Ctrl+C here to stop everything and restore your config.
 #  (The website is started separately on Windows — see the banner.)
@@ -24,14 +24,18 @@ restore() {
 }
 trap restore INT TERM EXIT
 
-echo "Starting backend (postgres + api)..."
+echo "Starting backend (mysql + api)..."
 $COMPOSE up -d
 
 echo "Waiting for the database to be ready..."
-until [ "$(docker inspect -f '{{.State.Health.Status}}' "$($COMPOSE ps -q postgres)" 2>/dev/null)" = "healthy" ]; do sleep 2; done
+# `postgres` now sits behind the `legacy` compose profile and is not started here,
+# so this waits on `mysql`. Its healthcheck has a 30s start_period.
+until [ "$(docker inspect -f '{{.State.Health.Status}}' "$($COMPOSE ps -q mysql)" 2>/dev/null)" = "healthy" ]; do sleep 2; done
 
-echo "Applying catalog migrations (safe to repeat)..."
-$COMPOSE exec -T api npm run db:catalog:migrate >/dev/null 2>&1 && echo "  catalog ready" || echo "  (note: if login fails later, re-run this script)"
+echo "Applying migrations + column collations (safe to repeat)..."
+# migrate:deploy also runs post-migrate-collations.sql, which is what makes search
+# case-insensitive now that Prisma's mode: 'insensitive' is gone.
+$COMPOSE exec -T api npm -w @assetmon/db run migrate:deploy >/dev/null 2>&1 && echo "  database ready" || echo "  (note: if login fails later, re-run this script)"
 
 cat <<'BANNER'
 
