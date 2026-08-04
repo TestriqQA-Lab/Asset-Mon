@@ -8,6 +8,18 @@
 cd "$(dirname "$0")" || exit 1
 COMPOSE="docker compose -f docker-compose.yml -f docker-compose.local.yml"
 
+# A leftover backup means a previous run ended without restore() firing — closed
+# terminal, machine slept, process killed rather than Ctrl+C'd. Overwriting it here
+# would replace the real .env backup with the Docker one and lose the original for
+# good, so recover instead of ploughing on.
+if [ -f .env.beforelocal.bak ]; then
+  echo "A previous run did not restore your config (.env.beforelocal.bak is still here)."
+  echo "Putting it back before continuing; re-run this script afterwards."
+  mv -f .env.beforelocal.bak .env
+  [ -f apps/web/.env.local.beforelocal.bak ] && mv -f apps/web/.env.local.beforelocal.bak apps/web/.env.local
+  exit 1
+fi
+
 # Swap in local-run config, backing up whatever you had.
 [ -f .env ] && cp .env .env.beforelocal.bak
 cp .env.docker .env
@@ -17,7 +29,10 @@ printf 'NEXT_PUBLIC_API_URL=http://localhost:4000\nNEXT_PUBLIC_SITE_URL=http://l
 restore() {
   echo ""
   echo "Stopping backend & restoring your config..."
-  $COMPOSE down
+  # `down` re-reads docker-compose.yml, which requires MYSQL_ROOT_PASSWORD to
+  # interpolate. Restoring .env first would therefore break the teardown — so the
+  # value is supplied inline and the order is: stop the stack, then restore config.
+  MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-teardown}" $COMPOSE down
   [ -f .env.beforelocal.bak ] && mv -f .env.beforelocal.bak .env
   [ -f apps/web/.env.local.beforelocal.bak ] && mv -f apps/web/.env.local.beforelocal.bak apps/web/.env.local
   echo "Done. Your workspaces/data are kept for next time."
@@ -25,7 +40,11 @@ restore() {
 trap restore INT TERM EXIT
 
 echo "Starting backend (mysql + api)..."
-$COMPOSE up -d
+# --build, not a bare `up -d`. Compose happily reuses whatever image is tagged for
+# this project, and the tag survives across branches — so without this you can be
+# running a build from days ago while reading today's source, which is a genuinely
+# confusing way to lose an hour. Layers are cached, so a no-change rebuild is quick.
+$COMPOSE up -d --build
 
 echo "Waiting for the database to be ready..."
 # `postgres` now sits behind the `legacy` compose profile and is not started here,
