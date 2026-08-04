@@ -121,6 +121,13 @@ model PlatformAuditLog {
   @@index([seq])
 }
 
+// Serializes concurrent platform-audit-log appends via SELECT ... FOR UPDATE.
+model PlatformAuditCounter {
+  id       String  @id @default("platform")
+  lastSeq  Int     @default(0)
+  lastHash String?
+}
+
 model PlatformRefreshTokenJti {
   jti       String   @id
   userId    String?

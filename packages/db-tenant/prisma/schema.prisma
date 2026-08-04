@@ -637,6 +637,15 @@ model AuditLog {
   @@index([seq])
 }
 
+// Serializes concurrent audit-log appends via SELECT ... FOR UPDATE on the
+// counter row. Without this, concurrent INSERTs create phantom rows that can't
+// be prevented by locking the current tail AuditLog row.
+model AuditCounter {
+  tenantId String  @id @default("default")
+  lastSeq  Int     @default(0)
+  lastHash String?
+}
+
 // ------------ Notifications (in-app inbox) ------------
 model Notification {
   id          String   @id @default(uuid())

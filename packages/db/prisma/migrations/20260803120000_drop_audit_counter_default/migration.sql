@@ -1,0 +1,11 @@
+-- Drop the column default on `AuditCounter.tenantId`.
+--
+-- The init migration carried `DEFAULT 'default'`, a leftover from the per-tenant
+-- database model where a single counter row needed no tenant. Under shared tables
+-- it let a counter be created without naming a tenant, so every tenant's audit
+-- chain could collapse onto one row. `tenantId` is always supplied explicitly now
+-- (seedDefaults in auth.service.ts, and consolidate-data.ts for migrated tenants),
+-- so the default has no legitimate use.
+--
+-- Data-safe: existing rows keep their values; only the column default is removed.
+ALTER TABLE `AuditCounter` ALTER COLUMN `tenantId` DROP DEFAULT;

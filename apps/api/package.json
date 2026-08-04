@@ -11,6 +11,7 @@
     "platform:bootstrap-admin": "node scripts/platform-bootstrap-admin.js"
   },
   "dependencies": {
+    "@assetmon/db": "*",
     "@assetmon/db-catalog": "*",
     "@assetmon/db-tenant": "*",
     "@assetmon/shared": "*",

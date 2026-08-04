@@ -1,0 +1,1203 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id                     String           @id @default(uuid())
+  slug                   String           @unique
+  name                   String
+  dbName                 String           @unique
+  status                 TenantStatus     @default(PROVISIONING)
+  plan                   String           @default("starter")
+  settings               Json             @default("{}")
+  // Subscription / billing
+  subscriptionStatus     String           @default("trialing")
+  trialEndsAt            DateTime?
+  currentPeriodEnd       DateTime?
+  razorpayCustomerId     String?
+  razorpaySubscriptionId String?
+  razorpayPlanId         String?
+  inviteToken            String?          @unique
+  // Sticky disable: true means the invite link was deliberately turned off and must
+  // NOT be auto-re-minted on a passive read; cleared only by an explicit rotate().
+  inviteDisabled         Boolean          @default(false)
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  tenantUsers            TenantUser[]
+  supportRequests        SupportRequest[]
+}
+
+enum TenantStatus {
+  PROVISIONING
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+model TenantUser {
+  id        String   @id @default(uuid())
+  email     String
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([email, tenantId])
+  @@index([email])
+}
+
+// Platform-level operator (your in-house team that manages every tenant).
+// Lives in the catalog DB so it is fully cross-tenant.
+model PlatformUser {
+  id                      String               @id @default(uuid())
+  email                   String               @unique
+  passwordHash            String
+  firstName               String
+  lastName                String
+  role                    PlatformRole         @default(SUPPORT)
+  active                  Boolean              @default(true)
+  totpSecret              String?
+  totpEnabled             Boolean              @default(false)
+  failedLoginCount        Int                  @default(0)
+  lockedUntil             DateTime?
+  tokenVersion            Int                  @default(0)
+  passwordChangedAt       DateTime?
+  // --- MFA / 3FA enrolment + recovery (mandatory for platform operators) ---
+  primaryEmailVerifiedAt  DateTime?
+  recoveryEmail           String?
+  recoveryEmailVerifiedAt DateTime?
+  backupCodesGeneratedAt  DateTime?
+  mfaEnrolledAt           DateTime? // single authoritative gate column; NULL => incomplete => force-gated
+  lastTotpStep            BigInt? // last accepted TOTP step T; reject step <= this (replay defense)
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+  mfaPending              PlatformMfaPending[]
+  backupCodes             PlatformBackupCode[]
+}
+
+enum PlatformRole {
+  SUPER_ADMIN
+  SUPPORT
+}
+
+// Stage of the multi-step MFA login chain (also reused by backup-code "usedFor").
+enum PlatformMfaStage {
+  EMAIL
+  TOTP
+}
+
+// Append-only record of every platform-level mutation. Useful for forensics
+// and for showing the operator team what each member has been doing.
+//
+// Tamper-evidence: each row hashes (prevHash, actor, action, target, metadata,
+// createdAt) with SHA-256. Rewriting an old row without recomputing every
+// downstream `entryHash` breaks the chain — and recomputing them requires
+// write access to the catalog DB *plus* recomputing every subsequent hash,
+// which is detectable by a periodic integrity sweep.
+model PlatformAuditLog {
+  id         String   @id @default(uuid())
+  actorId    String
+  actorEmail String
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   Json     @default("{}")
+  ipAddress  String?
+  userAgent  String?
+  prevHash   String?
+  entryHash  String?
+  seq        Int      @default(autoincrement())
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([action])
+  @@index([targetType, targetId])
+  @@index([seq])
+}
+
+// Serializes concurrent platform-audit-log appends via SELECT ... FOR UPDATE.
+model PlatformAuditCounter {
+  id       String  @id @default("platform")
+  lastSeq  Int     @default(0)
+  lastHash String?
+}
+
+model PlatformRefreshTokenJti {
+  jti       String   @id
+  userId    String?
+  reason    String   @default("refresh")
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+// One row per in-flight operator login chain. ALL mutable state (attempt
+// counters, live OTP hash, stage, tv/pwd snapshots) lives here so a process
+// restart cannot reset attempt/send budgets. The signed MFA-pending ticket is
+// only a pointer to this row (by `nonce`, rotated each step).
+model PlatformMfaPending {
+  id                String           @id @default(uuid())
+  userId            String
+  user              PlatformUser     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nonce             String           @unique
+  stage             PlatformMfaStage
+  pwdAtSnapshot     DateTime?
+  tvSnapshot        Int
+  emailOtpHash      String?
+  emailTarget       String?
+  emailExpiresAt    DateTime?
+  emailLastSentAt   DateTime?
+  emailSendCount    Int              @default(0)
+  emailCodeAttempts Int              @default(0)
+  chainAttempts     Int              @default(0)
+  backupCodeUsed    Boolean          @default(false)
+  consumedAt        DateTime?
+  expiresAt         DateTime
+  createdAt         DateTime         @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// Single-use recovery codes. Stored only as HMAC-SHA256(code, OTP_PEPPER),
+// stamped with the pepperVersion that produced the hash so a pepper rotation
+// auto-invalidates old codes (and the next-login gate forces regeneration).
+model PlatformBackupCode {
+  id            String            @id @default(uuid())
+  userId        String
+  user          PlatformUser      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash      String
+  pepperVersion Int
+  usedAt        DateTime?
+  usedFor       PlatformMfaStage?
+  createdAt     DateTime          @default(now())
+
+  @@unique([userId, codeHash])
+}
+
+// Platform-side email send log. Platform email has no tenant context, so it
+// cannot use the tenant EmailLog. NEVER stores the OTP body. FK-less indexed
+// userId, matching the PlatformAuditLog convention (logs are retained).
+model PlatformOperatorEmailLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  toEmail   String
+  purpose   String
+  subject   String?
+  sent      Boolean  @default(false)
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+}
+
+// Governed 4-eyes peer MFA reset. A super-admin REQUESTS a reset of another
+// operator's MFA; a NEUTRAL second super-admin (!= requester, != target)
+// APPROVES with a step-up. Short-lived (~15m). FK-less indexed ids, matching the
+// PlatformAuditLog convention.
+model PlatformMfaResetRequest {
+  id          String    @id @default(uuid())
+  requesterId String
+  targetId    String
+  approverId  String?
+  status      String    @default("PENDING") // PENDING | APPROVED | EXPIRED
+  incidentRef String
+  expiresAt   DateTime
+  approvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([targetId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+// ── Support channel (Slice 4) ──────────────────────────────────────────────
+// Company admins open requests; platform operators reply. Stored in the CATALOG
+// DB so operators read across all tenants without fanning out into tenant DBs.
+enum SupportRequestStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum SupportAuthorType {
+  TENANT
+  PLATFORM
+}
+
+model SupportRequest {
+  id               String               @id @default(uuid())
+  tenantId         String
+  tenant           Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdByEmail   String
+  createdByUserId  String?
+  subject          String
+  status           SupportRequestStatus @default(OPEN)
+  lastMessageAt    DateTime             @default(now())
+  // *UnreadAt: set when the OTHER side posts a message; cleared to null when THIS
+  // side opens the thread. Badge counts = rows where my side's *UnreadAt != null.
+  platformUnreadAt DateTime?            @default(now())
+  tenantUnreadAt   DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  messages         SupportMessage[]
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([lastMessageAt])
+  @@index([platformUnreadAt])
+}
+
+model SupportMessage {
+  id          String            @id @default(uuid())
+  requestId   String
+  request     SupportRequest    @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  authorType  SupportAuthorType
+  authorEmail String
+  body        String
+  createdAt   DateTime          @default(now())
+
+  @@index([requestId])
+}
+
+// ── Broadcast announcements (Slice 5) ──────────────────────────────────────
+// Operator-authored notices rendered to targeted tenants as a dismissible
+// dashboard banner. Audience is stored as JSON arrays (FK-less, matching the
+// PlatformAuditLog convention) so a deleted tenant/plan simply stops matching.
+// Dismissal is client-side (localStorage), so there is no per-user table here.
+model Announcement {
+  id                String    @id @default(uuid())
+  title             String
+  body              String // plain text (rendered as text, never HTML)
+  severity          String    @default("info") // info | warning | critical
+  audienceType      String    @default("ALL") // ALL | PLAN | TENANTS
+  audiencePlans     Json      @default("[]") // string[] of plan keys, used when audienceType=PLAN
+  audienceTenantIds Json      @default("[]") // string[] of Tenant.id, used when audienceType=TENANTS
+  startsAt          DateTime?
+  endsAt            DateTime?
+  active            Boolean   @default(true)
+  version           Int       @default(1) // bumped on material edits so a dismissed banner re-appears
+  createdById       String
+  createdByEmail    String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([active])
+  @@index([startsAt])
+  @@index([endsAt])
+}
+
+// ------------ Users / Auth ------------
+model User {
+  tenantId                String
+  id                      String               @id @default(uuid())
+  email                   String
+  passwordHash            String
+  firstName               String
+  lastName                String
+  role                    Role                 @default(EMPLOYEE)
+  active                  Boolean              @default(true)
+  totpSecret              String?
+  totpEnabled             Boolean              @default(false)
+  // Brute-force / credential-stuffing defence
+  failedLoginCount        Int                  @default(0)
+  lockedUntil             DateTime?
+  // Incremented when password/role/active changes or on "logout all" → invalidates outstanding access tokens
+  tokenVersion            Int                  @default(0)
+  passwordChangedAt       DateTime?
+  // RBAC scope: when set, the user only sees data in this department.
+  // (`departmentId` is reporting-style; `scopedDepartmentId` is access-control.)
+  scopedDepartmentId      String?
+  scopedDepartment        Department?          @relation("ScopedUsers", fields: [scopedDepartmentId], references: [id])
+  uploadedAttachments     AssetAttachment[]    @relation("AttachmentUploader")
+  savedViews              SavedView[]
+  departmentId            String?
+  department              Department?          @relation(fields: [departmentId], references: [id])
+  assignments             Assignment[]
+  performedAudits         AuditLog[]           @relation("PerformedBy")
+  openedTickets           ServiceTicket[]      @relation("OpenedTickets")
+  assignedTickets         ServiceTicket[]      @relation("AssignedTickets")
+  requestedPRs            PurchaseRequest[]    @relation("RequestedPRs")
+  approvedPRs             PurchaseRequest[]    @relation("ApprovedPRs")
+  softwareAssignments     SoftwareAssignment[]
+  reservations            Reservation[]
+  startedAudits           AuditSession[]       @relation("StartedAudits")
+  auditScans              AuditScan[]          @relation("ScannedBy")
+  createdApiKeys          ApiKey[]             @relation("ApiKeyCreator")
+  notifications           Notification[]
+  // --- MFA (optional; company admin + employees) ---
+  mfaMethod               TenantMfaMethod      @default(NONE)
+  mfaEnabledAt            DateTime?
+  recoveryEmail           String?
+  recoveryEmailVerifiedAt DateTime?
+  lastTotpStep            BigInt?
+  mfaPending              TenantMfaPending[]
+  backupCodes             TenantBackupCode[]
+  // --- Asset Requests (Phase 2 RBAC) ---
+  assetRequests           AssetRequest[]       @relation("AssetRequests")
+  assignedRequests        AssetRequest[]       @relation("AssignedRequests")
+  reviewedRequests        AssetRequest[]       @relation("ReviewedRequests")
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  @@unique([tenantId, email])
+  @@index([role])
+  @@index([tenantId, role])
+}
+
+enum Role {
+  ADMIN
+  ASSET_MANAGER
+  EMPLOYEE
+}
+
+// How a tenant user's MFA is configured. NONE = off (most users). EMAIL = 2FA
+// (password + email code). EMAIL_TOTP = 3FA (+ authenticator app).
+enum TenantMfaMethod {
+  NONE
+  EMAIL
+  EMAIL_TOTP
+}
+
+// Stage of the multi-step MFA login chain (also reused by backup-code "usedFor").
+enum TenantMfaStage {
+  EMAIL
+  TOTP
+}
+
+// ------------ Org structure ------------
+model Department {
+  tenantId         String
+  id               String            @id @default(uuid())
+  name             String
+  costCenter       String?
+  users            User[]
+  scopedUsers      User[]            @relation("ScopedUsers")
+  assets           Asset[]
+  purchaseRequests PurchaseRequest[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([tenantId, name])
+}
+
+model Location {
+  tenantId  String
+  id        String       @id @default(uuid())
+  name      String
+  type      LocationType
+  parentId  String?
+  parent    Location?    @relation("LocationTree", fields: [parentId], references: [id])
+  children  Location[]   @relation("LocationTree")
+  assets    Asset[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([tenantId, name, parentId])
+}
+
+enum LocationType {
+  BUILDING
+  FLOOR
+  ROOM
+  DESK
+}
+
+// ------------ Catalog ------------
+model Category {
+  tenantId      String
+  id            String                @id @default(uuid())
+  name          String
+  description   String?
+  customFields  Json                  @default("[]") // [{name, type, required}] — kept for asset custom fields
+  type          CategoryType          @default(ASSET)
+  imageUrl      String?
+  assets        Asset[]
+  prItems       PurchaseRequestItem[]
+  poItems       PurchaseOrderItem[]
+  assetRequests AssetRequest[]
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@unique([tenantId, name])
+}
+
+enum CategoryType {
+  ASSET
+  ACCESSORY
+  LICENSE
+}
+
+model Vendor {
+  tenantId         String
+  id               String            @id @default(uuid())
+  name             String
+  contact          String?
+  email            String?
+  phone            String?
+  assets           Asset[]
+  serviceTickets   ServiceTicket[]
+  purchaseOrders   PurchaseOrder[]
+  softwareLicenses SoftwareLicense[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([tenantId, name])
+}
+
+// ------------ Assets ------------
+model Asset {
+  tenantId             String
+  id                   String                @id @default(uuid())
+  assetTag             String
+  name                 String
+  serialNumber         String?
+  model                String?
+  status               AssetStatus           @default(AVAILABLE)
+  categoryId           String?
+  category             Category?             @relation(fields: [categoryId], references: [id])
+  locationId           String?
+  location             Location?             @relation(fields: [locationId], references: [id])
+  departmentId         String?
+  department           Department?           @relation(fields: [departmentId], references: [id])
+  vendorId             String?
+  vendor               Vendor?               @relation(fields: [vendorId], references: [id])
+  purchaseDate         DateTime?
+  purchaseCost         Decimal?              @db.Decimal(12, 2)
+  warrantyEnd          DateTime?
+  purchaseOrderId      String?
+  purchaseOrder        PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
+  depreciationMethod   DepreciationMethod    @default(NONE)
+  salvageValue         Decimal?              @db.Decimal(12, 2)
+  usefulLifeMonths     Int?
+  depreciationStart    DateTime?
+  notes                String?
+  orderNumber          String?
+  requestable          Boolean               @default(false)
+  customFields         Json                  @default("{}")
+  photoUrl             String?
+  assignments          Assignment[]
+  auditLogs            AuditLog[]
+  maintenanceSchedules MaintenanceSchedule[]
+  serviceTickets       ServiceTicket[]
+  softwareAssignments  SoftwareAssignment[]
+  reservations         Reservation[]
+  auditScans           AuditScan[]
+  // Parent / accessory relationships — e.g. laptop has charger, dock, sleeve.
+  parentId             String?
+  parent               Asset?                @relation("AssetParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children             Asset[]               @relation("AssetParent")
+  attachments          AssetAttachment[]
+  // Optional custom status display (system status enum stays canonical for business logic).
+  statusDefId          String?
+  statusDef            AssetStatusDef?       @relation(fields: [statusDefId], references: [id])
+  fulfilledRequests    AssetRequest[]        @relation("FulfilledRequests")
+  requestedItems       AssetRequestItem[]    @relation("RequestedAssets")
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@unique([tenantId, assetTag])
+  @@index([status])
+  @@index([categoryId])
+  @@index([locationId])
+  @@index([tenantId, status])
+  @@index([tenantId, categoryId])
+  @@index([tenantId, locationId])
+  @@index([tenantId, parentId])
+}
+
+enum AssetStatus {
+  PENDING
+  AVAILABLE
+  ASSIGNED
+  OUT_OF_SERVICE
+  OUT_FOR_REPAIR
+  LOST_STOLEN
+  ARCHIVED
+}
+
+// ------------ Assignments / Check-in-out ------------
+model Assignment {
+  tenantId     String
+  id           String    @id @default(uuid())
+  assetId      String
+  asset        Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  checkedOutAt DateTime  @default(now())
+  dueAt        DateTime?
+  returnedAt   DateTime?
+  notes        String?
+
+  @@index([assetId])
+  @@index([userId])
+  @@index([returnedAt])
+  @@index([tenantId, assetId])
+  @@index([tenantId, userId, returnedAt])
+}
+
+// ------------ Maintenance ------------
+model MaintenanceSchedule {
+  tenantId     String
+  id           String    @id @default(uuid())
+  assetId      String
+  asset        Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  title        String
+  description  String?
+  intervalDays Int // recurrence interval in days
+  nextDueAt    DateTime
+  lastRunAt    DateTime?
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([assetId])
+  @@index([nextDueAt])
+  @@index([active])
+  @@index([tenantId, assetId])
+  @@index([tenantId, active, nextDueAt])
+}
+
+model ServiceTicket {
+  tenantId     String
+  id           String         @id @default(uuid())
+  ticketNumber String
+  assetId      String
+  asset        Asset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  title        String
+  description  String?
+  priority     TicketPriority @default(MEDIUM)
+  status       TicketStatus   @default(OPEN)
+  openedById   String?
+  openedBy     User?          @relation("OpenedTickets", fields: [openedById], references: [id])
+  assignedToId String?
+  assignedTo   User?          @relation("AssignedTickets", fields: [assignedToId], references: [id])
+  vendorId     String?
+  vendor       Vendor?        @relation(fields: [vendorId], references: [id])
+  cost         Decimal?       @db.Decimal(12, 2)
+  openedAt     DateTime       @default(now())
+  resolvedAt   DateTime?
+  resolution   String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@unique([tenantId, ticketNumber])
+  @@index([assetId])
+  @@index([status])
+  @@index([assignedToId])
+  @@index([tenantId, status])
+  @@index([tenantId, assignedToId])
+  @@index([tenantId, assetId])
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_VENDOR
+  RESOLVED
+  CLOSED
+  CANCELLED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// ------------ Procurement ------------
+model PurchaseRequest {
+  tenantId       String
+  id             String                @id @default(uuid())
+  number         String
+  title          String
+  justification  String?
+  status         PRStatus              @default(DRAFT)
+  requestedById  String
+  requestedBy    User                  @relation("RequestedPRs", fields: [requestedById], references: [id])
+  approvedById   String?
+  approvedBy     User?                 @relation("ApprovedPRs", fields: [approvedById], references: [id])
+  approvedAt     DateTime?
+  departmentId   String?
+  department     Department?           @relation(fields: [departmentId], references: [id])
+  totalEstimate  Decimal?              @db.Decimal(12, 2)
+  notes          String?
+  items          PurchaseRequestItem[]
+  purchaseOrders PurchaseOrder[]
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@unique([tenantId, number])
+  @@index([status])
+  @@index([tenantId, status])
+}
+
+enum PRStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  ORDERED
+  CANCELLED
+}
+
+model PurchaseRequestItem {
+  tenantId          String
+  id                String          @id @default(uuid())
+  prId              String
+  pr                PurchaseRequest @relation(fields: [prId], references: [id], onDelete: Cascade)
+  categoryId        String?
+  category          Category?       @relation(fields: [categoryId], references: [id])
+  description       String
+  quantity          Int
+  unitPriceEstimate Decimal?        @db.Decimal(12, 2)
+
+  @@index([tenantId, prId])
+}
+
+model PurchaseOrder {
+  tenantId   String
+  id         String              @id @default(uuid())
+  poNumber   String
+  prId       String?
+  pr         PurchaseRequest?    @relation(fields: [prId], references: [id])
+  vendorId   String?
+  vendor     Vendor?             @relation(fields: [vendorId], references: [id])
+  status     POStatus            @default(DRAFT)
+  orderedAt  DateTime?
+  receivedAt DateTime?
+  totalCost  Decimal?            @db.Decimal(12, 2)
+  notes      String?
+  items      PurchaseOrderItem[]
+  assets     Asset[]
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  @@unique([tenantId, poNumber])
+  @@index([status])
+  @@index([tenantId, status])
+}
+
+enum POStatus {
+  DRAFT
+  SENT
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+model PurchaseOrderItem {
+  tenantId    String
+  id          String        @id @default(uuid())
+  poId        String
+  po          PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  categoryId  String?
+  category    Category?     @relation(fields: [categoryId], references: [id])
+  description String
+  quantity    Int
+  unitCost    Decimal       @db.Decimal(12, 2)
+  receivedQty Int           @default(0)
+
+  @@index([tenantId, poId])
+}
+
+enum DepreciationMethod {
+  NONE
+  STRAIGHT_LINE
+  DECLINING_BALANCE
+}
+
+// ------------ Software & Licenses ------------
+model Software {
+  tenantId    String
+  id          String            @id @default(uuid())
+  name        String
+  publisher   String?
+  description String?
+  licenses    SoftwareLicense[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([tenantId, name])
+}
+
+model SoftwareLicense {
+  tenantId     String
+  id           String               @id @default(uuid())
+  softwareId   String
+  software     Software             @relation(fields: [softwareId], references: [id], onDelete: Cascade)
+  licenseKey   String?
+  type         LicenseType          @default(SUBSCRIPTION)
+  seats        Int                  @default(1)
+  purchaseDate DateTime?
+  expiresAt    DateTime?
+  cost         Decimal?             @db.Decimal(12, 2)
+  vendorId     String?
+  vendor       Vendor?              @relation(fields: [vendorId], references: [id])
+  notes        String?
+  assignments  SoftwareAssignment[]
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@index([softwareId])
+  @@index([expiresAt])
+  @@index([tenantId, softwareId])
+  @@index([tenantId, expiresAt])
+}
+
+enum LicenseType {
+  PERPETUAL
+  SUBSCRIPTION
+  TRIAL
+  OPEN_SOURCE
+}
+
+model SoftwareAssignment {
+  tenantId   String
+  id         String          @id @default(uuid())
+  licenseId  String
+  license    SoftwareLicense @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?           @relation(fields: [userId], references: [id])
+  assetId    String?
+  asset      Asset?          @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  assignedAt DateTime        @default(now())
+  returnedAt DateTime?
+  notes      String?
+
+  @@index([licenseId])
+  @@index([userId])
+  @@index([assetId])
+  @@index([returnedAt])
+  @@index([tenantId, licenseId, returnedAt])
+}
+
+// ------------ Reservations ------------
+model Reservation {
+  tenantId  String
+  id        String            @id @default(uuid())
+  assetId   String
+  asset     Asset             @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User              @relation(fields: [userId], references: [id])
+  startAt   DateTime
+  endAt     DateTime
+  status    ReservationStatus @default(CONFIRMED)
+  notes     String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([assetId, startAt])
+  @@index([userId])
+  @@index([status])
+  @@index([tenantId, assetId, startAt])
+  @@index([tenantId, status])
+}
+
+enum ReservationStatus {
+  REQUESTED
+  CONFIRMED
+  CHECKED_OUT
+  COMPLETED
+  CANCELLED
+}
+
+// ------------ Physical Audits ------------
+model AuditSession {
+  tenantId    String
+  id          String      @id @default(uuid())
+  name        String
+  scope       Json? // { locationId?, departmentId?, categoryId? }
+  scheduledAt DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  status      AuditStatus @default(PLANNED)
+  startedById String?
+  startedBy   User?       @relation("StartedAudits", fields: [startedById], references: [id])
+  scans       AuditScan[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([status])
+  @@index([tenantId, status])
+}
+
+enum AuditStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model AuditScan {
+  tenantId    String
+  id          String       @id @default(uuid())
+  sessionId   String
+  session     AuditSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  assetId     String?
+  asset       Asset?       @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  rawTag      String? // tag scanned but not matched to an asset
+  scannedById String?
+  scannedBy   User?        @relation("ScannedBy", fields: [scannedById], references: [id])
+  notes       String?
+  createdAt   DateTime     @default(now())
+
+  @@unique([tenantId, sessionId, assetId])
+  @@index([sessionId])
+}
+
+// ------------ Attachments / status defs / saved views ------------
+model AssetAttachment {
+  tenantId     String
+  id           String   @id @default(uuid())
+  assetId      String
+  asset        Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  kind         String // photo | document | other
+  filename     String
+  url          String
+  size         Int
+  mimeType     String
+  uploadedById String?
+  uploadedBy   User?    @relation("AttachmentUploader", fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now())
+
+  @@index([assetId])
+  @@index([tenantId, assetId])
+}
+
+model AssetStatusDef {
+  tenantId  String
+  id        String      @id @default(uuid())
+  key       String
+  label     String
+  color     String      @default("gray")
+  mapsTo    AssetStatus
+  order     Int         @default(0)
+  isSystem  Boolean     @default(false)
+  assets    Asset[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([tenantId, key])
+}
+
+model SavedView {
+  tenantId  String
+  id        String   @id @default(uuid())
+  name      String
+  kind      String // assets | tickets | maintenance | reservations
+  filters   Json     @default("{}")
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  isShared  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([kind])
+  @@index([tenantId, ownerId])
+}
+
+// ------------ Integrations ------------
+model ApiKey {
+  tenantId    String
+  id          String    @id @default(uuid())
+  name        String
+  hash        String
+  prefix      String
+  scope       String    @default("read_write")
+  role        String    @default("ADMIN") // tenant role this key acts as (least-privilege); legacy keys = ADMIN
+  createdById String?
+  createdBy   User?     @relation("ApiKeyCreator", fields: [createdById], references: [id])
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([tenantId, hash])
+  @@index([revokedAt])
+  @@index([tenantId, revokedAt])
+}
+
+model Webhook {
+  tenantId   String
+  id         String            @id @default(uuid())
+  url        String
+  events     Json              @default("[]")
+  secret     String
+  active     Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+  deliveries WebhookDelivery[]
+
+  @@index([tenantId, active])
+}
+
+model WebhookDelivery {
+  tenantId    String
+  id          String    @id @default(uuid())
+  webhookId   String
+  webhook     Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event       String
+  payload     Json
+  status      Int?
+  attempts    Int       @default(0)
+  lastError   String?
+  succeededAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([webhookId, createdAt])
+  @@index([succeededAt])
+  @@index([tenantId, webhookId, createdAt])
+}
+
+model EmailLog {
+  tenantId  String
+  id        String   @id @default(uuid())
+  toEmail   String
+  subject   String
+  body      String
+  sent      Boolean  @default(false)
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([tenantId, createdAt])
+}
+
+// ------------ Audit ------------
+model AuditLog {
+  tenantId      String
+  id            String   @id @default(uuid())
+  assetId       String?
+  asset         Asset?   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  action        String
+  detail        Json?
+  performedById String?
+  performedBy   User?    @relation("PerformedBy", fields: [performedById], references: [id])
+  // Tamper-evidence: each entry hashes (prevHash, fields…) — verifiable end-to-end.
+  prevHash      String?
+  entryHash     String?
+  // Which hash recipe produced entryHash. v1 hashed the mutable assetId column; v2
+  // hashes a snapshot inside `detail` instead, so deleting an asset cannot break the
+  // chain. Verification uses the recipe each row was written with.
+  hashVersion   Int      @default(1)
+  seq           Int      @default(autoincrement())
+  createdAt     DateTime @default(now())
+
+  // MySQL requires an AUTO_INCREMENT column to be the leading column of some index,
+  // so `seq` keeps a standalone index; the composite is what per-tenant chain
+  // traversal (verifyChain orders by seq within one tenant) actually uses.
+
+  @@index([assetId])
+  @@index([createdAt])
+  @@index([seq])
+  @@index([tenantId, seq])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, assetId])
+}
+
+// Serializes concurrent audit-log appends via SELECT ... FOR UPDATE on the
+// counter row. Without this, concurrent INSERTs create phantom rows that can't
+// be prevented by locking the current tail AuditLog row.
+//
+// One row per tenant, seeded at provisioning (seedDefaults in auth.service.ts) and
+// by the consolidation script for migrated tenants. `tenantId` deliberately carries
+// NO default: a default made it possible to create the row without naming a tenant,
+// which is how every chain briefly ended up sharing one counter.
+model AuditCounter {
+  tenantId String  @id
+  lastSeq  Int     @default(0)
+  lastHash String?
+}
+
+// ------------ Notifications (in-app inbox) ------------
+model Notification {
+  tenantId  String
+  id        String    @id @default(uuid())
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String?
+  href      String?
+  kind      String // e.g. ticket.assigned, warranty.expiring, maint.due, license.expiring
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt])
+  @@index([createdAt])
+  @@index([tenantId, userId, readAt])
+  @@index([tenantId, createdAt])
+}
+
+// Persisted denylist of consumed refresh-token JTIs (per tenant DB).
+// Replaces the in-memory Map so a process restart cannot resurrect a reused token.
+model RefreshTokenJti {
+  tenantId  String
+  jti       String   @id
+  userId    String?
+  // "logout" or "refresh" — see auth.service.ts theft-detection logic.
+  reason    String   @default("refresh")
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
+  @@index([tenantId, userId])
+}
+
+// Idempotency-key store for replay-safe mutations.
+model IdempotencyKey {
+  tenantId  String
+  key       String
+  scope     String
+  createdAt DateTime @default(now())
+
+  @@id([tenantId, scope, key])
+}
+
+// Per-tenant mirror of PlatformMfaPending: one row per in-flight MFA login chain.
+// All mutable state (attempt counters, live OTP hash, stage, snapshots) lives
+// here so a restart can't reset attempt/send budgets. Located via `nonce`.
+model TenantMfaPending {
+  tenantId          String
+  id                String         @id @default(uuid())
+  userId            String
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nonce             String
+  stage             TenantMfaStage
+  pwdAtSnapshot     DateTime?
+  tvSnapshot        Int
+  emailOtpHash      String?
+  emailTarget       String?
+  emailExpiresAt    DateTime?
+  emailLastSentAt   DateTime?
+  emailSendCount    Int            @default(0)
+  emailCodeAttempts Int            @default(0)
+  chainAttempts     Int            @default(0)
+  backupCodeUsed    Boolean        @default(false)
+  consumedAt        DateTime?
+  expiresAt         DateTime
+  createdAt         DateTime       @default(now())
+
+  @@unique([tenantId, nonce])
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([tenantId, userId])
+}
+
+// Per-tenant mirror of PlatformBackupCode: single-use recovery codes, stored
+// only as HMAC+pepper hash, stamped with the producing pepperVersion.
+model TenantBackupCode {
+  tenantId      String
+  id            String          @id @default(uuid())
+  userId        String
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash      String
+  pepperVersion Int
+  usedAt        DateTime?
+  usedFor       TenantMfaStage?
+  createdAt     DateTime        @default(now())
+
+  @@unique([tenantId, userId, codeHash])
+}
+
+// ------------ Asset Requests (employee → manager approval, Phase 2 RBAC) ------------
+model AssetRequest {
+  tenantId         String
+  id               String             @id @default(uuid())
+  number           String // AR-00001
+  requestedById    String
+  requestedBy      User               @relation("AssetRequests", fields: [requestedById], references: [id])
+  categoryId       String?
+  category         Category?          @relation(fields: [categoryId], references: [id])
+  title            String
+  reason           String?
+  urgency          RequestUrgency     @default(NORMAL)
+  status           RequestStatus      @default(PENDING)
+  // Auto-assigned manager (round-robin, fewest open requests)
+  assignedToId     String?
+  assignedTo       User?              @relation("AssignedRequests", fields: [assignedToId], references: [id])
+  // Resolution fields (filled by the approver — usually the assignedTo manager)
+  reviewedById     String?
+  reviewedBy       User?              @relation("ReviewedRequests", fields: [reviewedById], references: [id])
+  reviewedAt       DateTime?
+  declineReason    String?
+  // Escalation: manager can push to Admin for a decision
+  escalatedToAdmin Boolean            @default(false)
+  escalationNote   String?
+  // If approved → the manager assigns a specific asset
+  fulfilledAssetId String?
+  fulfilledAsset   Asset?             @relation("FulfilledRequests", fields: [fulfilledAssetId], references: [id], onDelete: SetNull)
+  fulfilledAt      DateTime?
+  // v2 (asset-requests redesign): request mode, scheduling, per-device lines, one-way manager note
+  mode             RequestMode        @default(CATEGORY)
+  neededBy         DateTime?
+  isTemporary      Boolean            @default(false)
+  returnBy         DateTime?
+  managerNote      String?
+  items            AssetRequestItem[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@unique([tenantId, number])
+  @@index([requestedById])
+  @@index([status])
+  @@index([assignedToId])
+  @@index([categoryId])
+  @@index([tenantId, status])
+  @@index([tenantId, requestedById])
+  @@index([tenantId, assignedToId])
+}
+
+model AssetRequestItem {
+  tenantId  String
+  id        String            @id @default(uuid())
+  requestId String
+  request   AssetRequest      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  assetId   String
+  asset     Asset             @relation("RequestedAssets", fields: [assetId], references: [id], onDelete: Cascade)
+  status    RequestItemStatus @default(REQUESTED)
+  createdAt DateTime          @default(now())
+
+  @@index([requestId])
+  @@index([assetId])
+  @@index([tenantId, requestId])
+  @@index([tenantId, assetId])
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  FULFILLED
+  CANCELLED
+}
+
+enum RequestUrgency {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum RequestMode {
+  CATEGORY
+  SPECIFIC
+}
+
+enum RequestItemStatus {
+  REQUESTED
+  APPROVED
+  DECLINED
+  FULFILLED
+}

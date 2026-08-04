@@ -10,11 +10,13 @@
     "db:catalog:generate": "npm -w @assetmon/db-catalog run generate",
     "db:catalog:migrate": "npm -w @assetmon/db-catalog run migrate",
     "db:tenant:generate": "npm -w @assetmon/db-tenant run generate",
-    "db:setup": "npm run db:catalog:generate && npm run db:tenant:generate && npm run db:catalog:migrate",
+    "db:setup": "npm -w @assetmon/db run generate && npm -w @assetmon/db run migrate:deploy",
     "api:dev": "npm -w @assetmon/api run start:dev",
     "web:dev": "npm -w @assetmon/web run dev",
     "build": "npm -w @assetmon/api run build && npm -w @assetmon/web run build",
-    "platform:bootstrap-admin": "npm -w @assetmon/api run platform:bootstrap-admin --"
+    "platform:bootstrap-admin": "npm -w @assetmon/api run platform:bootstrap-admin --",
+    "check:tenant-safety": "bash ci/check-tenant-safety.sh",
+    "verify": "npm run check:tenant-safety && npx tsc -p apps/api/tsconfig.json --noEmit && npx jest --config apps/api/jest.config.js"
   },
   "engines": {
     "node": ">=20"

@@ -1,0 +1,19 @@
+{
+  "name": "@assetmon/db",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate:deploy": "prisma migrate deploy && prisma db execute --file ./post-migrate-collations.sql --schema prisma/schema.prisma",
+    "migrate:dev": "prisma migrate dev && prisma db execute --file ./post-migrate-collations.sql --schema prisma/schema.prisma",
+    "studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0"
+  }
+}
