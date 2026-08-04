@@ -160,9 +160,15 @@ same intent — case-sensitive AND accent-sensitive, so only the columns
 | `'Laptop' = 'laptop'` | 0 | 0 |
 | `'José' = 'Jose'` | 0 | 0 |
 
-Verified by deploying the repo's migrations, unmodified, to both engines. The resulting
-schema is identical: **49 tables, 12 case-insensitive columns, 213 indexes** on MySQL
-8.4.11 and on MariaDB 10.11.18.
+Verified by deploying the repo's migrations, unmodified, to MySQL 8.4.11, MariaDB
+10.11.18 and **MariaDB 11.8.8 — the version Hostinger actually runs** (confirmed
+2026-08-04 via `SELECT VERSION()` in phpMyAdmin). The resulting schema is identical on
+all three: **49 tables, 12 case-insensitive columns, 213 indexes**.
+
+Column behaviour checked on 11.8.8 rather than inferred from the schema: a
+non-collated column (`Category.name`) stores `Widget` and `widget` as distinct rows,
+a collated one (`Asset.name`) matches `macbook` against `MacBook Air`, and the
+collated unique on `Asset.assetTag` rejects `ct-2` against `CT-2`.
 
 Everything else the migration depends on was exercised through the real Prisma client
 against MariaDB and works: `Json` `array_contains` (the webhook delivery path, and the
@@ -175,10 +181,13 @@ One behavioural note: `utf8mb4_bin` compares and sorts by code point, so `ORDER 
 non-collated string column puts uppercase before lowercase. Equality, uniqueness and the
 case-insensitive search columns are unaffected.
 
-**Still worth running `SELECT VERSION();` before deploying.** All of the above is
-MariaDB 10.11; Hostinger has also shipped 10.6, and the collation position is the same
-there, but anything older than 10.5 should be re-probed — the JSON functions were still
-maturing.
+**One MariaDB quirk that is worth knowing but does not bite.** The default *session*
+collation on 11.8 is `utf8mb4_uca1400_ai_ci`, which is both case- and
+accent-insensitive. It governs comparisons between bare literals, not columns — a
+column's own collation always wins when a column is one side of the comparison, which
+is every comparison the application makes. A quick `SELECT 'A'='a'` in phpMyAdmin will
+return 1 and look alarming; `SELECT 'A'='a' COLLATE utf8mb4_bin` returns 0 and is the
+relevant answer.
 
 ## Rolling back
 
