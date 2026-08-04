@@ -70,6 +70,67 @@ function timingSafeEq(a, b) {
 }
 
 /**
+ * Append a chained, tamper-evident row to PlatformAuditLog.
+ *
+ * Mirrors PlatformAuditService.record(): take SELECT ... FOR UPDATE on the
+ * PlatformAuditCounter singleton, hash against the counter's tail, insert, then
+ * advance the counter. Reading the tail with `findFirst orderBy seq desc` instead —
+ * which this script used to do — leaves the counter stale, so the next append from
+ * the API chains onto an older hash and the chain forks.
+ *
+ * `hashPlatformEntry` lives in the compiled output, so this needs a built API
+ * (`npm -w @assetmon/api run build`) or the production image, which has one. That is
+ * the same requirement the --reset-mfa path already carries. It throws rather than
+ * degrading to an unhashed row: an audit entry nobody can verify is not worth writing.
+ */
+async function appendPlatformAudit(prisma, entry) {
+  let hashPlatformEntry;
+  try {
+    ({ hashPlatformEntry } = require('../dist/platform/platform-audit-hash'));
+  } catch (e) {
+    throw new Error(
+      'Cannot write a verifiable audit row: apps/api/dist is missing. ' +
+      'Build first (npm -w @assetmon/api run build), or run this inside the API image.',
+    );
+  }
+  return prisma.$transaction(
+    (tx) => appendChainedEntryTx(tx, hashPlatformEntry, entry),
+    { isolationLevel: 'ReadCommitted' },
+  );
+}
+
+/**
+ * The chained append itself, for callers that already hold a transaction (the
+ * break-glass reset needs the audit row and the MFA clear to commit together).
+ */
+async function appendChainedEntryTx(tx, hashPlatformEntry, entry) {
+  const rows = await tx.$queryRawUnsafe(
+    "SELECT `lastSeq`, `lastHash` FROM `PlatformAuditCounter` WHERE `id` = 'platform' FOR UPDATE",
+  );
+  if (rows.length === 0) throw new Error('PlatformAuditCounter singleton is missing — seed it at deploy time.');
+  const prevHash = rows[0].lastHash ?? null;
+  const createdAt = new Date();
+  const full = {
+    actorId: entry.actorId,
+    actorEmail: entry.actorEmail,
+    action: entry.action,
+    targetType: entry.targetType ?? null,
+    targetId: entry.targetId ?? null,
+    metadata: entry.metadata ?? {},
+    ipAddress: null,
+    userAgent: null,
+    createdAt,
+  };
+  const entryHash = hashPlatformEntry({ prevHash, ...full });
+  const row = await tx.platformAuditLog.create({ data: { ...full, prevHash, entryHash } });
+  await tx.platformAuditCounter.update({
+    where: { id: 'platform' },
+    data: { lastSeq: row.seq, lastHash: entryHash },
+  });
+  return row;
+}
+
+/**
  * Break-glass MFA reset (host/SSH only). Clears a locked-out operator's MFA so
  * they re-enroll at next login. Gated by a separate BREAKGLASS_TOKEN (DB access
  * alone is insufficient) and writes a hash-chained PlatformAuditLog row so the
@@ -116,38 +177,20 @@ async function resetMfaFlow(args, email) {
         const updated = await tx.platformUser.update({ where: { id: user.id }, data: clearMfaUserData() });
         if (updated.mfaEnrolledAt !== null) throw new Error('post-condition failed: mfaEnrolledAt is not null');
 
-        const last = await tx.platformAuditLog.findFirst({ orderBy: { seq: 'desc' }, select: { entryHash: true } });
-        const createdAt = new Date();
-        const metadata = { source: 'cli', host: require('os').hostname(), incidentRef: args['incident-ref'] || null };
-        const entryHash = hashPlatformEntry({
-          prevHash: last ? last.entryHash : null,
+        // Chain against the PlatformAuditCounter, not a `findFirst orderBy seq desc`
+        // tail scan. The API advances that counter on every append and reads its
+        // lastHash to chain; appending here without moving it leaves the counter
+        // stale, so the next API entry chains onto an older hash and the chain forks.
+        await appendChainedEntryTx(tx, hashPlatformEntry, {
           actorId: 'cli-breakglass',
           actorEmail: 'cli-breakglass',
           action: 'platform.cli.mfa_reset',
           targetType: 'platformUser',
           targetId: user.id,
-          metadata,
-          ipAddress: null,
-          userAgent: null,
-          createdAt,
-        });
-        await tx.platformAuditLog.create({
-          data: {
-            actorId: 'cli-breakglass',
-            actorEmail: 'cli-breakglass',
-            action: 'platform.cli.mfa_reset',
-            targetType: 'platformUser',
-            targetId: user.id,
-            metadata,
-            ipAddress: null,
-            userAgent: null,
-            prevHash: last ? last.entryHash : null,
-            entryHash,
-            createdAt,
-          },
+          metadata: { source: 'cli', host: require('os').hostname(), incidentRef: args['incident-ref'] || null },
         });
       },
-      { isolationLevel: 'Serializable' },
+      { isolationLevel: 'ReadCommitted' },
     );
     console.log('');
     console.log('✓ MFA reset for ' + email + '.');
@@ -262,21 +305,22 @@ async function resetMfaFlow(args, email) {
       action = 'platform.cli.bootstrap';
     }
 
-    // Best-effort audit row — never block the CLI on audit-write failure.
-    try {
-      await prisma.platformAuditLog.create({
-        data: {
-          actorId: user.id,
-          actorEmail: user.email,
-          action,
-          targetType: 'platformUser',
-          targetId: user.id,
-          metadata: { source: 'cli', host: require('os').hostname() },
-        },
-      });
-    } catch (e) {
-      console.warn('warn: could not write audit row:', e?.message || e);
-    }
+    // Creating or resetting a SUPER_ADMIN is the most privileged thing this system
+    // can do, so its audit row has to be tamper-evident like every other. This used
+    // to write the row with no prevHash/entryHash at all — present in the log, but
+    // silently alterable, and leaving a gap in the middle of the chain.
+    //
+    // Deliberately NOT best-effort any more: an unrecorded (or unverifiable)
+    // super-admin creation is worse than a failed bootstrap, and the failure is
+    // recoverable by re-running.
+    await appendPlatformAudit(prisma, {
+      actorId: user.id,
+      actorEmail: user.email,
+      action,
+      targetType: 'platformUser',
+      targetId: user.id,
+      metadata: { source: 'cli', host: require('os').hostname() },
+    });
 
     console.log('');
     console.log(existing ? '✓ Platform admin password reset.' : '✓ Platform super admin created.');
