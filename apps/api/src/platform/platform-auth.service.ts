@@ -86,8 +86,14 @@ export class PlatformAuthService {
   // is also no public way to discover whether the platform has been
   // initialised — the login form behaves identically before and after.
 
+  // A correct password never yields tokens here. Every operator role either gets a
+  // setup ticket (not enrolled) or enters the email-then-TOTP chain, both below —
+  // this method has no path that returns an access token. It used to carry a
+  // "TODO(security): enforce TOTP/2FA for SUPER_ADMIN before go-live" note, left over
+  // from before the MFA work landed; the note outlived the gap and, sitting on the
+  // login method, read like an open hole at exactly the moment someone is deciding
+  // whether to deploy.
   async login(dto: LoginDto, _req?: any) {
-    // TODO(security): enforce TOTP/2FA for SUPER_ADMIN before go-live.
     const email = dto.email.toLowerCase();
     const user = await this.catalog.platformUser.findUnique({ where: { email } });
 

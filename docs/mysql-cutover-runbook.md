@@ -202,11 +202,3 @@ mistaken bulk rebuild be repaired during development.
 - the `CatalogPrismaService` alias, folding its ~20 call sites onto `GlobalPrismaService`
 - `apps/api/scripts/seed-postgres.ts` and the `POSTGRES_URL` entries in the env templates
 
-## Still to port
-
-`verify-deploy.sh` — the deployment self-check. It still builds the image and boots the
-stack in production mode, which remains useful, but it asserts that "a real signup
-provisions an isolated tenant database", and provisioning no longer creates a database.
-It also drives Postgres directly. Port it to assert the shared-table equivalent (a
-signup creates a Tenant row plus its seed rows and an AuditCounter) before relying on
-it as a deployment gate.
