@@ -19,7 +19,7 @@ import { NotificationsService } from '../notifications/notifications.module';
 const STATUSES = ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'ORDERED', 'CANCELLED'] as const;
 
 @Injectable()
-class PurchaseRequestsService {
+export class PurchaseRequestsService {
   constructor(
     private readonly ctx: TenantContextService,
     private readonly notifications: NotificationsService,
@@ -73,19 +73,27 @@ class PurchaseRequestsService {
     const number = await this.nextNumber();
     const items = (data.items || []) as Array<{ description: string; quantity: number; unitPriceEstimate?: number; categoryId?: string }>;
     const total = items.reduce((s, i) => s + (i.unitPriceEstimate || 0) * (i.quantity || 0), 0);
-    return db.purchaseRequest.create({
-      data: {
-        number,
-        title: data.title,
-        justification: data.justification || null,
-        status: 'DRAFT',
-        requestedById,
-        departmentId: data.departmentId || null,
-        totalEstimate: total || null,
-        notes: data.notes || null,
-        items: { create: items.map((i) => ({ ...i, unitPriceEstimate: i.unitPriceEstimate ?? null })) },
-      },
-      include: { items: true },
+    // Flat transaction: each create goes through the Prisma extension individually
+    // (nested relation writes bypass the extension's $allOperations hook).
+    return db.$transaction(async (tx: any) => {
+      const pr = await tx.purchaseRequest.create({
+        data: {
+          number,
+          title: data.title,
+          justification: data.justification || null,
+          status: 'DRAFT',
+          requestedById,
+          departmentId: data.departmentId || null,
+          totalEstimate: total || null,
+          notes: data.notes || null,
+        },
+      });
+      await Promise.all(items.map((i) =>
+        tx.purchaseRequestItem.create({
+          data: { ...i, unitPriceEstimate: i.unitPriceEstimate ?? null, prId: pr.id },
+        }),
+      ));
+      return tx.purchaseRequest.findUnique({ where: { id: pr.id }, include: { items: true } });
     });
   }
 
@@ -110,9 +118,22 @@ class PurchaseRequestsService {
     if (data.notes !== undefined) patch.notes = data.notes;
 
     if (data.items) {
-      await db.purchaseRequestItem.deleteMany({ where: { prId: id } });
-      patch.items = { create: data.items.map((i: any) => ({ ...i, unitPriceEstimate: i.unitPriceEstimate ?? null })) };
-      patch.totalEstimate = data.items.reduce((s: number, i: any) => s + (i.unitPriceEstimate || 0) * (i.quantity || 0), 0) || null;
+      // Flat transaction: delete-all + re-create each child individually so each
+      // operation goes through the Prisma extension (nested writes bypass it).
+      const recomputedTotal = data.items.reduce((s: number, i: any) => s + (i.unitPriceEstimate || 0) * (i.quantity || 0), 0) || null;
+      return db.$transaction(async (tx: any) => {
+        await tx.purchaseRequestItem.deleteMany({ where: { prId: id } });
+        await tx.purchaseRequest.update({
+          where: { id },
+          data: { ...patch, totalEstimate: recomputedTotal },
+        });
+        await Promise.all(data.items.map((i: any) =>
+          tx.purchaseRequestItem.create({
+            data: { ...i, unitPriceEstimate: i.unitPriceEstimate ?? null, prId: id },
+          }),
+        ));
+        return tx.purchaseRequest.findUnique({ where: { id }, include: { items: true } });
+      });
     }
 
     return db.purchaseRequest.update({ where: { id }, data: patch, include: { items: true } });

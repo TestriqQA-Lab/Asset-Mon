@@ -40,10 +40,10 @@ export class LifecycleService {
     }
 
     const assignment = await db.assignment.create({
-      data: { assetId, userId, dueAt: dueAt ? new Date(dueAt) : null },
+      data: { tenantId: this.ctx.tenantId!, assetId, userId, dueAt: dueAt ? new Date(dueAt) : null },
     });
     await db.asset.update({ where: { id: assetId }, data: { status: 'ASSIGNED' } });
-    await writeAuditEntry(db, { assetId, action: 'CHECKED_OUT', performedById, detail: { userId, dueAt }, impersonatedBy: this.ctx.impersonatedBy ?? null });
+    await writeAuditEntry(db, { tenantId: this.ctx.tenantId!, assetId, action: 'CHECKED_OUT', performedById, detail: { userId, dueAt }, impersonatedBy: this.ctx.impersonatedBy ?? null });
     return assignment;
   }
 
@@ -53,7 +53,7 @@ export class LifecycleService {
     if (!open) throw new BadRequestException('Asset is not checked out');
     const updated = await db.assignment.update({ where: { id: open.id }, data: { returnedAt: new Date() } });
     await db.asset.update({ where: { id: assetId }, data: { status: 'AVAILABLE' } });
-    await writeAuditEntry(db, { assetId, action: 'CHECKED_IN', performedById, detail: { assignmentId: open.id }, impersonatedBy: this.ctx.impersonatedBy ?? null });
+    await writeAuditEntry(db, { tenantId: this.ctx.tenantId!, assetId, action: 'CHECKED_IN', performedById, detail: { assignmentId: open.id }, impersonatedBy: this.ctx.impersonatedBy ?? null });
     return updated;
   }
 }

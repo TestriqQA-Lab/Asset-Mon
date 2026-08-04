@@ -18,7 +18,7 @@ import { RequireNav } from '../tenant-settings/require-nav.decorator';
 import { AssetsService } from './assets.service';
 import { LifecycleService } from './lifecycle.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
-import { TenantPrismaPool } from '../tenancy/tenant-prisma.pool';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { CreateAssetDto, UpdateAssetDto, ListAssetsQueryDto, CheckoutDto, BulkIdsDto, BulkUpdateDto } from './dto';
 import { signFileToken, verifySignedFileToken } from '../common/signed-url';
@@ -203,9 +203,9 @@ export class AssetsController {
     }
 
     const db = this.ctx.prisma();
-    const cats = new Map((await db.category.findMany()).map((c) => [c.name.toLowerCase(), c]));
-    const locs = new Map((await db.location.findMany()).map((l) => [l.name.toLowerCase(), l]));
-    const depts = new Map((await db.department.findMany()).map((d) => [d.name.toLowerCase(), d]));
+    const cats = new Map<string, any>((await db.category.findMany()).map((c: any) => [c.name.toLowerCase(), c]));
+    const locs = new Map<string, any>((await db.location.findMany()).map((l: any) => [l.name.toLowerCase(), l]));
+    const depts = new Map<string, any>((await db.department.findMany()).map((d: any) => [d.name.toLowerCase(), d]));
 
     // Single up-front billing check covering the whole batch.
     if (this.ctx.tenantId) {
@@ -316,7 +316,7 @@ export class AssetsController {
 export class AssetsPublicFileController {
   constructor(
     private readonly catalog: CatalogPrismaService,
-    private readonly pool: TenantPrismaPool,
+    private readonly globalPrisma: GlobalPrismaService,
   ) {}
 
   @Get(':name')
@@ -339,9 +339,9 @@ export class AssetsPublicFileController {
       res.status(404).send('Not found'); return;
     }
     try {
-      const db = this.pool.get(tenant.dbName);
+      const db = this.globalPrisma;
       const owned = await db.asset.findFirst({
-        where: { photoUrl: { endsWith: '/' + safe } }, select: { id: true },
+        where: { tenantId: tenant.id, photoUrl: { endsWith: '/' + safe } }, select: { id: true },
       });
       if (!owned) { res.status(404).send('Not found'); return; }
     } catch {

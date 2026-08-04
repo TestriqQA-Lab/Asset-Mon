@@ -93,10 +93,14 @@ export class EventBusService {
   async emit(event: string, payload: any, opts?: { emails?: Array<{ to: string; subject: string; body: string }> }) {
     if (!this.ctx.tenantId) return;
     const db = this.ctx.prisma();
-    const hooks = await db.webhook.findMany({ where: { active: true, events: { has: event } } });
+    // `events` was a Postgres String[] and used the `has` filter; under MySQL it is a
+    // Json column, whose equivalent membership test is `array_contains`. `has` silently
+    // stopped matching after the migration — and every emit() caller swallows errors,
+    // so webhook delivery failed without a trace.
+    const hooks = await db.webhook.findMany({ where: { active: true, events: { array_contains: event } } });
     for (const h of hooks) {
       const delivery = await db.webhookDelivery.create({
-        data: { webhookId: h.id, event, payload, attempts: 0 },
+        data: { tenantId: this.ctx.tenantId!, webhookId: h.id, event, payload, attempts: 0 },
       });
       // Fire & forget; do not block request.
       this.deliver(h, delivery.id, event, payload).catch(() => {});
@@ -105,7 +109,7 @@ export class EventBusService {
       for (const m of opts.emails) {
         const res = await this.mailer.send(m.to, m.subject, m.body);
         await db.emailLog.create({
-          data: { toEmail: m.to, subject: m.subject, body: m.body, sent: res.ok, error: res.ok ? null : (res as any).error },
+          data: { tenantId: this.ctx.tenantId!, toEmail: m.to, subject: m.subject, body: m.body, sent: res.ok, error: res.ok ? null : (res as any).error },
         });
       }
     }

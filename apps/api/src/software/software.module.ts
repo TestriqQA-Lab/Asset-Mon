@@ -45,7 +45,7 @@ class SoftwareService {
 
   create(d: any) {
     return this.ctx.prisma().software.create({
-      data: { name: d.name, publisher: d.publisher || null, description: d.description || null },
+      data: { tenantId: this.ctx.tenantId!, name: d.name, publisher: d.publisher || null, description: d.description || null },
     });
   }
 
@@ -110,6 +110,7 @@ class LicensesService {
   create(d: any) {
     return this.ctx.prisma().softwareLicense.create({
       data: {
+        tenantId: this.ctx.tenantId!,
         softwareId: d.softwareId,
         licenseKey: d.licenseKey || null,
         type: d.type || 'SUBSCRIPTION',
@@ -151,9 +152,17 @@ class LicensesService {
       if (!a) throw new NotFoundException('Asset not found in this workspace');
     }
 
-    // Serialise the seat check + insert so two concurrent assigns can never both
-    // commit and over-allocate a license.
+    // Serialise the seat check + insert with row-level locking so two concurrent
+    // assigns can never both commit and over-allocate a license.
+    // FOR UPDATE on the license row prevents concurrent reads of the same seat count.
     const result = await db.$transaction(async (tx: any) => {
+      // Lock the license row to prevent concurrent seat allocation races.
+      // MySQL syntax: backtick identifiers and `?` placeholders — double quotes are
+      // string literals here, not identifiers, and `$1` is a syntax error.
+      await tx.$queryRawUnsafe(
+        `SELECT \`id\` FROM \`SoftwareLicense\` WHERE \`id\` = ? FOR UPDATE`,
+        licenseId,
+      );
       const lic = await tx.softwareLicense.findUnique({
         where: { id: licenseId },
         include: { assignments: { where: { returnedAt: null } } },
@@ -177,9 +186,10 @@ class LicensesService {
           notes: body.notes || null,
         },
       });
-    }, { isolationLevel: 'Serializable' as any });
+    }, { isolationLevel: 'ReadCommitted' as any });
 
     await writeAuditEntry(db, {
+      tenantId: this.ctx.tenantId!,
       assetId: body.assetId || null, action: 'LICENSE_ASSIGNED', performedById,
       detail: { licenseId, assignmentId: result.id, userId: body.userId, assetId: body.assetId },
     });
@@ -196,6 +206,7 @@ class LicensesService {
       data: { returnedAt: new Date() },
     });
     await writeAuditEntry(db, {
+      tenantId: this.ctx.tenantId!,
       assetId: a.assetId, action: 'LICENSE_UNASSIGNED', performedById, detail: { licenseId, assignmentId },
     });
     return updated;

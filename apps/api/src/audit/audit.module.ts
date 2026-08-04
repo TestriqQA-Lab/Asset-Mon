@@ -10,7 +10,7 @@ import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
 import { RequireNav } from '../tenant-settings/require-nav.decorator';
 
 @Injectable()
-class AuditService {
+export class AuditService {
   constructor(private readonly ctx: TenantContextService) {}
 
   list(limit = 100) {
@@ -26,8 +26,10 @@ class AuditService {
 
   async verifyChain() {
     const rows = await this.ctx.prisma().auditLog.findMany({
+      // The extension scopes this to the caller's tenant, so `seq` ordering is within
+      // one chain even though the column auto-increments globally across the shared table.
       orderBy: { seq: 'asc' },
-      select: { id: true, seq: true, prevHash: true, entryHash: true, action: true, assetId: true, performedById: true, detail: true, createdAt: true, hashVersion: true },
+      select: { id: true, tenantId: true, seq: true, prevHash: true, entryHash: true, action: true, assetId: true, performedById: true, detail: true, createdAt: true, hashVersion: true },
     });
     let lastHash: string | null = null;
     let scanned = 0;
@@ -44,8 +46,11 @@ class AuditService {
         detail: r.detail,
         createdAt: r.createdAt,
         // Verify each row against the recipe it was written with, so entries predating
-        // the v2 change keep validating.
+        // the v2 change keep validating. v3 entries include tenantId in the hash.
         hashVersion: r.hashVersion,
+        // Only the v3 branch reads this, so rows migrated from the per-tenant Postgres
+        // databases (v1/v2) verify unchanged despite having had a tenantId backfilled.
+        tenantId: r.tenantId,
       });
       if (r.entryHash !== expected || (lastHash != null && r.prevHash !== lastHash)) {
         broken.push({ seq: r.seq, id: r.id, action: r.action, expected, actual: r.entryHash, prevHashOk: lastHash == null || r.prevHash === lastHash });
@@ -67,7 +72,16 @@ class AuditService {
    */
   async rebuildChain(performedById: string | null) {
     const db = this.ctx.prisma();
-    const rows = await db.auditLog.findMany({ orderBy: { seq: 'asc' } });
+    const tenantId = this.ctx.tenantId!;
+    // Hold the tenant's AuditCounter row for the whole rebuild. Without it a
+    // concurrent writeAuditEntry would append onto the pre-rebuild tail hash and
+    // fork the chain the rebuild is trying to repair.
+    return db.$transaction(async (tx: any) => {
+    await tx.$queryRawUnsafe(
+      `SELECT \`lastSeq\` FROM \`AuditCounter\` WHERE \`tenantId\` = ? FOR UPDATE`,
+      tenantId,
+    );
+    const rows = await tx.auditLog.findMany({ orderBy: { seq: 'asc' } });
     let prev: string | null = null;
     let updated = 0;
     for (const r of rows) {
@@ -84,9 +98,13 @@ class AuditService {
         detail: r.detail,
         createdAt: r.createdAt,
         hashVersion: AUDIT_HASH_VERSION,
+        // v3 hashes the tenantId. Omitting it here would re-stamp every row with a
+        // hash computed over an empty tenant, and verifyChain — which passes the
+        // stored tenantId — would report the freshly rebuilt chain as broken.
+        tenantId,
       });
       if (r.entryHash !== newHash || r.prevHash !== prev || r.hashVersion !== AUDIT_HASH_VERSION) {
-        await db.auditLog.update({
+        await tx.auditLog.update({
           where: { id: r.id },
           data: { entryHash: newHash, prevHash: prev, hashVersion: AUDIT_HASH_VERSION },
         });
@@ -100,15 +118,23 @@ class AuditService {
     const tailHash = computeEntryHash({
       prevHash: prev, action: 'audit.chain.rebuild',
       assetId: null, performedById, detail: tailDetail, createdAt,
-      hashVersion: AUDIT_HASH_VERSION,
+      hashVersion: AUDIT_HASH_VERSION, tenantId,
     });
-    await db.auditLog.create({
+    const tailRow = await tx.auditLog.create({
       data: {
+        tenantId,
         action: 'audit.chain.rebuild', detail: tailDetail, performedById,
         prevHash: prev, entryHash: tailHash, hashVersion: AUDIT_HASH_VERSION, createdAt,
       },
     });
+    // Re-point the counter at the new tail. Skipping this would leave lastHash on the
+    // pre-rebuild hash, so the next append would chain onto a hash no row carries.
+    await tx.auditCounter.update({
+      where: { tenantId },
+      data: { lastSeq: tailRow.seq, lastHash: tailHash },
+    });
     return { scanned: rows.length, updated, tailEntry: { entryHash: tailHash } };
+    }, { timeout: 120_000, maxWait: 10_000 });
   }
 }
 

@@ -31,6 +31,7 @@ class MaintenanceService {
     const db = this.ctx.prisma();
     const m = await db.maintenanceSchedule.create({
       data: {
+        tenantId: this.ctx.tenantId!,
         assetId: data.assetId,
         title: data.title,
         description: data.description,
@@ -38,7 +39,7 @@ class MaintenanceService {
         nextDueAt: new Date(data.nextDueAt),
       },
     });
-    await writeAuditEntry(db, { assetId: data.assetId, action: 'MAINT_SCHEDULED', performedById, detail: { scheduleId: m.id, title: data.title } });
+    await writeAuditEntry(db, { tenantId: this.ctx.tenantId!, assetId: data.assetId, action: 'MAINT_SCHEDULED', performedById, detail: { scheduleId: m.id, title: data.title } });
     return m;
   }
 
@@ -61,7 +62,7 @@ class MaintenanceService {
       where: { id },
       data: { lastRunAt: new Date(), nextDueAt: next },
     });
-    await writeAuditEntry(db, { assetId: s.assetId, action: 'MAINT_PERFORMED', performedById, detail: { scheduleId: id, title: s.title } });
+    await writeAuditEntry(db, { tenantId: this.ctx.tenantId!, assetId: s.assetId, action: 'MAINT_PERFORMED', performedById, detail: { scheduleId: id, title: s.title } });
     return updated;
   }
 }

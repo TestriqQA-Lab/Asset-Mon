@@ -50,6 +50,7 @@ class PhysicalAuditsService {
   async create(data: { name: string; scope?: any; scheduledAt?: string }) {
     return this.ctx.prisma().auditSession.create({
       data: {
+        tenantId: this.ctx.tenantId!,
         name: data.name,
         scope: data.scope || {},
         scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
@@ -84,7 +85,7 @@ class PhysicalAuditsService {
         try { parsed = JSON.parse(tag); } catch {}
       }
       const lookupTag = parsed?.tag || tag;
-      const a = await db.asset.findUnique({ where: { assetTag: lookupTag } });
+      const a = await db.asset.findUnique({ where: { tenantId_assetTag: { tenantId: this.ctx.tenantId!, assetTag: lookupTag } } });
       if (a) assetId = a.id;
     }
 
@@ -102,6 +103,7 @@ class PhysicalAuditsService {
     try {
       return await db.auditScan.create({
         data: {
+          tenantId: this.ctx.tenantId!,
           sessionId: id,
           assetId,
           rawTag: assetId ? null : ((body.assetTag || '').trim() || null),

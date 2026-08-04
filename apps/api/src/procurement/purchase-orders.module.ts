@@ -18,7 +18,7 @@ import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
 import { RequireNav } from '../tenant-settings/require-nav.decorator';
 
 @Injectable()
-class PurchaseOrdersService {
+export class PurchaseOrdersService {
   constructor(
     private readonly ctx: TenantContextService,
     private readonly assets: AssetsService,
@@ -56,28 +56,32 @@ class PurchaseOrdersService {
     if (!pr) throw new NotFoundException('Request not found');
     if (pr.status !== 'APPROVED') throw new BadRequestException('Request must be APPROVED');
     const poNumber = await this.nextPoNumber();
-    const po = await db.purchaseOrder.create({
-      data: {
-        poNumber,
-        prId,
-        status: 'DRAFT',
-        // Carry the requester's notes (and the PR's own number) into the PO so the
-        // downstream buyer keeps the original justification.
-        notes: pr.notes ? `[from ${pr.number}] ${pr.notes}` : `[from ${pr.number}]`,
-        items: {
-          create: pr.items.map((i: any) => ({
-            categoryId: i.categoryId,
-            description: i.description,
-            quantity: i.quantity,
-            unitCost: i.unitPriceEstimate || 0,
-          })),
+    return db.$transaction(async (tx: any) => {
+      const po = await tx.purchaseOrder.create({
+        data: {
+          poNumber,
+          prId,
+          status: 'DRAFT',
+          notes: pr.notes ? `[from ${pr.number}] ${pr.notes}` : `[from ${pr.number}]`,
+          totalCost: pr.totalEstimate,
         },
-        totalCost: pr.totalEstimate,
-      },
-      include: { items: true },
+      });
+      await Promise.all(
+        pr.items.map((i: any) =>
+          tx.purchaseOrderItem.create({
+            data: {
+              poId: po.id,
+              categoryId: i.categoryId,
+              description: i.description,
+              quantity: i.quantity,
+              unitCost: i.unitPriceEstimate || 0,
+            },
+          }),
+        ),
+      );
+      await tx.purchaseRequest.update({ where: { id: prId }, data: { status: 'ORDERED' } });
+      return tx.purchaseOrder.findUnique({ where: { id: po.id }, include: { items: true } });
     });
-    await db.purchaseRequest.update({ where: { id: prId }, data: { status: 'ORDERED' } });
-    return po;
   }
 
   async createBlank(data: any) {
@@ -85,21 +89,30 @@ class PurchaseOrdersService {
     const poNumber = await this.nextPoNumber();
     const items = (data.items || []) as any[];
     const total = items.reduce((s, i) => s + (i.unitCost || 0) * (i.quantity || 0), 0);
-    return db.purchaseOrder.create({
-      data: {
-        poNumber,
-        vendorId: data.vendorId || null,
-        status: 'DRAFT',
-        totalCost: total || null,
-        notes: data.notes || null,
-        items: { create: items.map((i: any) => ({
-          categoryId: i.categoryId || null,
-          description: i.description,
-          quantity: i.quantity,
-          unitCost: i.unitCost || 0,
-        })) },
-      },
-      include: { items: true },
+    // Flat transaction: each create goes through the Prisma extension individually
+    // (nested relation writes bypass the extension's $allOperations hook).
+    return db.$transaction(async (tx: any) => {
+      const po = await tx.purchaseOrder.create({
+        data: {
+          poNumber,
+          vendorId: data.vendorId || null,
+          status: 'DRAFT',
+          totalCost: total || null,
+          notes: data.notes || null,
+        },
+      });
+      await Promise.all(items.map((i: any) =>
+        tx.purchaseOrderItem.create({
+          data: {
+            categoryId: i.categoryId || null,
+            description: i.description,
+            quantity: i.quantity,
+            unitCost: i.unitCost || 0,
+            poId: po.id,
+          },
+        }),
+      ));
+      return tx.purchaseOrder.findUnique({ where: { id: po.id }, include: { items: true } });
     });
   }
 
@@ -114,14 +127,28 @@ class PurchaseOrdersService {
     if (data.vendorId !== undefined) patch.vendorId = data.vendorId || null;
     if (data.notes !== undefined) patch.notes = data.notes;
     if (data.items) {
-      await db.purchaseOrderItem.deleteMany({ where: { poId: id } });
-      patch.items = { create: data.items.map((i: any) => ({
-        categoryId: i.categoryId || null,
-        description: i.description,
-        quantity: i.quantity,
-        unitCost: i.unitCost || 0,
-      })) };
-      patch.totalCost = data.items.reduce((s: number, i: any) => s + (i.unitCost || 0) * (i.quantity || 0), 0);
+      // Flat transaction: delete-all + re-create each child individually so each
+      // operation goes through the Prisma extension (nested writes bypass it).
+      const recomputedTotal = data.items.reduce((s: number, i: any) => s + (i.unitCost || 0) * (i.quantity || 0), 0);
+      return db.$transaction(async (tx: any) => {
+        await tx.purchaseOrderItem.deleteMany({ where: { poId: id } });
+        await tx.purchaseOrder.update({
+          where: { id },
+          data: { ...patch, totalCost: recomputedTotal },
+        });
+        await Promise.all(data.items.map((i: any) =>
+          tx.purchaseOrderItem.create({
+            data: {
+              categoryId: i.categoryId || null,
+              description: i.description,
+              quantity: i.quantity,
+              unitCost: i.unitCost || 0,
+              poId: id,
+            },
+          }),
+        ));
+        return tx.purchaseOrder.findUnique({ where: { id }, include: { items: true } });
+      });
     }
     return db.purchaseOrder.update({ where: { id }, data: patch, include: { items: true } });
   }
@@ -161,8 +188,12 @@ class PurchaseOrdersService {
       if (toCreate <= 0) continue;
       for (let i = 0; i < toCreate; i++) {
         const idemKey = `po:${id}:item:${item.id}:${item.receivedQty + i + 1}`;
+        // IdempotencyKey's primary key gained tenantId in the shared-table move, so the
+        // compound input is now tenantId_scope_key. The old `scope_key` name threw, the
+        // .catch() swallowed it, `seen` was always null — and the guard that stops a
+        // retried receive from creating duplicate assets quietly did nothing.
         const seen = await db.idempotencyKey.findUnique({
-          where: { scope_key: { scope: 'po-receive', key: idemKey } },
+          where: { tenantId_scope_key: { tenantId: this.ctx.tenantId!, scope: 'po-receive', key: idemKey } },
         }).catch(() => null);
         if (seen) continue;
 
@@ -178,7 +209,7 @@ class PurchaseOrdersService {
           { skipBillingCheck: true },
         );
         await db.asset.update({ where: { id: a.id }, data: { purchaseOrderId: id } });
-        await db.idempotencyKey.create({ data: { scope: 'po-receive', key: idemKey } }).catch(() => {});
+        await db.idempotencyKey.create({ data: { tenantId: this.ctx.tenantId!, scope: 'po-receive', key: idemKey } }).catch(() => {});
         // Update receivedQty after each successful item so a crash mid-loop
         // leaves the PO in a consistent, replayable state (PARTIAL, not lost).
         await db.purchaseOrderItem.update({

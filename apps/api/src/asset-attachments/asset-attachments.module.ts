@@ -53,7 +53,7 @@ class AssetAttachmentsService {
   }
 
   async create(data: { assetId: string; filename: string; url: string; size: number; mimeType: string; kind: string; uploadedById: string }) {
-    return this.ctx.prisma().assetAttachment.create({ data });
+    return this.ctx.prisma().assetAttachment.create({ data: { ...data, tenantId: this.ctx.tenantId! } });
   }
 
   async remove(id: string) {

@@ -85,6 +85,7 @@ class TicketsService {
     const restricted = openedByRole === 'EMPLOYEE';
     const ticket = await db.serviceTicket.create({
       data: {
+        tenantId: this.ctx.tenantId!,
         ticketNumber,
         assetId: data.assetId,
         title: data.title,
@@ -103,7 +104,7 @@ class TicketsService {
         await db.asset.update({ where: { id: data.assetId }, data: { status: 'OUT_OF_SERVICE' } });
       }
     }
-    await writeAuditEntry(db, { assetId: data.assetId, action: 'TICKET_OPENED', performedById: openedById, detail: { ticketId: ticket.id, title: ticket.title } });
+    await writeAuditEntry(db, { tenantId: this.ctx.tenantId!, assetId: data.assetId, action: 'TICKET_OPENED', performedById: openedById, detail: { ticketId: ticket.id, title: ticket.title } });
     // notify assignee if any
     const emails = [];
     if (ticket.assignedToId) {
@@ -190,7 +191,7 @@ class TicketsService {
         }
       }
     }
-    await writeAuditEntry(db, { assetId: before.assetId, action: 'TICKET_UPDATED', performedById, detail: { ticketId: id, status: t.status } });
+    await writeAuditEntry(db, { tenantId: this.ctx.tenantId!, assetId: before.assetId, action: 'TICKET_UPDATED', performedById, detail: { ticketId: id, status: t.status } });
     if (data.status && data.status !== before.status) {
       this.events.emit('ticket.status_changed', {
         id, ticketNumber: t.ticketNumber, status: t.status, prevStatus: before.status,

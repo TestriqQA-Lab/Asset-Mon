@@ -48,6 +48,7 @@ export class CategoriesService {
   create(data: CategoryWrite & { name: string }) {
     return this.ctx.prisma().category.create({
       data: {
+        tenantId: this.ctx.tenantId!, 
         name: data.name,
         description: data.description,
         customFields: data.customFields || [],

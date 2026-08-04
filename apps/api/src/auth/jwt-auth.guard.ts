@@ -2,14 +2,14 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Unauthor
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
-import { TenantPrismaPool } from '../tenancy/tenant-prisma.pool';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwt: JwtService,
     private readonly catalog: CatalogPrismaService,
-    private readonly pool: TenantPrismaPool,
+    private readonly globalPrisma: GlobalPrismaService,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -41,9 +41,9 @@ export class JwtAuthGuard implements CanActivate {
     // server-side counter. Bumping `User.tokenVersion` (logout-all, role change,
     // password reset) immediately invalidates every access token in circulation.
     if (typeof payload.tv === 'number') {
-      const db = this.pool.get(tenant.dbName);
-      const u = await db.user.findUnique({ where: { id: payload.sub }, select: { tokenVersion: true, active: true } }).catch(() => null);
-      if (!u || !u.active) throw new UnauthorizedException('Session expired');
+      const db = this.globalPrisma;
+      const u = await db.user.findUnique({ where: { id: payload.sub }, select: { tenantId: true, tokenVersion: true, active: true } }).catch(() => null);
+      if (!u || !u.active || u.tenantId !== tenant.id) throw new UnauthorizedException('Session expired');
       if (u.tokenVersion !== payload.tv) throw new UnauthorizedException('Session expired');
     }
 
@@ -56,10 +56,10 @@ export class JwtAuthGuard implements CanActivate {
     if (!slug) throw new UnauthorizedException('X-Tenant-Slug header required for API key auth');
     const tenant = await this.catalog.tenant.findUnique({ where: { slug } });
     if (!tenant || tenant.status !== 'ACTIVE') throw new UnauthorizedException('Workspace not active');
-    const db = this.pool.get(tenant.dbName);
+    const db = this.globalPrisma;
     const hash = crypto.createHash('sha256').update(apiKey).digest('hex');
-    const key = await db.apiKey.findUnique({ where: { hash } });
-    if (!key) throw new UnauthorizedException('Invalid API key');
+    const key = await db.apiKey.findUnique({ where: { tenantId_hash: { tenantId: tenant.id, hash } } });
+    if (!key || key.tenantId !== tenant.id) throw new UnauthorizedException('Invalid API key');
     if (key.revokedAt) throw new UnauthorizedException('API key revoked');
     if (key.expiresAt && key.expiresAt < new Date()) throw new UnauthorizedException('API key expired');
 

@@ -49,12 +49,12 @@ export class AssetsService {
     if (q.q) {
       const term = q.q.trim();
       where.OR = [
-        { name: { contains: term, mode: 'insensitive' } },
-        { assetTag: { contains: term, mode: 'insensitive' } },
-        { serialNumber: { contains: term, mode: 'insensitive' } },
+        { name: { contains: term } },
+        { assetTag: { contains: term } },
+        { serialNumber: { contains: term } },
         // `notes` is hidden from the EMPLOYEE view (5B); excluding it from their search
         // prevents a blind yes/no oracle on notes content.
-        ...(this.ctx.role === 'EMPLOYEE' ? [] : [{ notes: { contains: term, mode: 'insensitive' } }]),
+        ...(this.ctx.role === 'EMPLOYEE' ? [] : [{ notes: { contains: term } }]),
       ];
     }
     const page = Math.max(1, q.page || 1);
@@ -195,6 +195,7 @@ export class AssetsService {
     const assetTag = data.assetTag || (await this.nextAssetTag());
     const created = await db.asset.create({
       data: {
+        tenantId: this.ctx.tenantId!, 
         assetTag,
         name: data.name,
         serialNumber: data.serialNumber || null,
@@ -220,7 +221,7 @@ export class AssetsService {
         statusDefId: data.statusDefId || null,
       },
     });
-    await writeAuditEntry(db, { assetId: created.id, action: 'CREATED', performedById, detail: { name: created.name }, impersonatedBy: this.ctx.impersonatedBy ?? null });
+    await writeAuditEntry(db, { tenantId: this.ctx.tenantId!, assetId: created.id, action: 'CREATED', performedById, detail: { name: created.name }, impersonatedBy: this.ctx.impersonatedBy ?? null });
     this.events.emit('asset.created', { id: created.id, assetTag: created.assetTag, name: created.name }).catch(() => {});
     return created;
   }
@@ -239,7 +240,7 @@ export class AssetsService {
     }
     if (data.statusDefId !== undefined) patch.statusDefId = data.statusDefId || null;
     const updated = await db.asset.update({ where: { id }, data: patch });
-    await writeAuditEntry(db, { assetId: id, action: 'UPDATED', performedById, detail: this.diff(before, updated), impersonatedBy: this.ctx.impersonatedBy ?? null });
+    await writeAuditEntry(db, { tenantId: this.ctx.tenantId!, assetId: id, action: 'UPDATED', performedById, detail: this.diff(before, updated), impersonatedBy: this.ctx.impersonatedBy ?? null });
     this.events.emit('asset.updated', { id: updated.id, assetTag: updated.assetTag, status: updated.status }).catch(() => {});
     return updated;
   }
@@ -248,7 +249,7 @@ export class AssetsService {
     const db = this.ctx.prisma();
     const existing = await db.asset.findUnique({ where: { id }, select: { id: true, assetTag: true, name: true } });
     if (!existing) throw new NotFoundException('Asset not found');
-    await writeAuditEntry(db, { assetId: id, action: 'DELETED', performedById, detail: { assetTag: existing.assetTag, name: existing.name }, impersonatedBy: this.ctx.impersonatedBy ?? null });
+    await writeAuditEntry(db, { tenantId: this.ctx.tenantId!, assetId: id, action: 'DELETED', performedById, detail: { assetTag: existing.assetTag, name: existing.name }, impersonatedBy: this.ctx.impersonatedBy ?? null });
     // Detach all audit logs from the asset so they survive the delete (cascade would remove them).
     await db.auditLog.updateMany({ where: { assetId: id }, data: { assetId: null } });
     const deleted = await db.asset.delete({ where: { id } });
@@ -276,7 +277,7 @@ export class AssetsService {
     const r = await db.asset.updateMany({ where: { id: { in: ok } }, data });
     const imp = this.ctx.impersonatedBy ?? null;
     for (const id of ok) {
-      await writeAuditEntry(db, { assetId: id, action: 'BULK_UPDATED', performedById, detail: { patch }, impersonatedBy: imp }).catch(() => {});
+      await writeAuditEntry(db, { tenantId: this.ctx.tenantId!, assetId: id, action: 'BULK_UPDATED', performedById, detail: { patch }, impersonatedBy: imp }).catch(() => {});
     }
     this.events.emit('asset.bulk_updated', { ids: ok, patch }).catch(() => {});
     return { updated: r.count };
@@ -288,7 +289,7 @@ export class AssetsService {
     if (ids.length > 500) throw new BadRequestException('Too many ids (max 500)');
     const imp = this.ctx.impersonatedBy ?? null;
     for (const id of ids) {
-      await writeAuditEntry(db, { assetId: id, action: 'DELETED', performedById, detail: { bulk: true }, impersonatedBy: imp }).catch(() => {});
+      await writeAuditEntry(db, { tenantId: this.ctx.tenantId!, assetId: id, action: 'DELETED', performedById, detail: { bulk: true }, impersonatedBy: imp }).catch(() => {});
     }
     await db.auditLog.updateMany({ where: { assetId: { in: ids } }, data: { assetId: null } });
     const r = await db.asset.deleteMany({ where: { id: { in: ids } } });

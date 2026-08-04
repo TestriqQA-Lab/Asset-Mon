@@ -12,7 +12,7 @@ export class LocationsService {
     return this.ctx.prisma().location.findMany({ orderBy: { name: 'asc' }, include: { children: true } });
   }
   create(data: { name: string; type: any; parentId?: string | null }) {
-    return this.ctx.prisma().location.create({ data });
+    return this.ctx.prisma().location.create({ data: { ...data, tenantId: this.ctx.tenantId! } });
   }
   update(id: string, data: { name?: string; type?: any; parentId?: string | null }) {
     return this.ctx.prisma().location.update({ where: { id }, data });

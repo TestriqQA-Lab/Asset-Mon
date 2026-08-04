@@ -9,7 +9,7 @@ export class DepartmentsService {
     return this.ctx.prisma().department.findMany({ orderBy: { name: 'asc' } });
   }
   create(data: { name: string; costCenter?: string }) {
-    return this.ctx.prisma().department.create({ data });
+    return this.ctx.prisma().department.create({ data: { ...data, tenantId: this.ctx.tenantId! } });
   }
   update(id: string, data: { name?: string; costCenter?: string }) {
     return this.ctx.prisma().department.update({ where: { id }, data });

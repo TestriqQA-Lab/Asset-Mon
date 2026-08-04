@@ -9,7 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
-import { TenantPrismaPool } from '../tenancy/tenant-prisma.pool';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { TenantProvisioningService } from '../tenancy/tenant-provisioning.service';
 import { PlatformAuditService } from './platform-audit.service';
 import { assertSuperAdmin } from './platform-mfa.util';
@@ -26,7 +26,7 @@ export class PlatformTenantsService {
 
   constructor(
     private readonly catalog: CatalogPrismaService,
-    private readonly pool: TenantPrismaPool,
+    private readonly globalPrisma: GlobalPrismaService,
     private readonly provisioning: TenantProvisioningService,
     private readonly jwt: JwtService,
     private readonly audit: PlatformAuditService,
@@ -39,8 +39,8 @@ export class PlatformTenantsService {
     if (filter.plan && filter.plan !== 'all') where.plan = filter.plan;
     if (filter.search) {
       where.OR = [
-        { name: { contains: filter.search, mode: 'insensitive' } },
-        { slug: { contains: filter.search, mode: 'insensitive' } },
+        { name: { contains: filter.search } },
+        { slug: { contains: filter.search } },
       ];
     }
     const tenants = await this.catalog.tenant.findMany({
@@ -58,10 +58,10 @@ export class PlatformTenantsService {
       let userCount = 0, assetCount = 0;
       try {
         if (t.status === 'ACTIVE' || t.status === 'PROVISIONING') {
-          const db = this.pool.get(t.dbName);
+          const db = this.globalPrisma;
           [userCount, assetCount] = await Promise.all([
-            db.user.count(),
-            db.asset.count(),
+            db.user.count({ where: { tenantId: t.id } }),
+            db.asset.count({ where: { tenantId: t.id } }),
           ]);
         }
       } catch (e: any) {
@@ -97,16 +97,20 @@ export class PlatformTenantsService {
     // can investigate. Only skip when the DB itself is gone (DELETED).
     if (t.status !== 'DELETED') {
       try {
-        const db = this.pool.get(t.dbName);
-        const [u, a, tk, lastAudit] = await Promise.all([
-          db.user.count(),
-          db.asset.count(),
-          db.serviceTicket.count().catch(() => 0),
-          db.auditLog.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true } }).catch(() => null),
+        const db = this.globalPrisma;
+        const [u, a, ti, lastAudit] = await Promise.all([
+          db.user.count({ where: { tenantId: t.id } }),
+          db.asset.count({ where: { tenantId: t.id } }),
+          db.serviceTicket.count({ where: { tenantId: t.id } }).catch(() => 0),
+          db.auditLog.findFirst({
+            where: { tenantId: t.id },
+            orderBy: { createdAt: 'desc' },
+            select: { createdAt: true },
+          }).catch(() => null),
         ]);
-        stats = { userCount: u, assetCount: a, ticketCount: tk, lastActivityAt: lastAudit?.createdAt || null };
+        stats = { userCount: u, assetCount: a, ticketCount: ti, lastActivityAt: lastAudit?.createdAt || null };
         admins = await db.user.findMany({
-          where: { role: 'ADMIN' },
+          where: { tenantId: t.id, role: 'ADMIN' },
           select: { id: true, email: true, firstName: true, lastName: true, active: true, totpEnabled: true, createdAt: true },
         }).catch(() => []);
       } catch (e: any) {
@@ -247,14 +251,16 @@ export class PlatformTenantsService {
     if (t.status === 'DELETED') {
       throw new ConflictException('Tenant has been deleted');
     }
-    const db = this.pool.get(t.dbName);
-    return db.user.findMany({
+    const db = this.globalPrisma;
+    const users = await db.user.findMany({
+      where: { tenantId: t.id },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true, email: true, firstName: true, lastName: true, role: true,
         active: true, totpEnabled: true, mfaMethod: true, lockedUntil: true, createdAt: true,
       },
     });
+    return users;
   }
 
   async resetTenantUserPassword(actor: { id: string; email: string; role?: string }, tenantId: string, userId: string, req?: any) {
@@ -262,9 +268,9 @@ export class PlatformTenantsService {
     const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
-    const db = this.pool.get(t.dbName);
+    const db = this.globalPrisma;
     const u = await db.user.findUnique({ where: { id: userId } });
-    if (!u) throw new NotFoundException('User not found');
+    if (!u || u.tenantId !== t.id) throw new NotFoundException('User not found');
     // Temporary password: high-entropy and conforms to the public policy
     // (≥10 chars, includes letter + digit + symbol) so the new owner can hold
     // it until they self-rotate without immediately hitting policy errors.
@@ -299,9 +305,9 @@ export class PlatformTenantsService {
     const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
-    const db = this.pool.get(t.dbName);
+    const db = this.globalPrisma;
     const u = await db.user.findUnique({ where: { id: userId } });
-    if (!u) throw new NotFoundException('User not found');
+    if (!u || u.tenantId !== t.id) throw new NotFoundException('User not found');
     await db.$transaction(async (tx: any) => {
       await tx.tenantBackupCode.deleteMany({ where: { userId } });
       await tx.tenantMfaPending.deleteMany({ where: { userId } });
@@ -321,9 +327,9 @@ export class PlatformTenantsService {
     const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
-    const db = this.pool.get(t.dbName);
+    const db = this.globalPrisma;
     const u = await db.user.findUnique({ where: { id: userId } });
-    if (!u) throw new NotFoundException('User not found');
+    if (!u || u.tenantId !== t.id) throw new NotFoundException('User not found');
     await db.user.update({ where: { id: userId }, data: { failedLoginCount: 0, lockedUntil: null } });
     await this.audit.record(actor, 'tenant.unlockUser',
       { type: 'tenantUser', id: userId },
@@ -369,9 +375,9 @@ export class PlatformTenantsService {
     const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
-    const db = this.pool.get(t.dbName);
+    const db = this.globalPrisma;
     const u = await db.user.findUnique({ where: { id: userId } });
-    if (!u || !u.active) throw new NotFoundException('User not found');
+    if (!u || !u.active || u.tenantId !== t.id) throw new NotFoundException('User not found');
 
     // Impersonation tokens are deliberately stand-alone access tokens:
     //   • no refresh token is issued, so the lifetime is hard-capped at IMPERSONATE_TTL
@@ -410,14 +416,14 @@ export class PlatformTenantsService {
 
     const active = await this.catalog.tenant.findMany({
       where: { status: 'ACTIVE' },
-      select: { dbName: true },
+      select: { id: true, dbName: true },
     });
 
     let users = 0, assets = 0, errors = 0;
     await Promise.all(active.map(async (t) => {
       try {
-        const db = this.pool.get(t.dbName);
-        const [u, a] = await Promise.all([db.user.count(), db.asset.count()]);
+        const db = this.globalPrisma;
+        const [u, a] = await Promise.all([db.user.count({ where: { tenantId: t.id } }), db.asset.count({ where: { tenantId: t.id } })]);
         users += u; assets += a;
       } catch { errors++; }
     }));

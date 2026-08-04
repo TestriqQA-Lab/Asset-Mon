@@ -1,22 +1,20 @@
 import { Injectable, Scope, Inject } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import { Request } from 'express';
-import { PrismaClient } from '@assetmon/db-tenant';
-import { TenantPrismaPool } from './tenant-prisma.pool';
+import { GlobalPrismaService } from './global-prisma.service';
+import type { ScopedPrismaClient } from './scoped-client';
 
 @Injectable({ scope: Scope.REQUEST })
 export class TenantContextService {
+  private client: ScopedPrismaClient | null = null;
+
   constructor(
     @Inject(REQUEST) private readonly req: Request & { tenant?: any; user?: any },
-    private readonly pool: TenantPrismaPool,
+    private readonly globalPrisma: GlobalPrismaService,
   ) {}
 
   get tenantId(): string | undefined {
     return this.req.tenant?.id;
-  }
-
-  get tenantDbName(): string | undefined {
-    return this.req.tenant?.dbName;
   }
 
   get userId(): string | undefined {
@@ -38,8 +36,14 @@ export class TenantContextService {
     return typeof v === 'string' && v.length > 0 ? v : undefined;
   }
 
-  prisma(): PrismaClient {
-    if (!this.tenantDbName) throw new Error('No tenant context');
-    return this.pool.get(this.tenantDbName);
+  /**
+   * The tenant-scoped client for this request. Memoised per request because
+   * `$extends` builds a new client each call.
+   */
+  prisma(): ScopedPrismaClient {
+    const tid = this.tenantId;
+    if (!tid) throw new Error('No tenant context');
+    if (!this.client) this.client = this.globalPrisma.forTenant(tid);
+    return this.client;
   }
 }

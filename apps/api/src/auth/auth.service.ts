@@ -4,8 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { authenticator } from 'otplib';
 import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
-import { TenantProvisioningService } from '../tenancy/tenant-provisioning.service';
-import { TenantPrismaPool } from '../tenancy/tenant-prisma.pool';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { SignupDto, LoginDto, AcceptInviteDto } from './dto';
 import { decryptSecret } from '../common/crypto';
 import { WorkspaceInviteService } from '../workspace-invite/workspace-invite.service';
@@ -36,8 +35,7 @@ export class AuthService {
 
   constructor(
     private readonly catalog: CatalogPrismaService,
-    private readonly provisioning: TenantProvisioningService,
-    private readonly pool: TenantPrismaPool,
+    private readonly globalPrisma: GlobalPrismaService,
     private readonly jwt: JwtService,
     private readonly invites: WorkspaceInviteService,
     private readonly mfaTicket: MfaTicketService,
@@ -62,18 +60,18 @@ export class AuthService {
     }
 
     const email = dto.email.toLowerCase();
-    const tenantDb = this.pool.get(tenant.dbName);
+    const tenantDb = this.globalPrisma;
 
     const planKey: PlanKey = (PLANS[tenant.plan as PlanKey] ? tenant.plan : 'business') as PlanKey;
     const plan = PLANS[planKey];
     if (plan.limits.users != null) {
-      const userCount = await tenantDb.user.count();
+      const userCount = await tenantDb.user.count({ where: { tenantId: tenant.id } });
       if (userCount >= plan.limits.users) {
         throw new BadRequestException(`This workspace has reached its plan limit (${plan.limits.users} users).`);
       }
     }
 
-    const existing = await tenantDb.user.findUnique({ where: { email } });
+    const existing = await tenantDb.user.findUnique({ where: { tenantId_email: { tenantId: tenant.id, email } } });
     if (existing) {
       throw new BadRequestException('A user with this email already exists in this workspace');
     }
@@ -90,6 +88,7 @@ export class AuthService {
     try {
       user = await tenantDb.user.create({
         data: {
+          tenantId: tenant.id,
           email,
           passwordHash,
           firstName: dto.firstName,
@@ -105,63 +104,78 @@ export class AuthService {
     return this.issueTokens(tenant.id, tenant.slug, tenant.dbName, user.id, user.role, user.email, user.tokenVersion);
   }
 
+  /**
+   * Provision a workspace. Everything that defines an existing workspace — the
+   * Tenant row, its admin, the catalog mapping and the seed rows — is written in ONE
+   * transaction, so a failure leaves no trace.
+   *
+   * This used to be a sequence of independent writes with a `catalog.tenant.delete()`
+   * in the catch as compensation. That worked under database-per-tenant, where the
+   * tenant's rows lived in a database we dropped separately. Under shared tables the
+   * seeded User/Category/AssetStatusDef/AuditCounter rows reference their tenant by a
+   * plain `tenantId` column with no foreign key, so deleting the Tenant row orphaned
+   * them permanently — invisible rows, billable against nothing, impossible to reach.
+   */
   async signup(dto: SignupDto) {
-    const existing = await this.catalog.tenant.findUnique({ where: { slug: dto.slug } });
-    if (existing) throw new BadRequestException('Workspace slug is already taken');
-
+    const email = dto.email.toLowerCase();
     const dbName = `assetmon_t_${dto.slug.replace(/-/g, '_')}`;
     const trialEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    const tenant = await this.catalog.tenant.create({
-      data: {
-        slug: dto.slug, name: dto.workspaceName, dbName, status: 'PROVISIONING',
-        plan: 'business', subscriptionStatus: 'trialing', trialEndsAt: trialEnd,
-      },
-    });
 
-    // Extended rollback: cleans up any partially-provisioned state regardless of
-    // where the failure occurred.
+    // Hashing is deliberately done before opening the transaction — at cost 12 it
+    // takes long enough that holding a transaction across it would be wasteful.
+    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_COST);
+
+    let tenant: any, user: any;
     try {
-      await this.provisioning.createDatabase(dbName);
-      await this.provisioning.runMigrations(dbName);
-
-      const tenantDb = this.pool.get(dbName);
-      await this.seedDefaults(tenantDb);
-      const passwordHash = await bcrypt.hash(dto.password, BCRYPT_COST);
-      const user = await tenantDb.user.create({
-        data: {
-          email: dto.email.toLowerCase(),
-          passwordHash,
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          role: 'ADMIN',
-          passwordChangedAt: new Date(),
-        },
-      });
-
-      await this.catalog.tenantUser.create({
-        data: { email: dto.email.toLowerCase(), tenantId: tenant.id },
-      });
-      await this.catalog.tenant.update({ where: { id: tenant.id }, data: { status: 'ACTIVE' } });
-
-      try { await this.seedDemoData(tenantDb, user.id); } catch (e: any) { this.log.warn(`Demo seed failed: ${e.message}`); }
-
-      return this.issueTokens(tenant.id, tenant.slug, dbName, user.id, user.role, user.email, user.tokenVersion);
+      ({ tenant, user } = await this.globalPrisma.$transaction(async (tx) => {
+        const t = await tx.tenant.create({
+          data: {
+            slug: dto.slug, name: dto.workspaceName, dbName, status: 'ACTIVE',
+            plan: 'business', subscriptionStatus: 'trialing', trialEndsAt: trialEnd,
+          },
+        });
+        await this.seedDefaults(tx, t.id);
+        const u = await tx.user.create({
+          data: {
+            tenantId: t.id,
+            email,
+            passwordHash,
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            role: 'ADMIN',
+            passwordChangedAt: new Date(),
+          },
+        });
+        await tx.tenantUser.create({ data: { email, tenantId: t.id } });
+        return { tenant: t, user: u };
+      }));
     } catch (err: any) {
+      // The slug is unique, so a racing signup surfaces here rather than through the
+      // old check-then-create, which could interleave between the two statements.
+      if (err?.code === 'P2002') throw new BadRequestException('Workspace slug is already taken');
       this.log.error(`Provisioning failed: ${err.message}`);
-      await this.catalog.tenant.delete({ where: { id: tenant.id } }).catch(() => {});
-      await this.provisioning.dropDatabase(dbName).catch(() => {});
       throw new BadRequestException(`Failed to provision workspace: ${err.message}`);
     }
+
+    // Demo content is a nicety, not part of what makes the workspace valid — it stays
+    // outside the transaction so a failure here cannot undo a good signup.
+    try {
+      await this.seedDemoData(this.globalPrisma, tenant.id, user.id);
+    } catch (e: any) {
+      this.log.warn(`Demo seed failed: ${e.message}`);
+    }
+
+    return this.issueTokens(tenant.id, tenant.slug, dbName, user.id, user.role, user.email, user.tokenVersion);
   }
 
-  private async seedDemoData(db: any, _adminId: string) {
-    const eng = await db.department.create({ data: { name: 'Engineering', costCenter: 'E-100' } });
-    const ops = await db.department.create({ data: { name: 'Operations', costCenter: 'O-200' } });
-    const hq = await db.location.create({ data: { name: 'HQ', type: 'BUILDING' } });
-    const floor2 = await db.location.create({ data: { name: 'Floor 2', type: 'FLOOR', parentId: hq.id } });
-    const apple = await db.vendor.create({ data: { name: 'Apple Inc', email: 'sales@apple.com' } });
-    const dell = await db.vendor.create({ data: { name: 'Dell Technologies', email: 'sales@dell.com' } });
-    const cats = await db.category.findMany();
+  private async seedDemoData(db: any, tenantId: string, _adminId: string) {
+    const eng = await db.department.create({ data: { tenantId, name: 'Engineering', costCenter: 'E-100' } });
+    const ops = await db.department.create({ data: { tenantId, name: 'Operations', costCenter: 'O-200' } });
+    const hq = await db.location.create({ data: { tenantId, name: 'HQ', type: 'BUILDING' } });
+    const floor2 = await db.location.create({ data: { tenantId, name: 'Floor 2', type: 'FLOOR', parentId: hq.id } });
+    const apple = await db.vendor.create({ data: { tenantId, name: 'Apple Inc', email: 'sales@apple.com' } });
+    const dell = await db.vendor.create({ data: { tenantId, name: 'Dell Technologies', email: 'sales@dell.com' } });
+    const cats = await db.category.findMany({ where: { tenantId } });
     const byName = (n: string) => cats.find((c: any) => c.name === n);
 
     const seed = [
@@ -175,9 +189,10 @@ export class AuthService {
 
     for (const s of seed) {
       const cat = byName(s.cat) || cats[0];
-      const tag = `AM-${String((await db.asset.count()) + 1).padStart(5, '0')}`;
+      const tag = `AM-${String((await db.asset.count({ where: { tenantId } })) + 1).padStart(5, '0')}`;
       await db.asset.create({
         data: {
+          tenantId,
           assetTag: tag, name: s.name, status: 'AVAILABLE',
           categoryId: cat.id, locationId: s.loc, departmentId: s.dept, vendorId: s.vendor,
           serialNumber: s.serial, purchaseCost: s.cost,
@@ -225,8 +240,8 @@ export class AuthService {
       throw new UnauthorizedException('Workspace not active');
     }
 
-    const tenantDb = this.pool.get(chosen.tenant.dbName);
-    const user = await tenantDb.user.findUnique({ where: { email } });
+    const tenantDb = this.globalPrisma;
+    const user = await tenantDb.user.findUnique({ where: { tenantId_email: { tenantId: chosen.tenant.id, email } } });
     if (!user || !user.active) {
       await bcrypt.compare(dto.password || '', DUMMY_HASH);
       throw new UnauthorizedException('Invalid credentials');
@@ -340,7 +355,7 @@ export class AuthService {
 
     const tenant = await this.catalog.tenant.findUnique({ where: { id: payload.tid } });
     if (!tenant || tenant.status !== 'ACTIVE') throw new UnauthorizedException();
-    const db = this.pool.get(tenant.dbName);
+    const db = this.globalPrisma;
 
     // Persisted reuse check. If the JTI was already consumed:
     //   - via /auth/logout: the legit user clicked sign-out; refuse silently without
@@ -368,6 +383,7 @@ export class AuthService {
 
     await db.refreshTokenJti.create({
       data: {
+        tenantId: tenant.id,
         jti: payload.jti,
         userId: payload.sub,
         reason: 'refresh',
@@ -385,11 +401,12 @@ export class AuthService {
       if (payload.jti && payload.tid) {
         const tenant = await this.catalog.tenant.findUnique({ where: { id: payload.tid } });
         if (tenant) {
-          const db = this.pool.get(tenant.dbName);
+          const db = this.globalPrisma;
           await db.refreshTokenJti.upsert({
             where: { jti: payload.jti },
             update: { reason: 'logout' },
             create: {
+              tenantId: payload.tid,
               jti: payload.jti,
               userId: payload.sub,
               reason: 'logout',
@@ -405,7 +422,7 @@ export class AuthService {
   async logoutAll(tid: string, sub: string) {
     const tenant = await this.catalog.tenant.findUnique({ where: { id: tid } });
     if (!tenant) return { ok: true };
-    const db = this.pool.get(tenant.dbName);
+    const db = this.globalPrisma;
     await db.user.update({ where: { id: sub }, data: { tokenVersion: { increment: 1 } } }).catch(() => {});
     return { ok: true };
   }
@@ -421,6 +438,7 @@ export class AuthService {
     const nonce = crypto.randomUUID();
     await tenantDb.tenantMfaPending.create({
       data: {
+        tenantId: tenant.id,
         userId: user.id, nonce, stage: 'EMAIL',
         tvSnapshot: user.tokenVersion, pwdAtSnapshot: user.passwordChangedAt ?? null,
         emailOtpHash: hashCode(code), emailTarget: user.email,
@@ -434,17 +452,17 @@ export class AuthService {
       { scope: 'tenant', sub: user.id, tid: tenant.id, db: tenant.dbName, nonce, tv: user.tokenVersion },
       600,
     );
-    void this.sendTenantLoginEmail(tenantDb, user.email, code); // fire-and-forget
+    void this.sendTenantLoginEmail(tenantDb, tenant.id, user.email, code); // fire-and-forget
     const dev = (process.env.NODE_ENV || 'development') !== 'production';
     return { code: 'EMAIL_OTP_REQUIRED', ticket, resendIn: 60, maskedEmail: maskEmail(user.email), ...(dev ? { devCode: code } : {}) };
   }
 
-  private async sendTenantLoginEmail(tenantDb: any, to: string, code: string) {
+  private async sendTenantLoginEmail(tenantDb: any, tenantId: string, to: string, code: string) {
     const subject = 'Your AssetMon sign-in code';
     const body = `Your AssetMon sign-in code is ${code}\n\nIt expires in 5 minutes. If this was not you, change your password.`;
     const res = await this.mailer.send(to, subject, body);
     // Reuse the tenant EmailLog, but NEVER store the code in the body.
-    await tenantDb.emailLog.create({ data: { toEmail: to, subject, body: '[sign-in code omitted]', sent: res.ok, error: res.ok ? null : (res as any).error || 'send failed' } }).catch(() => {});
+    await tenantDb.emailLog.create({ data: { tenantId, toEmail: to, subject, body: '[sign-in code omitted]', sent: res.ok, error: res.ok ? null : (res as any).error || 'send failed' } }).catch(() => {});
   }
 
   private sameInstant(a: Date | null, b: Date | null): boolean {
@@ -459,10 +477,23 @@ export class AuthService {
     throw new UnauthorizedException({ code: 'MFA_RESTART' });
   }
 
-  private async loadTenantChainTx(tx: any, nonce: string, expectStage: 'EMAIL' | 'TOTP'): Promise<any> {
-    const row = await tx.tenantMfaPending.findUnique({ where: { nonce } });
+  // `tx` here is the raw global client, not the tenant-scoped one, so every lookup
+  // names its tenant explicitly. `nonce` alone stopped being unique when the
+  // per-tenant databases were merged — it is now @@unique([tenantId, nonce]).
+  private async loadTenantChainTx(tx: any, tenantId: string, nonce: string, expectStage: 'EMAIL' | 'TOTP'): Promise<any> {
+    // Take the row lock BEFORE reading. Every caller reads an attempt counter and
+    // then writes it back, so without this two concurrent code submissions both read
+    // the same `chainAttempts`/`emailCodeAttempts` and both write value+1 — the
+    // brute-force ceiling silently doubles. Postgres SERIALIZABLE used to cover this;
+    // under MySQL an explicit X lock is the equivalent, and unlike MySQL's
+    // SERIALIZABLE it cannot deadlock on an S→X upgrade.
+    await tx.$queryRawUnsafe(
+      `SELECT \`id\` FROM \`TenantMfaPending\` WHERE \`tenantId\` = ? AND \`nonce\` = ? FOR UPDATE`,
+      tenantId, nonce,
+    );
+    const row = await tx.tenantMfaPending.findUnique({ where: { tenantId_nonce: { tenantId, nonce } } });
     if (!row || row.consumedAt || row.expiresAt < new Date()) return { fail: 'MFA_RESTART' };
-    const user = await tx.user.findUnique({ where: { id: row.userId } });
+    const user = await tx.user.findUnique({ where: { id: row.userId, tenantId } });
     if (!user || !user.active) return { fail: 'MFA_RESTART' };
     if (user.lockedUntil && user.lockedUntil > new Date()) return { fail: 'LOCKED' };
     if (row.tvSnapshot !== user.tokenVersion || !this.sameInstant(row.pwdAtSnapshot, user.passwordChangedAt)) return { fail: 'MFA_RESTART' };
@@ -475,8 +506,8 @@ export class AuthService {
     return { row, user };
   }
 
-  private async redeemTenantBackupCode(tx: any, userId: string, code: string, usedFor: 'EMAIL' | 'TOTP'): Promise<boolean> {
-    const candidates = await tx.tenantBackupCode.findMany({ where: { userId, usedAt: null, pepperVersion: currentPepperVersion() } });
+  private async redeemTenantBackupCode(tx: any, tenantId: string, userId: string, code: string, usedFor: 'EMAIL' | 'TOTP'): Promise<boolean> {
+    const candidates = await tx.tenantBackupCode.findMany({ where: { tenantId, userId, usedAt: null, pepperVersion: currentPepperVersion() } });
     for (const c of candidates) {
       if (verifyCode(code, c.codeHash)) {
         const res = await tx.tenantBackupCode.updateMany({ where: { id: c.id, usedAt: null }, data: { usedAt: new Date(), usedFor } });
@@ -492,9 +523,9 @@ export class AuthService {
     if (claims.scope !== 'tenant' || !claims.nonce || !claims.tid) throw new UnauthorizedException({ code: 'MFA_RESTART' });
     const tenant = await this.catalog.tenant.findUnique({ where: { id: claims.tid } });
     if (!tenant || tenant.status !== 'ACTIVE') throw new UnauthorizedException({ code: 'MFA_RESTART' });
-    const db = this.pool.get(tenant.dbName);
+    const db = this.globalPrisma;
     const outcome = await db.$transaction(async (tx: any) => {
-      const v = await this.loadTenantChainTx(tx, claims.nonce!, 'EMAIL');
+      const v = await this.loadTenantChainTx(tx, tenant.id, claims.nonce!, 'EMAIL');
       if (v.fail) return v;
       const { row, user } = v;
       const isNumeric = /^[0-9]{6}$/.test(normalizeCode(code));
@@ -512,7 +543,7 @@ export class AuthService {
         }
       } else {
         if (row.backupCodeUsed) return { fail: 'BACKUP_TWICE' };
-        usedBackup = await this.redeemTenantBackupCode(tx, user.id, code, 'EMAIL');
+        usedBackup = await this.redeemTenantBackupCode(tx, tenant.id, user.id, code, 'EMAIL');
         if (!usedBackup) {
           await tx.tenantMfaPending.update({ where: { id: row.id }, data: { chainAttempts: (row.chainAttempts ?? 0) + 1 } });
           await this.recordFailedLogin(tx, user);
@@ -522,14 +553,14 @@ export class AuthService {
       if (user.mfaMethod === 'EMAIL') {
         await tx.tenantMfaPending.update({ where: { id: row.id }, data: { consumedAt: new Date(), backupCodeUsed: row.backupCodeUsed || usedBackup } });
         await tx.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } });
-        await tx.tenantMfaPending.deleteMany({ where: { userId: user.id, consumedAt: null } });
+        await tx.tenantMfaPending.deleteMany({ where: { tenantId: tenant.id, userId: user.id, consumedAt: null } });
         return { tokens: this.issueTokens(tenant.id, tenant.slug, tenant.dbName, user.id, user.role, user.email, user.tokenVersion) };
       }
       const newNonce = crypto.randomUUID();
       await tx.tenantMfaPending.update({ where: { id: row.id }, data: { stage: 'TOTP', nonce: newNonce, emailOtpHash: null, backupCodeUsed: row.backupCodeUsed || usedBackup } });
       const next = this.mfaTicket.sign(MFA_TICKET_PURPOSE.PENDING, { scope: 'tenant', sub: user.id, tid: tenant.id, db: tenant.dbName, nonce: newNonce, tv: user.tokenVersion }, 600);
       return { next };
-    }, { isolationLevel: 'Serializable' });
+    }, { isolationLevel: 'ReadCommitted' });
     if (outcome.fail) this.throwChainFailure(outcome);
     if (outcome.tokens) return outcome.tokens;
     return { code: 'TOTP_REQUIRED', ticket: outcome.next };
@@ -541,9 +572,9 @@ export class AuthService {
     if (claims.scope !== 'tenant' || !claims.nonce || !claims.tid) throw new UnauthorizedException({ code: 'MFA_RESTART' });
     const tenant = await this.catalog.tenant.findUnique({ where: { id: claims.tid } });
     if (!tenant || tenant.status !== 'ACTIVE') throw new UnauthorizedException({ code: 'MFA_RESTART' });
-    const db = this.pool.get(tenant.dbName);
+    const db = this.globalPrisma;
     const outcome = await db.$transaction(async (tx: any) => {
-      const v = await this.loadTenantChainTx(tx, claims.nonce!, 'TOTP');
+      const v = await this.loadTenantChainTx(tx, tenant.id, claims.nonce!, 'TOTP');
       if (v.fail) return v;
       const { row, user } = v;
       const isNumeric = /^[0-9]{6}$/.test(normalizeCode(code));
@@ -565,7 +596,7 @@ export class AuthService {
         }
       } else {
         if (row.backupCodeUsed) return { fail: 'BACKUP_TWICE' };
-        usedBackup = await this.redeemTenantBackupCode(tx, user.id, code, 'TOTP');
+        usedBackup = await this.redeemTenantBackupCode(tx, tenant.id, user.id, code, 'TOTP');
         if (!usedBackup) {
           await tx.tenantMfaPending.update({ where: { id: row.id }, data: { chainAttempts: (row.chainAttempts ?? 0) + 1 } });
           await this.recordFailedLogin(tx, user);
@@ -574,14 +605,14 @@ export class AuthService {
       }
       await tx.tenantMfaPending.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
       await tx.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null, ...(acceptedStep != null ? { lastTotpStep: acceptedStep } : {}) } });
-      await tx.tenantMfaPending.deleteMany({ where: { userId: user.id, consumedAt: null } });
+      await tx.tenantMfaPending.deleteMany({ where: { tenantId: tenant.id, userId: user.id, consumedAt: null } });
       return { tokens: this.issueTokens(tenant.id, tenant.slug, tenant.dbName, user.id, user.role, user.email, user.tokenVersion) };
-    }, { isolationLevel: 'Serializable' });
+    }, { isolationLevel: 'ReadCommitted' });
     if (outcome.fail) this.throwChainFailure(outcome);
     return outcome.tokens;
   }
 
-  private async seedDefaults(db: any) {
+  private async seedDefaults(db: any, tenantId: string) {
     const cats = [
       { name: 'Laptop', customFields: [{ name: 'RAM_GB', type: 'number' }, { name: 'OS', type: 'text' }] },
       { name: 'Monitor', customFields: [{ name: 'Size_inches', type: 'number' }, { name: 'Resolution', type: 'text' }] },
@@ -589,7 +620,7 @@ export class AuthService {
       { name: 'Peripheral', customFields: [] },
       { name: 'Furniture', customFields: [] },
     ];
-    for (const c of cats) await db.category.create({ data: c });
+    for (const c of cats) await db.category.create({ data: { ...c, tenantId } });
 
     const SYSTEM_STATUSES = ['PENDING', 'AVAILABLE', 'ASSIGNED', 'OUT_OF_SERVICE', 'OUT_FOR_REPAIR', 'LOST_STOLEN', 'ARCHIVED'] as const;
     const COLOR: Record<string, string> = {
@@ -600,9 +631,18 @@ export class AuthService {
       const s = SYSTEM_STATUSES[i];
       const label = LABEL_OVERRIDE[s] || s.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
       await db.assetStatusDef.create({
-        data: { key: s, label, color: COLOR[s], mapsTo: s, isSystem: true, order: i },
+        data: { key: s, label, color: COLOR[s], mapsTo: s, isSystem: true, order: i, tenantId },
       }).catch(() => {});
     }
+
+    // Genesis row for the tenant's audit chain. Deliberately NOT best-effort: every
+    // audited action takes a FOR UPDATE on this row, so a workspace provisioned
+    // without one cannot write audit entries at all. Failing here aborts signup and
+    // triggers the caller's rollback, which is far better than a live workspace that
+    // throws on its first audited write.
+    await db.auditCounter.create({
+      data: { tenantId, lastSeq: 0, lastHash: null },
+    });
   }
 
   // Public so settings flows that bump tokenVersion (e.g. tenant MFA enable/

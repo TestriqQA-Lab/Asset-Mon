@@ -26,7 +26,7 @@ class SavedViewsService {
 
   create(userId: string, d: { name: string; kind: string; filters?: any; isShared?: boolean }) {
     return this.ctx.prisma().savedView.create({
-      data: { ownerId: userId, name: d.name, kind: d.kind, filters: d.filters || {}, isShared: !!d.isShared },
+      data: { tenantId: this.ctx.tenantId!, ownerId: userId, name: d.name, kind: d.kind, filters: d.filters || {}, isShared: !!d.isShared },
     });
   }
 

@@ -45,6 +45,7 @@ class ApiKeysService {
     const { token, prefix, hash } = genToken();
     const key = await this.ctx.prisma().apiKey.create({
       data: {
+        tenantId: this.ctx.tenantId!, 
         name, scope, role, prefix, hash,
         createdById: creatorId,
         expiresAt: expiresAt ? new Date(expiresAt) : null,
@@ -77,7 +78,7 @@ class WebhooksService {
   async create(url: string, events: string[], active: boolean) {
     await assertSafeOutboundUrl(url);
     const secret = `whsec_${crypto.randomBytes(24).toString('hex')}`;
-    return this.ctx.prisma().webhook.create({ data: { url, events, active, secret } });
+    return this.ctx.prisma().webhook.create({ data: { tenantId: this.ctx.tenantId!, url, events, active, secret } });
   }
 
   async update(id: string, patch: any) {

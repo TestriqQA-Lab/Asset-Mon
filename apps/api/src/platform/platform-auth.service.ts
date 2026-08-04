@@ -278,6 +278,13 @@ export class PlatformAuthService {
    * commits any counter writes before throwing outside the tx.
    */
   private async loadChain(tx: any, nonce: string, expectStage: 'EMAIL' | 'TOTP'): Promise<any> {
+    // X-lock the chain row before reading it — see the matching note in
+    // AuthService.loadTenantChainTx. The attempt counters below are read-then-written,
+    // so concurrent submissions would otherwise each get a fresh attempt budget.
+    await tx.$queryRawUnsafe(
+      `SELECT \`id\` FROM \`PlatformMfaPending\` WHERE \`nonce\` = ? FOR UPDATE`,
+      nonce,
+    );
     const row = await tx.platformMfaPending.findUnique({ where: { nonce } });
     if (!row || row.consumedAt || row.expiresAt < new Date()) return { fail: 'MFA_RESTART' };
     const user = await tx.platformUser.findUnique({ where: { id: row.userId } });
@@ -332,7 +339,7 @@ export class PlatformAuthService {
       });
       const next = this.mfaTicket.sign(MFA_TICKET_PURPOSE.PENDING, { scope: 'platform', sub: user.id, nonce: newNonce, tv: user.tokenVersion }, 600);
       return { next };
-    }, { isolationLevel: 'Serializable' });
+    }, { isolationLevel: 'ReadCommitted' });
     if (outcome.fail) this.throwChainFailure(outcome);
     return { code: 'TOTP_REQUIRED', ticket: outcome.next };
   }
@@ -382,7 +389,7 @@ export class PlatformAuthService {
       await tx.platformMfaPending.deleteMany({ where: { userId: user.id, consumedAt: null } });
       await this.audit.record({ id: user.id, email: user.email }, 'platform.auth.login', { type: 'platformUser', id: user.id }, { backupCodeUsed: row.backupCodeUsed || usedBackup }, req);
       return { tokens: this.issueTokens(user, Math.floor(Date.now() / 1000)) };
-    }, { isolationLevel: 'Serializable' });
+    }, { isolationLevel: 'ReadCommitted' });
     if (outcome.fail) this.throwChainFailure(outcome);
     return outcome.tokens;
   }

@@ -9,8 +9,8 @@ import { hashPlatformEntry } from './platform-audit-hash';
  * cannot quietly rewrite history without detection.
  *
  * The chain is per-actor-independent (i.e. a single global chain): writing
- * happens inside a serializable transaction so concurrent writers can't fork
- * the chain at the same `prevHash`.
+ * happens inside a ReadCommitted transaction with row-level FOR UPDATE locking
+ * so concurrent writers can't fork the chain at the same `prevHash`.
  */
 @Injectable()
 export class PlatformAuditService {
@@ -60,12 +60,23 @@ export class PlatformAuditService {
     try {
       await this.catalog.$transaction(
         async (tx) => {
-          const prev = await tx.platformAuditLog.findFirst({
-            orderBy: { seq: 'desc' },
-            select: { entryHash: true },
-          });
+          // Lock the counter row to strictly serialize concurrent appends.
+          const counters: any[] = await tx.$queryRawUnsafe(
+            `SELECT \`lastSeq\`, \`lastHash\` FROM \`PlatformAuditCounter\` WHERE \`id\` = 'platform' FOR UPDATE`,
+          );
+          
+          let lastSeq = 0;
+          let lastHash: string | null = null;
+          
+          if (counters.length === 0) {
+            throw new Error(`PlatformAuditCounter singleton is missing. It must be seeded at deploy time.`);
+          } else {
+            lastSeq = counters[0].lastSeq;
+            lastHash = counters[0].lastHash;
+          }
+
           const entryHash = this.hashEntry({
-            prevHash: prev?.entryHash ?? null,
+            prevHash: lastHash,
             actorId: actor.id,
             actorEmail: actor.email,
             action,
@@ -76,7 +87,8 @@ export class PlatformAuditService {
             userAgent: ua,
             createdAt,
           });
-          await tx.platformAuditLog.create({
+          
+          const newRow = await tx.platformAuditLog.create({
             data: {
               actorId: actor.id,
               actorEmail: actor.email,
@@ -86,13 +98,19 @@ export class PlatformAuditService {
               metadata,
               ipAddress: ip || null,
               userAgent: ua,
-              prevHash: prev?.entryHash ?? null,
+              prevHash: lastHash,
               entryHash,
               createdAt,
             },
           });
+
+          // Update the counter to reflect the newly appended row
+          await tx.platformAuditCounter.update({
+            where: { id: 'platform' },
+            data: { lastSeq: newRow.seq, lastHash: newRow.entryHash }
+          });
         },
-        { isolationLevel: 'Serializable' },
+        { isolationLevel: 'ReadCommitted' },
       );
       return;
     } catch {

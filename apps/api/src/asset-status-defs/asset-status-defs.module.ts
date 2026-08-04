@@ -56,7 +56,7 @@ export class AssetStatusDefsService {
     // those customisations on every list request.
     for (const d of SYSTEM_DEFS) {
       await db.assetStatusDef.upsert({
-        where: { key: d.key },
+        where: { tenantId_key: { tenantId: this.ctx.tenantId!, key: d.key } },
         update: {},
         create: { ...d } as any,
       }).catch(() => {});
@@ -68,7 +68,7 @@ export class AssetStatusDefsService {
     const key = d.key.trim().toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
     if (!key) throw new BadRequestException('Invalid key');
     return this.ctx.prisma().assetStatusDef.create({
-      data: { key, label: d.label, color: d.color || 'gray', mapsTo: d.mapsTo as any, order: d.order ?? 99 },
+      data: { tenantId: this.ctx.tenantId!, key, label: d.label, color: d.color || 'gray', mapsTo: d.mapsTo as any, order: d.order ?? 99 },
     });
   }
 

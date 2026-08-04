@@ -64,7 +64,38 @@ describe('audit hash versioning', () => {
     expect(a).toBe(b);
   });
 
+  test('v3 binds the entry to its tenant', () => {
+    const a = computeEntryHash({ ...base, assetId: null, hashVersion: 3, tenantId: 'tenant-a' });
+    const b = computeEntryHash({ ...base, assetId: null, hashVersion: 3, tenantId: 'tenant-b' });
+    expect(a).not.toBe(b);
+  });
+
+  test('v2 and v3 are distinct recipes even when the tenantId is absent', () => {
+    // The regression this guards: while v3 only added `tenantId` when it was truthy,
+    // a v3 row written without one hashed byte-for-byte identically to v2. Every entry
+    // then verified against the wrong recipe once the stored tenantId was fed back in.
+    const v2 = computeEntryHash({ ...base, assetId: null, hashVersion: 2 });
+    const v3NoTenant = computeEntryHash({ ...base, assetId: null, hashVersion: 3 });
+    expect(v3NoTenant).not.toBe(v2);
+  });
+
+  test('v3 does not disturb how v1/v2 rows verify', () => {
+    // Migrated rows keep their original version; passing the tenantId that the
+    // shared-table migration backfilled must not change their hash.
+    const v1 = computeEntryHash({ ...base, assetId: 'asset-1', hashVersion: 1 });
+    const v2 = computeEntryHash({ ...base, assetId: 'asset-1', hashVersion: 2 });
+    expect(computeEntryHash({ ...base, assetId: 'asset-1', hashVersion: 1, tenantId: 'tenant-a' })).toBe(v1);
+    expect(computeEntryHash({ ...base, assetId: 'asset-1', hashVersion: 2, tenantId: 'tenant-a' })).toBe(v2);
+  });
+
+  test('every other field still affects the hash under v3', () => {
+    const ref = computeEntryHash({ ...base, assetId: null, hashVersion: 3, tenantId: 'tenant-a' });
+    expect(computeEntryHash({ ...base, assetId: null, hashVersion: 3, tenantId: 'tenant-a', action: 'DELETED' })).not.toBe(ref);
+    expect(computeEntryHash({ ...base, assetId: null, hashVersion: 3, tenantId: 'tenant-a', prevHash: 'bbbb' })).not.toBe(ref);
+    expect(computeEntryHash({ ...base, assetId: null, hashVersion: 3, tenantId: 'tenant-a', detail: { name: 'other' } })).not.toBe(ref);
+  });
+
   test('new entries are written with the current version', () => {
-    expect(AUDIT_HASH_VERSION).toBe(2);
+    expect(AUDIT_HASH_VERSION).toBe(3);
   });
 });

@@ -235,29 +235,38 @@ class AssetRequestsService {
     let request: any;
     for (let attempt = 1; ; attempt++) {
       try {
-        request = await db.assetRequest.create({
-          data: {
-            number: await this.nextNumber(),
-            mode: mode as any,
-            title,
-            categoryId,
-            reason: data.reason || null,
-            urgency: (data.urgency as any) || 'NORMAL',
-            status: 'PENDING',
-            neededBy,
-            isTemporary,
-            returnBy,
-            requestedById,
-            assignedToId,
-            ...(assetIds.length > 0
-              ? { items: { create: assetIds.map((assetId) => ({ assetId })) } }
-              : {}),
-          },
-          include: {
-            requestedBy: { select: { id: true, firstName: true, lastName: true } },
-            category: { select: { id: true, name: true } },
-            items: { select: { id: true, assetId: true, status: true } },
-          },
+        // Flat transaction: each create goes through the Prisma extension individually
+        // (nested relation writes bypass the extension's $allOperations hook).
+        request = await db.$transaction(async (tx: any) => {
+          const ar = await tx.assetRequest.create({
+            data: {
+              number: await this.nextNumber(),
+              mode: mode as any,
+              title,
+              categoryId,
+              reason: data.reason || null,
+              urgency: (data.urgency as any) || 'NORMAL',
+              status: 'PENDING',
+              neededBy,
+              isTemporary,
+              returnBy,
+              requestedById,
+              assignedToId,
+            },
+          });
+          if (assetIds.length > 0) {
+            await Promise.all(assetIds.map((assetId) =>
+              tx.assetRequestItem.create({ data: { assetId, requestId: ar.id } }),
+            ));
+          }
+          return tx.assetRequest.findUnique({
+            where: { id: ar.id },
+            include: {
+              requestedBy: { select: { id: true, firstName: true, lastName: true } },
+              category: { select: { id: true, name: true } },
+              items: { select: { id: true, assetId: true, status: true } },
+            },
+          });
         });
         break;
       } catch (e: any) {
@@ -696,6 +705,7 @@ class AssetRequestsService {
   // failure never blocks the action). Mirrors the users/assets audit pattern.
   private async audit(action: string, performedById: string, detail: any) {
     await writeAuditEntry(this.ctx.prisma(), {
+      tenantId: this.ctx.tenantId!,
       action,
       performedById,
       detail,

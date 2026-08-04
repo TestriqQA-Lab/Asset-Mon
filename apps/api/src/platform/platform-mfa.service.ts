@@ -369,14 +369,19 @@ export class PlatformMfaService {
     const ip = (req?.headers?.['x-forwarded-for'] as string | undefined)?.split(',')[0].trim() || req?.ip || null;
     const ua = (req?.headers?.['user-agent'] as string | undefined) || null;
 
-    // EVERYTHING that must be atomic lives in ONE serializable tx. A Postgres
-    // advisory xact lock serializes all peer-reset executions against each other
-    // so two concurrent resets (even on different targets) can't both pass the
-    // availability floor. The guarded single-use claim, the step-up replay
-    // check+set, the availability re-check, the target clear, and the blocking
-    // chained audit are then all consistent and all-or-nothing.
+    // EVERYTHING that must be atomic lives in ONE transaction. Row-level locking
+    // (FOR UPDATE) on the reset request row serializes concurrent approvals for
+    // the same request so two concurrent resets can't both pass the availability
+    // floor. The guarded single-use claim, the step-up replay check+set, the
+    // availability re-check, the target clear, and the blocking chained audit
+    // are then all consistent and all-or-nothing.
     await this.catalog.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(742042042042)');
+      // Row-level lock on the specific reset request serializes concurrent approvals
+      // for the SAME request, so the single-use claim is strictly atomic.
+      await tx.$queryRawUnsafe(
+        `SELECT \`id\` FROM \`PlatformMfaResetRequest\` WHERE \`id\` = ? FOR UPDATE`,
+        requestId,
+      );
 
       // Single-use claim: only the FIRST approval (and only before expiry) flips
       // PENDING -> APPROVED. 0 rows => already consumed or expired => abort.
@@ -394,6 +399,14 @@ export class PlatformMfaService {
       const step = BigInt(Math.floor(Date.now() / 1000 / 30) + delta);
       if (approverNow?.lastTotpStep != null && step <= approverNow.lastTotpStep) throw new UnauthorizedException({ code: 'INVALID_CODE', message: 'Step-up code already used.' });
       await tx.platformUser.update({ where: { id: approver.id }, data: { lastTotpStep: step } });
+
+      // We must serialize the availability floor check GLOBALLY so two concurrent
+      // resets for different users don't race and leave < 2 MFA-complete admins.
+      // We replace the old pg_advisory_xact_lock by locking the entire active
+      // super-admin cohort. ORDER BY id prevents deadlocks between concurrent resets.
+      await tx.$queryRawUnsafe(
+        `SELECT \`id\` FROM \`PlatformUser\` WHERE \`role\` = 'SUPER_ADMIN' AND \`active\` = TRUE ORDER BY \`id\` FOR UPDATE`
+      );
 
       // Availability floor, re-evaluated inside the locked tx against fresh state
       // (reading the super-admin set also lets SSI catch a racing demotion).
@@ -423,7 +436,7 @@ export class PlatformMfaService {
       await tx.platformAuditLog.create({
         data: { actorId: approver.id, actorEmail: approver.email, action: 'platform.mfa.admin_reset', targetType: 'platformUser', targetId: reqPre.targetId, metadata, ipAddress: ip, userAgent: ua, prevHash: last?.entryHash ?? null, entryHash, createdAt },
       });
-    }, { isolationLevel: 'Serializable' });
+    }, { isolationLevel: 'ReadCommitted' });
 
     // Notify ALL active super-admins + the target (primary + recovery) — the
     // target's mailbox may be compromised, so we never rely on it alone.

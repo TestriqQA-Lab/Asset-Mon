@@ -56,6 +56,7 @@ export class NotificationsService {
   async push(data: { userId?: string | null; title: string; body?: string | null; href?: string | null; kind: string }) {
     return this.ctx.prisma().notification.create({
       data: {
+        tenantId: this.ctx.tenantId!,
         kind: normaliseKind(data.kind),
         title: String(data.title || '').slice(0, 200),
         body: data.body ? String(data.body).slice(0, 500) : null,
@@ -75,7 +76,7 @@ export class NotificationsService {
       body: data.body ? String(data.body).slice(0, 500) : null,
       href: safeHref(data.href ? String(data.href).slice(0, 300) : null),
     };
-    await db.notification.createMany({ data: users.map((u: any) => ({ ...safe, userId: u.id })) });
+    await db.notification.createMany({ data: users.map((u: any) => ({ ...safe, userId: u.id, tenantId: this.ctx.tenantId! })) });
     return { sent: users.length };
   }
 }

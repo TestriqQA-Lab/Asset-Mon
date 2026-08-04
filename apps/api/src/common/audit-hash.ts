@@ -20,8 +20,12 @@ function stableStringify(value: any): string {
 
 /**
  * The recipe new entries are written with. See `computeEntryHash` for why it changed.
+ *
+ * v3 means "tenantId is in the hash payload", with no exceptions: `writeAuditEntry`
+ * requires a tenantId, and v3 always writes the key. That invariant is what lets
+ * verifyChain() pick the recipe from `hashVersion` alone.
  */
-export const AUDIT_HASH_VERSION = 2;
+export const AUDIT_HASH_VERSION = 3;
 
 /** Key used to snapshot the asset's identity inside the (hashed) detail blob. */
 export const AUDIT_ASSET_SNAPSHOT_KEY = 'assetId';
@@ -42,8 +46,12 @@ export const AUDIT_ASSET_SNAPSHOT_KEY = 'assetId';
  * into `detail`, which is hashed and never rewritten, so the reference is still covered
  * by the chain while the mutable column is free to change.
  *
+ * v3 adds `tenantId` to the hash payload. In the shared-table architecture (MySQL
+ * migration), audit chains are per-tenant. Including tenantId in the hash cryptographically
+ * binds each chain to its tenant, preventing cross-tenant chain grafting.
+ *
  * Rows keep the version they were written with, so entries created before the change
- * continue to verify against v1.
+ * continue to verify against v1/v2.
  */
 export function computeEntryHash(input: {
   prevHash: string | null;
@@ -53,6 +61,7 @@ export function computeEntryHash(input: {
   detail: any;
   createdAt: Date;
   hashVersion?: number | null;
+  tenantId?: string | null;
 }): string {
   const base: Record<string, any> = {
     prev: input.prevHash || '',
@@ -64,13 +73,21 @@ export function computeEntryHash(input: {
   // v1 also covered the mutable column. `stableStringify` sorts keys, so adding it back
   // reproduces the original v1 payload byte-for-byte.
   if ((input.hashVersion ?? 1) < 2) base.assetId = input.assetId || '';
+  // v3 binds the chain to the tenant (shared-table migration). The key is added
+  // unconditionally for v3 — guarding on `input.tenantId` being truthy instead would
+  // let a tenantId-less v3 row hash byte-for-byte identically to a v2 one, which is
+  // exactly the ambiguity the version bump exists to rule out.
+  if ((input.hashVersion ?? 1) >= 3) base.tenantId = input.tenantId || '';
   return crypto.createHash('sha256').update(stableStringify(base)).digest('hex');
 }
 
 /**
- * Insert an audit-log entry computed with a hash chain. The read-then-write is
- * wrapped in a serialisable transaction so concurrent writers produce a strictly
- * linear chain (no two entries can share `prevHash`).
+ * Insert an audit-log entry computed with a hash chain. The read-then-write takes
+ * SELECT ... FOR UPDATE on the tenant's `AuditCounter` row, so concurrent writers
+ * cannot read the same `prevHash` and fork the chain. The counter (rather than the
+ * tail AuditLog row) is the lock target because locking the current tail cannot
+ * stop a concurrent INSERT from appearing beside it — a phantom the counter row,
+ * which always exists, does prevent.
  *
  * If the host Prisma client does not expose `$transaction` (e.g. a custom
  * test shim) the call falls back to the non-transactional path — still safe
@@ -80,11 +97,20 @@ export function computeEntryHash(input: {
  * by a platform operator through the /platform/tenants/:id/users/:userId/impersonate
  * flow. It is folded into the detail blob (and therefore into the chained
  * hash) so the action cannot be retroactively un-tagged as impersonated.
+ *
+ * `tenantId` is REQUIRED. Under shared tables every tenant owns an independent
+ * chain, so an entry that cannot name its tenant has no chain to join. Making it
+ * a required field means the compiler, not production, catches a missing one —
+ * an earlier revision defaulted it to the string 'default', which silently merged
+ * every tenant's chain into one.
  */
 export async function writeAuditEntry(
   db: any,
-  data: { assetId?: string | null; action: string; performedById?: string | null; detail?: any; impersonatedBy?: string | null },
+  data: { tenantId: string; assetId?: string | null; action: string; performedById?: string | null; detail?: any; impersonatedBy?: string | null },
 ) {
+  if (!data.tenantId) {
+    throw new Error(`writeAuditEntry requires a tenantId (action: ${data.action}).`);
+  }
   // Stamp impersonation onto the detail so platform-admin "view-as" actions
   // are unmistakable. We deliberately fold the marker into `detail` so the
   // chained hash also covers it — an impersonation tag cannot be retroactively
@@ -107,40 +133,72 @@ export async function writeAuditEntry(
   }
   data = { ...data, detail: mergedDetail };
 
+  const tenantId = data.tenantId;
+
   const doIt = async (tx: any) => {
-    const last = await tx.auditLog.findFirst({ orderBy: { seq: 'desc' }, select: { entryHash: true } });
+    // Serialize appends for THIS tenant only. Raw SQL because the lock has to be a
+    // real FOR UPDATE; note it deliberately bypasses the tenant-scoping extension,
+    // so the tenantId is bound explicitly here and reused for every write below —
+    // read and write must name the same row or the lock guards nothing.
+    const counters: any[] = await tx.$queryRawUnsafe(
+      `SELECT \`lastSeq\`, \`lastHash\` FROM \`AuditCounter\` WHERE \`tenantId\` = ? FOR UPDATE`,
+      tenantId,
+    );
+    if (counters.length === 0) {
+      throw new Error(
+        `AuditCounter row missing for tenant ${tenantId} (action: ${data.action}). ` +
+        `Every tenant is seeded one at provisioning — see seedDefaults() in auth.service.ts.`,
+      );
+    }
+    const lastHash: string | null = counters[0].lastHash ?? null;
+
     const createdAt = new Date();
     const entryHash = computeEntryHash({
-      prevHash: last?.entryHash || null,
+      prevHash: lastHash,
       action: data.action,
       assetId: data.assetId || null,
       performedById: data.performedById || null,
       detail: data.detail ?? null,
       createdAt,
       hashVersion: AUDIT_HASH_VERSION,
+      tenantId,
     });
-    return tx.auditLog.create({
+
+    const newRow = await tx.auditLog.create({
       data: {
+        tenantId,
         assetId: data.assetId || null,
         action: data.action,
         detail: data.detail ?? null,
         performedById: data.performedById || null,
-        prevHash: last?.entryHash || null,
+        prevHash: lastHash,
         entryHash,
         hashVersion: AUDIT_HASH_VERSION,
         createdAt,
       },
     });
+
+    // Advance the counter so the next append chains onto this entry. `lastSeq` is
+    // not read back by the chain (linkage is hash-to-hash) but is kept current for
+    // operators and for the consolidation script's seeding check.
+    await tx.auditCounter.update({
+      where: { tenantId },
+      data: { lastSeq: newRow.seq, lastHash: newRow.entryHash },
+    });
+
+    return newRow;
   };
 
   if (typeof db.$transaction === 'function') {
+    // ReadCommitted is sufficient because the FOR UPDATE above does the serializing;
+    // the isolation level is not what keeps the chain linear.
     try {
-      return await db.$transaction(doIt, { isolationLevel: 'Serializable' });
+      return await db.$transaction(doIt, { isolationLevel: 'ReadCommitted' });
     } catch (e: any) {
-      // Postgres SQLSTATE 40001 = serialisation_failure; one retry is enough
-      // under contended write conditions before bubbling up.
-      if (e?.code === 'P2034' || /serial/i.test(e?.message || '')) {
-        return await db.$transaction(doIt, { isolationLevel: 'Serializable' });
+      // MySQL 1213 (deadlock) and 1205 (lock wait timeout) are both transient under
+      // write contention; one retry is enough. P2034 is Prisma's wrapper for the same.
+      if (e?.code === 'P2034' || /deadlock|lock wait timeout/i.test(e?.message || '')) {
+        return await db.$transaction(doIt, { isolationLevel: 'ReadCommitted' });
       }
       throw e;
     }

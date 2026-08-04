@@ -84,6 +84,7 @@ class ReservationsService {
     }
     return this.ctx.prisma().reservation.create({
       data: {
+        tenantId: this.ctx.tenantId!,
         assetId: data.assetId,
         userId: data.userId,
         startAt: start,

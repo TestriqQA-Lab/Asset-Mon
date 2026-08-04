@@ -40,7 +40,7 @@ export class UsersService {
 
     const email = data.email.toLowerCase();
     if (this.ctx.tenantId) await this.billing.assertCanAddUser(this.ctx.tenantId);
-    const existing = await this.ctx.prisma().user.findUnique({ where: { email } });
+    const existing = await this.ctx.prisma().user.findUnique({ where: { tenantId_email: { tenantId: this.ctx.tenantId!, email } } });
     if (existing) throw new BadRequestException('Email already exists in this workspace');
     const BCRYPT_COST = Number(process.env.BCRYPT_COST || 12);
     const passwordHash = await bcrypt.hash(data.password, BCRYPT_COST);
@@ -54,6 +54,7 @@ export class UsersService {
     try {
       user = await this.ctx.prisma().user.create({
         data: {
+          tenantId: this.ctx.tenantId!,
           email, passwordHash,
           firstName: data.firstName, lastName: data.lastName,
           role: data.role, departmentId: data.departmentId || null,
@@ -69,6 +70,7 @@ export class UsersService {
       throw e;
     }
     await writeAuditEntry(this.ctx.prisma(), {
+      tenantId: this.ctx.tenantId!,
       action: 'user.create',
       performedById: actor.id,
       detail: { userId: user.id, email: user.email, role: user.role },
@@ -128,6 +130,7 @@ export class UsersService {
     });
 
     await writeAuditEntry(this.ctx.prisma(), {
+      tenantId: this.ctx.tenantId!,
       action: 'user.update',
       performedById: actor.id,
       detail: {
@@ -180,6 +183,7 @@ export class UsersService {
     });
 
     await writeAuditEntry(db, {
+      tenantId: this.ctx.tenantId!,
       action: 'user.reset_mfa',
       performedById: actor.id,
       detail: { userId: targetId, email: target.email, hadMfa, previousMethod: target.mfaMethod },
@@ -219,6 +223,7 @@ export class UsersService {
       .delete({ where: { email_tenantId: { email: u.email, tenantId: this.ctx.tenantId! } } })
       .catch(() => {});
     await writeAuditEntry(this.ctx.prisma(), {
+      tenantId: this.ctx.tenantId!,
       action: 'user.remove',
       performedById: actor.id,
       detail: { userId: id, email: u.email },
@@ -308,6 +313,13 @@ export class UsersService {
     const runTx = () =>
       db.$transaction(
         async (tx: any) => {
+          // X-lock the subject user for the whole handover. The counts below are read
+          // and acted on, so two concurrent role changes on the same user would
+          // otherwise each move the same requests/tickets and double-count.
+          await tx.$queryRawUnsafe(
+            `SELECT \`id\` FROM \`User\` WHERE \`id\` = ? AND \`tenantId\` = ? FOR UPDATE`,
+            id, this.ctx.tenantId!,
+          );
           let movedRequests = 0;
           let movedTickets = 0;
           if (demotion) {
@@ -334,14 +346,14 @@ export class UsersService {
           });
           return { movedRequests, movedTickets };
         },
-        { isolationLevel: 'Serializable' },
+        { isolationLevel: 'ReadCommitted' },
       );
 
     let counts: { movedRequests: number; movedTickets: number };
     for (let attempt = 1; ; attempt++) {
       try { counts = await runTx(); break; }
       catch (e: any) {
-        const serialization = e?.code === 'P2034' || /serial/i.test(e?.message || '');
+        const serialization = e?.code === 'P2034' || /serial|deadlock/i.test(e?.message || '');
         if (serialization && attempt < 3) continue;
         throw e;
       }
@@ -359,6 +371,7 @@ export class UsersService {
     }
 
     await writeAuditEntry(db, {
+      tenantId: this.ctx.tenantId!,
       action: 'user.role_change',
       performedById: actor.id,
       detail: { userId: id, email: target.email, from: target.role, to: role, reassignToId: handoffTargetId, ...counts },
@@ -521,6 +534,13 @@ export class UsersService {
     const runTx = () =>
       db.$transaction(
         async (tx: any) => {
+          // X-lock the leaver for the whole offboard. Every branch below reads a set
+          // of rows and then releases or reassigns them; concurrent offboards of the
+          // same user would otherwise both see the same open assignments.
+          await tx.$queryRawUnsafe(
+            `SELECT \`id\` FROM \`User\` WHERE \`id\` = ? AND \`tenantId\` = ? FOR UPDATE`,
+            id, this.ctx.tenantId!,
+          );
           let assets = 0;
           let seats = 0;
           let seatsSkipped = 0;
@@ -598,7 +618,7 @@ export class UsersService {
           if (deactivate) await tx.user.update({ where: { id }, data: { active: false, tokenVersion: { increment: 1 } } });
           return { assets, tickets: t.count, reservations: r.count, seats, seatsSkipped, requests: rq.count, apiKeys };
         },
-        { isolationLevel: 'Serializable' },
+        { isolationLevel: 'ReadCommitted' },
       );
 
     // Serialization-failure retry (codebase pattern, common/audit-hash.ts): retry the
@@ -607,7 +627,7 @@ export class UsersService {
     for (let attempt = 1; ; attempt++) {
       try { counts = await runTx(); break; }
       catch (e: any) {
-        const serialization = e?.code === 'P2034' || /serial/i.test(e?.message || '');
+        const serialization = e?.code === 'P2034' || /serial|deadlock/i.test(e?.message || '');
         if (serialization && attempt < 3) continue;
         throw e;
       }
@@ -618,6 +638,7 @@ export class UsersService {
     // ONE summary audit entry (amendment #5: not one per asset). Skip on a pure no-op.
     if (deactivate || changed > 0) {
       await writeAuditEntry(db, {
+        tenantId: this.ctx.tenantId!,
         action: 'user.offboard',
         performedById: actor.id,
         detail: { userId: id, email: target.email, ...summary },
