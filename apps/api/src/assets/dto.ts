@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsISO8601, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsInt, IsISO8601, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 const STATUSES = ['PENDING', 'AVAILABLE', 'ASSIGNED', 'OUT_OF_SERVICE', 'OUT_FOR_REPAIR', 'LOST_STOLEN', 'ARCHIVED'] as const;
@@ -10,7 +10,7 @@ export class CreateAssetDto {
   @IsOptional() @IsString() @MaxLength(64) assetTag?: string;
   @IsOptional() @IsString() @MaxLength(128) serialNumber?: string;
   @IsOptional() @IsString() @MaxLength(128) model?: string;
-  @IsOptional() @IsEnum(STATUSES) status?: typeof STATUSES[number];
+  @IsOptional() @IsIn(STATUSES) status?: typeof STATUSES[number];
   @IsOptional() @IsUUID() locationId?: string | null;
   @IsOptional() @IsUUID() departmentId?: string | null;
   @IsOptional() @IsUUID() vendorId?: string | null;
@@ -22,7 +22,7 @@ export class CreateAssetDto {
   @IsOptional() @IsBoolean() requestable?: boolean;
   @IsOptional() @IsObject() customFields?: Record<string, any>;
   @IsOptional() @IsString() @MaxLength(500) photoUrl?: string;
-  @IsOptional() @IsEnum(DEP_METHODS) depreciationMethod?: typeof DEP_METHODS[number];
+  @IsOptional() @IsIn(DEP_METHODS) depreciationMethod?: typeof DEP_METHODS[number];
   @IsOptional() @IsNumber() salvageValue?: number;
   @IsOptional() @IsInt() @Min(1) @Max(600) usefulLifeMonths?: number;
   @IsOptional() @IsISO8601() depreciationStart?: string;
@@ -39,7 +39,7 @@ export class UpdateAssetDto {
   @IsOptional() @IsString() @MaxLength(64) assetTag?: string;
   @IsOptional() @IsString() @MaxLength(128) serialNumber?: string | null;
   @IsOptional() @IsString() @MaxLength(128) model?: string | null;
-  @IsOptional() @IsEnum(STATUSES) status?: typeof STATUSES[number];
+  @IsOptional() @IsIn(STATUSES) status?: typeof STATUSES[number];
   @ValidateIf((_, v) => v != null && v !== '') @IsUUID() categoryId?: string | null;
   @ValidateIf((_, v) => v != null && v !== '') @IsUUID() locationId?: string | null;
   @ValidateIf((_, v) => v != null && v !== '') @IsUUID() departmentId?: string | null;
@@ -52,7 +52,7 @@ export class UpdateAssetDto {
   @IsOptional() @IsBoolean() requestable?: boolean;
   @IsOptional() @IsObject() customFields?: Record<string, any>;
   @IsOptional() @IsString() @MaxLength(500) photoUrl?: string;
-  @IsOptional() @IsEnum(DEP_METHODS) depreciationMethod?: typeof DEP_METHODS[number];
+  @IsOptional() @IsIn(DEP_METHODS) depreciationMethod?: typeof DEP_METHODS[number];
   @IsOptional() @IsNumber() salvageValue?: number | null;
   @IsOptional() @IsInt() @Min(1) @Max(600) usefulLifeMonths?: number | null;
   @ValidateIf((_, v) => v != null && v !== '') @IsISO8601() depreciationStart?: string | null;
@@ -62,7 +62,7 @@ export class UpdateAssetDto {
 
 export class ListAssetsQueryDto {
   @IsOptional() @IsString() @MaxLength(100) q?: string;
-  @IsOptional() @IsEnum(STATUSES) status?: typeof STATUSES[number];
+  @IsOptional() @IsIn(STATUSES) status?: typeof STATUSES[number];
   @IsOptional() @IsUUID() categoryId?: string;
   @IsOptional() @IsUUID() locationId?: string;
   @IsOptional() @IsUUID() departmentId?: string;

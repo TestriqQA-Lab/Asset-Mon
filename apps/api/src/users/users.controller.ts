@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -15,14 +15,14 @@ class CreateUserDto {
   @IsString() @MinLength(8) password: string;
   @IsString() @MinLength(1) firstName: string;
   @IsString() @MinLength(1) lastName: string;
-  @IsEnum(ROLES) role: typeof ROLES[number];
+  @IsIn(ROLES) role: typeof ROLES[number];
   @IsOptional() @IsString() departmentId?: string | null;
   @IsOptional() @IsString() scopedDepartmentId?: string | null;
 }
 class UpdateUserDto {
   @IsOptional() @IsString() firstName?: string;
   @IsOptional() @IsString() lastName?: string;
-  @IsOptional() @IsEnum(ROLES) role?: typeof ROLES[number];
+  @IsOptional() @IsIn(ROLES) role?: typeof ROLES[number];
   @IsOptional() @IsBoolean() active?: boolean;
   @IsOptional() @IsString() departmentId?: string | null;
   @IsOptional() @IsString() scopedDepartmentId?: string | null;
@@ -44,7 +44,7 @@ class OffboardUserDto {
 class ChangeRoleDto {
   // Phase 4: Employee <-> Asset-Manager only (never ADMIN). reassignToId (optional)
   // is who takes a demoted manager's open work; omit to auto round-robin / unassign.
-  @IsEnum(SWITCHABLE_ROLES) role: typeof SWITCHABLE_ROLES[number];
+  @IsIn(SWITCHABLE_ROLES) role: typeof SWITCHABLE_ROLES[number];
   @IsOptional() @IsString() reassignToId?: string;
 }
 

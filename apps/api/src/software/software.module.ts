@@ -2,7 +2,7 @@ import {
   BadRequestException, Body, Controller, Delete, Get, Injectable, Module, NotFoundException,
   Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
-import { IsEnum, IsInt, IsISO8601, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsIn, IsInt, IsISO8601, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -249,7 +249,7 @@ class UpdateSoftwareDto {
 class CreateLicenseDto {
   @IsString() softwareId: string;
   @IsOptional() @IsString() licenseKey?: string;
-  @IsOptional() @IsEnum(LICENSE_TYPES) type?: typeof LICENSE_TYPES[number];
+  @IsOptional() @IsIn(LICENSE_TYPES) type?: typeof LICENSE_TYPES[number];
   @IsInt() @Min(1) seats: number;
   @IsOptional() @IsISO8601() purchaseDate?: string;
   @IsOptional() @IsISO8601() expiresAt?: string;
@@ -259,7 +259,7 @@ class CreateLicenseDto {
 }
 class UpdateLicenseDto {
   @IsOptional() @IsString() licenseKey?: string;
-  @IsOptional() @IsEnum(LICENSE_TYPES) type?: typeof LICENSE_TYPES[number];
+  @IsOptional() @IsIn(LICENSE_TYPES) type?: typeof LICENSE_TYPES[number];
   @IsOptional() @IsInt() @Min(0) seats?: number;
   @IsOptional() @IsISO8601() purchaseDate?: string;
   @IsOptional() @IsISO8601() expiresAt?: string;

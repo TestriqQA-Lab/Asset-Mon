@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { IsEnum, IsNumber, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -223,15 +223,15 @@ class CreateTicketDto {
   @IsUUID() assetId: string;
   @IsString() @MinLength(1) title: string;
   @IsOptional() @IsString() description?: string;
-  @IsOptional() @IsEnum(PRIORITIES) priority?: typeof PRIORITIES[number];
+  @IsOptional() @IsIn(PRIORITIES) priority?: typeof PRIORITIES[number];
   @IsOptional() @IsUUID() assignedToId?: string;
   @IsOptional() @IsUUID() vendorId?: string;
 }
 class UpdateTicketDto {
   @IsOptional() @IsString() title?: string;
   @IsOptional() @IsString() description?: string;
-  @IsOptional() @IsEnum(STATUSES) status?: typeof STATUSES[number];
-  @IsOptional() @IsEnum(PRIORITIES) priority?: typeof PRIORITIES[number];
+  @IsOptional() @IsIn(STATUSES) status?: typeof STATUSES[number];
+  @IsOptional() @IsIn(PRIORITIES) priority?: typeof PRIORITIES[number];
   @IsOptional() @IsString() assignedToId?: string | null;
   @IsOptional() @IsString() vendorId?: string | null;
   @IsOptional() @IsString() resolution?: string;

@@ -2,7 +2,7 @@ import {
   BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Injectable, Module,
   NotFoundException, Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
-import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
+import { IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -238,7 +238,7 @@ class UpdatePRDto {
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PRItemDto) items?: PRItemDto[];
 }
 class StatusDto {
-  @IsEnum(STATUSES) status: typeof STATUSES[number];
+  @IsIn(STATUSES) status: typeof STATUSES[number];
 }
 
 @ApiTags('purchase-requests')

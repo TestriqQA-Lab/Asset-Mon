@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -10,12 +10,12 @@ const TYPES = ['BUILDING', 'FLOOR', 'ROOM', 'DESK'] as const;
 
 class CreateLocationDto {
   @IsString() @MinLength(1) name: string;
-  @IsEnum(TYPES) type: typeof TYPES[number];
+  @IsIn(TYPES) type: typeof TYPES[number];
   @IsOptional() @IsString() parentId?: string | null;
 }
 class UpdateLocationDto {
   @IsOptional() @IsString() name?: string;
-  @IsOptional() @IsEnum(TYPES) type?: typeof TYPES[number];
+  @IsOptional() @IsIn(TYPES) type?: typeof TYPES[number];
   @IsOptional() @IsString() parentId?: string | null;
 }
 

@@ -2,7 +2,7 @@ import {
   BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Injectable, Module,
   NotFoundException, Param, Patch, Post, Query, UseGuards,
 } from '@nestjs/common';
-import { IsArray, IsBoolean, IsDateString, IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsDateString, IsIn, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -785,11 +785,11 @@ class AssetRequestsService {
 // DTOs
 // ---------------------------------------------------------------------------
 class CreateAssetRequestDto {
-  @IsOptional() @IsEnum(MODES) mode?: typeof MODES[number];
+  @IsOptional() @IsIn(MODES) mode?: typeof MODES[number];
   @IsOptional() @IsString() @MinLength(1) title?: string;
   @IsOptional() @IsUUID() categoryId?: string;
   @IsOptional() @IsString() reason?: string;
-  @IsOptional() @IsEnum(URGENCIES) urgency?: typeof URGENCIES[number];
+  @IsOptional() @IsIn(URGENCIES) urgency?: typeof URGENCIES[number];
   // v2: specific-device mode + optional scheduling fields
   @IsOptional() @IsArray() @IsUUID('all', { each: true }) assetIds?: string[];
   @IsOptional() @IsDateString() neededBy?: string;
