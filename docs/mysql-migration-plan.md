@@ -58,9 +58,13 @@ Prisma's DMMF and failing when the set drifts from the schema. Both run in CI.
 | 13 | Cross-tenant isolation test suite | ✅ |
 | 14 | Seat-license concurrency test | ✅ |
 
-Phases 1–3 are complete: the API boots on MySQL, `npm run verify` is green,
-`tools/verify-tenant-isolation.sh` passes 36/36, and all six concurrency scenarios
-in `apps/api/test-concurrency.ts` pass. Phase 4 is cutover.
+Phases 1–3 are complete and Phase 4 is rehearsed end to end (see
+[mysql-cutover-runbook.md](./mysql-cutover-runbook.md)). `npm run verify` is green,
+`tools/verify-tenant-isolation.sh` passes 36/36, all six concurrency scenarios in
+`apps/api/test-concurrency.ts` pass, `verify-deploy.sh` passes 27/27 against a freshly
+built production image, and the schema deploys unchanged to both MySQL 8.4 and
+MariaDB 10.11. What remains is not code: where the API runs, and provisioning the
+production database.
 
 ---
 
@@ -107,6 +111,10 @@ chain order. `PlatformAuditLog` was relying on physical row order until Phase 3.
 - **An `AUTO_INCREMENT` column must lead some index.** Replacing `@@index([seq])` with
   `@@index([tenantId, seq])` on `AuditLog` left `seq` non-leading and the schema failed
   validation. Both indexes are needed.
+- **MariaDB has no `utf8mb4_0900_*` collations.** The schema's original
+  `utf8mb4_0900_as_cs` table default failed on the first `CREATE TABLE` with error
+  1273. `utf8mb4_bin` exists on both engines with the same case- and
+  accent-sensitive semantics, so the schema now deploys to either unchanged.
 - **Every foreign-key column needs an index leading with that column** (error 1553 on
   drop). This is why step 10 is additive: only the standalone `@@index([tenantId])` is
   dropped — `tenantId` carries no FK, so it is the one that is always safe to remove.

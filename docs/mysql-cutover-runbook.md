@@ -36,8 +36,9 @@ schema → consolidate → INTEGRITY CHECK → rebuild chains → verify chains 
 
 ## Prerequisites
 
-- [ ] **Identify the engine.** `SELECT VERSION(), @@version_comment;` MySQL works as-is;
-      MariaDB needs one change, see "If the engine is MariaDB" below.
+- [ ] **Note the engine and version:** `SELECT VERSION(), @@version_comment;` The schema
+      deploys unchanged to MySQL 8 and MariaDB 10.11 alike — see "MariaDB" below for
+      what was verified and the one version caveat.
 - [ ] **Decide where the API runs.** A Hostinger Business plan is shared hosting: it
       serves PHP and static files and will not run the container stack. The API needs a
       VPS or another host, reaching MySQL over the network with Remote MySQL enabled and
@@ -133,60 +134,51 @@ It passed 36/36 against the rehearsed database.
 
 ---
 
-## If the engine is MariaDB
+## MariaDB
 
-Tested against **MariaDB 10.11.18** on 2026-08-04. The conclusion is narrower than
-feared: **one collation is the only incompatibility.** Everything else the migration
-depends on works unchanged.
+**Hostinger's shared Business plan runs MariaDB, not MySQL.** Per Hostinger's own
+in-panel assistant (Kodee, 2026-08-04), which also cautioned that the exact version
+varies — so treat the engine as settled and the version as still worth checking. The
+schema deploys to it unchanged — no patch, no separate
+variant, nothing to remember at cutover.
 
-**What breaks.** `utf8mb4_0900_as_cs` is a MySQL 8 UCA-9.0.0 collation and does not
-exist on MariaDB at all — nor does `utf8mb4_0900_as_ci`, nor `utf8mb4_uca1400_as_cs` on
-10.11. `prisma migrate deploy` fails on the very first `CREATE TABLE`:
+That took one change to arrange. The schema originally created tables
+`COLLATE utf8mb4_0900_as_cs`, a MySQL 8 UCA-9.0.0 collation that MariaDB does not have
+in any form — `prisma migrate deploy` died on the first `CREATE TABLE`:
 
 ```
 Database error code: 1273
 Database error: Unknown collation: 'utf8mb4_0900_as_cs'
 ```
 
-**The fix.** Replace it with `utf8mb4_bin`, which MariaDB does have and which preserves
-the intent — a case-sensitive *and* accent-sensitive default, so only the columns
+The table default is now `utf8mb4_bin`, which exists on both engines and carries the
+same intent — case-sensitive AND accent-sensitive, so only the columns
 `post-migrate-collations.sql` deliberately relaxes are case-insensitive:
 
-```bash
-sed -i 's/utf8mb4_0900_as_cs/utf8mb4_bin/g' packages/db/prisma/migrations/*/migration.sql
-# and in docker-compose.yml, --collation-server=utf8mb4_bin
-```
+| | `utf8mb4_bin` | `utf8mb4_0900_as_cs` |
+|---|---|---|
+| `'Laptop' = 'laptop'` | 0 | 0 |
+| `'José' = 'Jose'` | 0 | 0 |
 
-Applied that way, all 48 tables create cleanly and `post-migrate-collations.sql` runs
-unchanged — `utf8mb4_general_ci` exists on MariaDB, and produces the identical 12
-collated columns as on MySQL.
+Verified by deploying the repo's migrations, unmodified, to both engines. The resulting
+schema is identical: **49 tables, 12 case-insensitive columns, 213 indexes** on MySQL
+8.4.11 and on MariaDB 10.11.18.
 
-One behavioural difference to accept: `utf8mb4_bin` compares and sorts by code point, so
-`ORDER BY` on a non-collated string column puts uppercase before lowercase, where
-`utf8mb4_0900_as_cs` uses natural language ordering. It does not affect equality,
-uniqueness, or the case-insensitive search columns.
+Everything else the migration depends on was exercised through the real Prisma client
+against MariaDB and works: `Json` `array_contains` (the webhook delivery path, and the
+genuine unknown — Prisma documents JSON filtering for PostgreSQL and MySQL without
+committing to MariaDB), `SELECT ... FOR UPDATE` for every audit/seat/MFA lock,
+`extendedWhereUnique` which is how the scoping extension filters, case-insensitive
+search via column collation, and `AUTO_INCREMENT` on `AuditLog.seq`.
 
-**What was verified working on MariaDB**, each exercised through the real Prisma client:
+One behavioural note: `utf8mb4_bin` compares and sorts by code point, so `ORDER BY` on a
+non-collated string column puts uppercase before lowercase. Equality, uniqueness and the
+case-insensitive search columns are unaffected.
 
-| | |
-|---|---|
-| Basic create/read through the generated client | ✓ |
-| `Json` `array_contains` — the webhook delivery path | ✓ hit=1, miss=0 |
-| `SELECT ... FOR UPDATE` — every audit/seat/MFA lock | ✓ |
-| `extendedWhereUnique` — how the scoping extension filters | ✓ |
-| Case-insensitive search via column collation | ✓ lowercase matched mixed-case |
-| `AUTO_INCREMENT` on `AuditLog.seq` | ✓ |
-
-`array_contains` was the genuine unknown — Prisma documents JSON filtering for
-PostgreSQL and MySQL without committing to MariaDB, and webhook delivery depends on it.
-It works on 10.11.
-
-**Caveat on version.** All of the above is 10.11. Hostinger shared plans have also
-shipped 10.6; the collation situation is the same there, but if you land on something
-older than 10.5 re-run this probe before trusting it — the JSON functions in particular
-were still maturing.
-
----
+**Still worth running `SELECT VERSION();` before deploying.** All of the above is
+MariaDB 10.11; Hostinger has also shipped 10.6, and the collation position is the same
+there, but anything older than 10.5 should be re-probed — the JSON functions were still
+maturing.
 
 ## Rolling back
 

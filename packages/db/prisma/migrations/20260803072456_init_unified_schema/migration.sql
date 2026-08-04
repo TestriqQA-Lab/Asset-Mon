@@ -22,7 +22,7 @@ CREATE TABLE `Tenant` (
     UNIQUE INDEX `Tenant_dbName_key`(`dbName`),
     UNIQUE INDEX `Tenant_inviteToken_key`(`inviteToken`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `TenantUser` (
@@ -34,7 +34,7 @@ CREATE TABLE `TenantUser` (
     INDEX `TenantUser_email_idx`(`email`),
     UNIQUE INDEX `TenantUser_email_tenantId_key`(`email`, `tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `PlatformUser` (
@@ -62,7 +62,7 @@ CREATE TABLE `PlatformUser` (
 
     UNIQUE INDEX `PlatformUser_email_key`(`email`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `PlatformAuditLog` (
@@ -86,7 +86,7 @@ CREATE TABLE `PlatformAuditLog` (
     INDEX `PlatformAuditLog_targetType_targetId_idx`(`targetType`, `targetId`),
     INDEX `PlatformAuditLog_seq_idx`(`seq`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `PlatformAuditCounter` (
@@ -95,7 +95,7 @@ CREATE TABLE `PlatformAuditCounter` (
     `lastHash` VARCHAR(191) NULL,
 
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `PlatformRefreshTokenJti` (
@@ -108,7 +108,7 @@ CREATE TABLE `PlatformRefreshTokenJti` (
     INDEX `PlatformRefreshTokenJti_expiresAt_idx`(`expiresAt`),
     INDEX `PlatformRefreshTokenJti_userId_idx`(`userId`),
     PRIMARY KEY (`jti`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `PlatformMfaPending` (
@@ -134,7 +134,7 @@ CREATE TABLE `PlatformMfaPending` (
     INDEX `PlatformMfaPending_userId_idx`(`userId`),
     INDEX `PlatformMfaPending_expiresAt_idx`(`expiresAt`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `PlatformBackupCode` (
@@ -148,7 +148,7 @@ CREATE TABLE `PlatformBackupCode` (
 
     UNIQUE INDEX `PlatformBackupCode_userId_codeHash_key`(`userId`, `codeHash`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `PlatformOperatorEmailLog` (
@@ -164,7 +164,7 @@ CREATE TABLE `PlatformOperatorEmailLog` (
     INDEX `PlatformOperatorEmailLog_createdAt_idx`(`createdAt`),
     INDEX `PlatformOperatorEmailLog_userId_idx`(`userId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `PlatformMfaResetRequest` (
@@ -182,7 +182,7 @@ CREATE TABLE `PlatformMfaResetRequest` (
     INDEX `PlatformMfaResetRequest_status_idx`(`status`),
     INDEX `PlatformMfaResetRequest_expiresAt_idx`(`expiresAt`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `SupportRequest` (
@@ -203,7 +203,7 @@ CREATE TABLE `SupportRequest` (
     INDEX `SupportRequest_lastMessageAt_idx`(`lastMessageAt`),
     INDEX `SupportRequest_platformUnreadAt_idx`(`platformUnreadAt`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `SupportMessage` (
@@ -216,7 +216,7 @@ CREATE TABLE `SupportMessage` (
 
     INDEX `SupportMessage_requestId_idx`(`requestId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `Announcement` (
@@ -240,7 +240,7 @@ CREATE TABLE `Announcement` (
     INDEX `Announcement_startsAt_idx`(`startsAt`),
     INDEX `Announcement_endsAt_idx`(`endsAt`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `User` (
@@ -272,7 +272,7 @@ CREATE TABLE `User` (
     INDEX `User_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `User_tenantId_email_key`(`tenantId`, `email`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `Department` (
@@ -286,7 +286,7 @@ CREATE TABLE `Department` (
     INDEX `Department_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `Department_tenantId_name_key`(`tenantId`, `name`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `Location` (
@@ -301,7 +301,7 @@ CREATE TABLE `Location` (
     INDEX `Location_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `Location_tenantId_name_parentId_key`(`tenantId`, `name`, `parentId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `Category` (
@@ -318,7 +318,7 @@ CREATE TABLE `Category` (
     INDEX `Category_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `Category_tenantId_name_key`(`tenantId`, `name`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `Vendor` (
@@ -334,7 +334,7 @@ CREATE TABLE `Vendor` (
     INDEX `Vendor_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `Vendor_tenantId_name_key`(`tenantId`, `name`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `Asset` (
@@ -373,7 +373,7 @@ CREATE TABLE `Asset` (
     INDEX `Asset_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `Asset_tenantId_assetTag_key`(`tenantId`, `assetTag`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `Assignment` (
@@ -391,7 +391,7 @@ CREATE TABLE `Assignment` (
     INDEX `Assignment_returnedAt_idx`(`returnedAt`),
     INDEX `Assignment_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `MaintenanceSchedule` (
@@ -412,7 +412,7 @@ CREATE TABLE `MaintenanceSchedule` (
     INDEX `MaintenanceSchedule_active_idx`(`active`),
     INDEX `MaintenanceSchedule_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `ServiceTicket` (
@@ -440,7 +440,7 @@ CREATE TABLE `ServiceTicket` (
     INDEX `ServiceTicket_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `ServiceTicket_tenantId_ticketNumber_key`(`tenantId`, `ticketNumber`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `PurchaseRequest` (
@@ -463,7 +463,7 @@ CREATE TABLE `PurchaseRequest` (
     INDEX `PurchaseRequest_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `PurchaseRequest_tenantId_number_key`(`tenantId`, `number`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `PurchaseRequestItem` (
@@ -477,7 +477,7 @@ CREATE TABLE `PurchaseRequestItem` (
 
     INDEX `PurchaseRequestItem_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `PurchaseOrder` (
@@ -498,7 +498,7 @@ CREATE TABLE `PurchaseOrder` (
     INDEX `PurchaseOrder_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `PurchaseOrder_tenantId_poNumber_key`(`tenantId`, `poNumber`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `PurchaseOrderItem` (
@@ -513,7 +513,7 @@ CREATE TABLE `PurchaseOrderItem` (
 
     INDEX `PurchaseOrderItem_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `Software` (
@@ -528,7 +528,7 @@ CREATE TABLE `Software` (
     INDEX `Software_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `Software_tenantId_name_key`(`tenantId`, `name`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `SoftwareLicense` (
@@ -550,7 +550,7 @@ CREATE TABLE `SoftwareLicense` (
     INDEX `SoftwareLicense_expiresAt_idx`(`expiresAt`),
     INDEX `SoftwareLicense_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `SoftwareAssignment` (
@@ -569,7 +569,7 @@ CREATE TABLE `SoftwareAssignment` (
     INDEX `SoftwareAssignment_returnedAt_idx`(`returnedAt`),
     INDEX `SoftwareAssignment_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `Reservation` (
@@ -589,7 +589,7 @@ CREATE TABLE `Reservation` (
     INDEX `Reservation_status_idx`(`status`),
     INDEX `Reservation_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `AuditSession` (
@@ -608,7 +608,7 @@ CREATE TABLE `AuditSession` (
     INDEX `AuditSession_status_idx`(`status`),
     INDEX `AuditSession_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `AuditScan` (
@@ -625,7 +625,7 @@ CREATE TABLE `AuditScan` (
     INDEX `AuditScan_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `AuditScan_tenantId_sessionId_assetId_key`(`tenantId`, `sessionId`, `assetId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `AssetAttachment` (
@@ -643,7 +643,7 @@ CREATE TABLE `AssetAttachment` (
     INDEX `AssetAttachment_assetId_idx`(`assetId`),
     INDEX `AssetAttachment_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `AssetStatusDef` (
@@ -661,7 +661,7 @@ CREATE TABLE `AssetStatusDef` (
     INDEX `AssetStatusDef_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `AssetStatusDef_tenantId_key_key`(`tenantId`, `key`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `SavedView` (
@@ -679,7 +679,7 @@ CREATE TABLE `SavedView` (
     INDEX `SavedView_kind_idx`(`kind`),
     INDEX `SavedView_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `ApiKey` (
@@ -700,7 +700,7 @@ CREATE TABLE `ApiKey` (
     INDEX `ApiKey_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `ApiKey_tenantId_hash_key`(`tenantId`, `hash`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `Webhook` (
@@ -714,7 +714,7 @@ CREATE TABLE `Webhook` (
 
     INDEX `Webhook_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `WebhookDelivery` (
@@ -733,7 +733,7 @@ CREATE TABLE `WebhookDelivery` (
     INDEX `WebhookDelivery_succeededAt_idx`(`succeededAt`),
     INDEX `WebhookDelivery_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `EmailLog` (
@@ -749,7 +749,7 @@ CREATE TABLE `EmailLog` (
     INDEX `EmailLog_createdAt_idx`(`createdAt`),
     INDEX `EmailLog_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `AuditLog` (
@@ -770,7 +770,7 @@ CREATE TABLE `AuditLog` (
     INDEX `AuditLog_seq_idx`(`seq`),
     INDEX `AuditLog_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `AuditCounter` (
@@ -779,7 +779,7 @@ CREATE TABLE `AuditCounter` (
     `lastHash` VARCHAR(191) NULL,
 
     PRIMARY KEY (`tenantId`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `Notification` (
@@ -797,7 +797,7 @@ CREATE TABLE `Notification` (
     INDEX `Notification_createdAt_idx`(`createdAt`),
     INDEX `Notification_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `RefreshTokenJti` (
@@ -812,7 +812,7 @@ CREATE TABLE `RefreshTokenJti` (
     INDEX `RefreshTokenJti_userId_idx`(`userId`),
     INDEX `RefreshTokenJti_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`jti`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `IdempotencyKey` (
@@ -822,7 +822,7 @@ CREATE TABLE `IdempotencyKey` (
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
     PRIMARY KEY (`tenantId`, `scope`, `key`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `TenantMfaPending` (
@@ -850,7 +850,7 @@ CREATE TABLE `TenantMfaPending` (
     INDEX `TenantMfaPending_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `TenantMfaPending_tenantId_nonce_key`(`tenantId`, `nonce`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `TenantBackupCode` (
@@ -866,7 +866,7 @@ CREATE TABLE `TenantBackupCode` (
     INDEX `TenantBackupCode_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `TenantBackupCode_tenantId_userId_codeHash_key`(`tenantId`, `userId`, `codeHash`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `AssetRequest` (
@@ -902,7 +902,7 @@ CREATE TABLE `AssetRequest` (
     INDEX `AssetRequest_tenantId_idx`(`tenantId`),
     UNIQUE INDEX `AssetRequest_tenantId_number_key`(`tenantId`, `number`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- CreateTable
 CREATE TABLE `AssetRequestItem` (
@@ -917,7 +917,7 @@ CREATE TABLE `AssetRequestItem` (
     INDEX `AssetRequestItem_assetId_idx`(`assetId`),
     INDEX `AssetRequestItem_tenantId_idx`(`tenantId`),
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs;
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 
 -- AddForeignKey
 ALTER TABLE `TenantUser` ADD CONSTRAINT `TenantUser_tenantId_fkey` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1097,7 +1097,7 @@ ALTER TABLE `AssetRequestItem` ADD CONSTRAINT `AssetRequestItem_requestId_fkey` 
 ALTER TABLE `AssetRequestItem` ADD CONSTRAINT `AssetRequestItem_assetId_fkey` FOREIGN KEY (`assetId`) REFERENCES `Asset`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- Manual additions to enforce utf8mb4_general_ci on specific searchable columns
--- Option A: Database default is utf8mb4_0900_as_cs (case-sensitive)
+-- Option A: Database default is utf8mb4_bin (case-sensitive)
 ALTER TABLE `Tenant` MODIFY COLUMN `name` VARCHAR(191) COLLATE utf8mb4_general_ci NOT NULL;
 ALTER TABLE `Tenant` MODIFY COLUMN `slug` VARCHAR(191) COLLATE utf8mb4_general_ci NOT NULL;
 
