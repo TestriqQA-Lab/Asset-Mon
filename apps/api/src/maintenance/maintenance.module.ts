@@ -6,6 +6,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { assertTenantRefs } from '../tenancy/assert-tenant-refs';
 import { ModuleGuard } from '../tenant-settings/module.guard';
 import { RequireModule } from '../tenant-settings/require-module.decorator';
 import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
@@ -29,6 +30,7 @@ class MaintenanceService {
 
   async create(data: { assetId: string; title: string; description?: string; intervalDays: number; nextDueAt: string }, performedById: string) {
     const db = this.ctx.prisma();
+    await assertTenantRefs(db, { asset: data.assetId });
     const m = await db.maintenanceSchedule.create({
       data: {
         tenantId: this.ctx.tenantId!,

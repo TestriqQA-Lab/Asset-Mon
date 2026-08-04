@@ -18,7 +18,30 @@ function required(name: string): string {
 }
 
 const POSTGRES_URL = required('POSTGRES_URL');
-const mysql = new PrismaClient({ datasources: { db: { url: required('DATABASE_URL') } } });
+
+/**
+ * `SET FOREIGN_KEY_CHECKS=0` is SESSION state, not server state — it applies to the
+ * one connection that ran it. Prisma pools connections, so with the default pool the
+ * setting lands on one connection while the inserts that depend on it run on others,
+ * and the load fails on the first row whose parent has not been copied yet.
+ *
+ * Forcing the pool to a single connection makes the session settings and every
+ * statement share one connection. This is a single-threaded batch script, so there is
+ * nothing to gain from a larger pool anyway.
+ */
+function singleConnection(url: string): string {
+  const u = new URL(url);
+  u.searchParams.set('connection_limit', '1');
+  return u.toString();
+}
+
+const mysql = new PrismaClient({ datasources: { db: { url: singleConnection(required('DATABASE_URL')) } } });
+
+/** Models whose rows must be inserted in chain order — see the sort below. */
+const HASH_CHAINED = new Set(['AuditLog', 'PlatformAuditLog']);
+
+/** Rows dropped by a unique-constraint collision, collected and reported at the end. */
+const shortfalls: Array<{ scope: string; model: string; expected: number; got: number }> = [];
 
 // ── Tenant-scoped models in the old per-tenant Postgres DBs.
 // These need tenantId injected during migration.
@@ -125,8 +148,14 @@ async function run() {
   const catalogPool = new PgPool({ connectionString: `${POSTGRES_URL}/assetmon_catalog` });
 
   // ── Step 0: Disable FK checks for the entire load ──
-  console.log('Disabling MySQL FK checks...');
+  // Rows are copied model by model, so a child is often inserted before its parent.
+  // Safe here only because verify-integrity.ts re-validates every FK afterwards.
+  console.log('Disabling MySQL FK checks (single pooled connection)...');
   await mysql.$executeRawUnsafe('SET FOREIGN_KEY_CHECKS=0');
+  const [fkState]: any[] = await mysql.$queryRawUnsafe('SELECT @@SESSION.foreign_key_checks AS v');
+  if (Number(fkState?.v) !== 0) {
+    throw new Error('FOREIGN_KEY_CHECKS did not stick — the pool is handing out more than one connection.');
+  }
 
   // ── Step 1: Migrate global (catalog) models ──
   console.log('\n── Step 1: Global Models ──');
@@ -136,9 +165,19 @@ async function run() {
       console.log(`  ${model}: 0 rows (skip)`);
       continue;
     }
+    // PlatformAuditLog is a hash chain and its `seq` is re-assigned by MySQL's
+    // auto-increment on insert, so insertion order becomes chain order. Rows are read
+    // in CTID (physical) order, which matches insertion order only until something
+    // rewrites a page — after a VACUUM FULL or a dump/restore it does not. Sorting by
+    // createdAt makes the new seq agree with the chain, and keeps the counter seeded
+    // below (ORDER BY seq DESC LIMIT 1) pointing at the real tail.
+    if (HASH_CHAINED.has(model)) {
+      rows.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    }
     const cleaned = rows.map(r => cleanRow(r, model));
     const count = await insertBatch(model, cleaned);
-    console.log(`  ${model}: ${rows.length} PG → ${count} MySQL`);
+    if (count !== rows.length) shortfalls.push({ scope: 'global', model, expected: rows.length, got: count });
+    console.log(`  ${model}: ${rows.length} PG → ${count} MySQL${count !== rows.length ? '  ⚠ SHORTFALL' : ''}`);
   }
 
   // ── Step 2: Seed PlatformAuditCounter ──
@@ -174,8 +213,8 @@ async function run() {
       const rows = await fetchAllRows(tenantPool, model);
       if (rows.length === 0) continue;
 
-      // Sort AuditLog by createdAt to preserve ordering for new seq assignment
-      if (model === 'AuditLog') {
+      // Chain order must survive the seq re-assignment — see the note in Step 1.
+      if (HASH_CHAINED.has(model)) {
         rows.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
       }
 
@@ -186,7 +225,8 @@ async function run() {
       });
 
       const count = await insertBatch(model, cleaned);
-      console.log(`  ${model}: ${rows.length} PG → ${count} MySQL`);
+      if (count !== rows.length) shortfalls.push({ scope: tenant.slug, model, expected: rows.length, got: count });
+      console.log(`  ${model}: ${rows.length} PG → ${count} MySQL${count !== rows.length ? '  ⚠ SHORTFALL' : ''}`);
       totalRows += count;
     }
 
@@ -221,8 +261,34 @@ async function run() {
   await catalogPool.end();
   await mysql.$disconnect();
 
+  // ── Step 5: Report any rows the target refused ──
+  // `createMany({ skipDuplicates: true })` is what makes this script re-runnable, but
+  // it also means a row rejected by a unique constraint vanishes without an error.
+  // The likely cause is collation: Postgres compared these columns case- and
+  // accent-sensitively, MySQL's utf8mb4_general_ci does neither, so values that were
+  // distinct in the source collide in the target — two assets tagged `AM-001` and
+  // `am-001`, say. Loud and non-zero, because silently migrating fewer rows than the
+  // source held is the worst outcome available.
+  if (shortfalls.length > 0) {
+    console.log('\n═══════════════════════════════════════════════');
+    console.log('  ⚠  ROWS DROPPED — DO NOT PROCEED TO CUTOVER');
+    console.log('═══════════════════════════════════════════════');
+    let lost = 0;
+    for (const s of shortfalls) {
+      lost += s.expected - s.got;
+      console.log(`  ${s.scope} / ${s.model}: ${s.expected} → ${s.got}  (lost ${s.expected - s.got})`);
+    }
+    console.log(`\n  ${lost} row(s) lost across ${shortfalls.length} model(s).`);
+    console.log('  Find the collisions before re-running, e.g. for asset tags:');
+    console.log("    SELECT lower(\"assetTag\"), count(*) FROM \"Asset\"");
+    console.log('     GROUP BY 1 HAVING count(*) > 1;');
+    console.log('  Resolve them in the SOURCE database, then re-run this script.\n');
+    process.exitCode = 1;
+    return;
+  }
+
   console.log('\n═══════════════════════════════════════════════');
-  console.log('  ✅ Consolidation Complete');
+  console.log('  ✅ Consolidation Complete — no rows dropped');
   console.log('═══════════════════════════════════════════════\n');
 }
 

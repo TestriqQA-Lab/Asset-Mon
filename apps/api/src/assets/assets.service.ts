@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { assertTenantRefs } from '../tenancy/assert-tenant-refs';
 import { EventBusService } from '../events/events.module';
 import { writeAuditEntry } from '../common/audit-hash';
 import { BillingService } from '../billing/billing.module';
@@ -191,6 +192,14 @@ export class AssetsService {
     if (!data.name) throw new BadRequestException('name is required');
     if (!opts?.skipBillingCheck && this.ctx.tenantId) await this.billing.assertCanAddAsset(this.ctx.tenantId);
     const db = this.ctx.prisma();
+    await assertTenantRefs(db, {
+      category: data.categoryId,
+      location: data.locationId,
+      department: data.departmentId,
+      vendor: data.vendorId,
+      asset: data.parentId,
+      assetStatusDef: data.statusDefId,
+    });
 
     const assetTag = data.assetTag || (await this.nextAssetTag());
     const created = await db.asset.create({
@@ -230,6 +239,14 @@ export class AssetsService {
     const db = this.ctx.prisma();
     const before = await db.asset.findUnique({ where: { id } });
     if (!before) throw new NotFoundException('Asset not found');
+    await assertTenantRefs(db, {
+      category: data.categoryId,
+      location: data.locationId,
+      department: data.departmentId,
+      vendor: data.vendorId,
+      asset: data.parentId,
+      assetStatusDef: data.statusDefId,
+    });
     const patch: any = { ...data };
     if (data.purchaseDate !== undefined) patch.purchaseDate = data.purchaseDate ? new Date(data.purchaseDate) : null;
     if (data.warrantyEnd !== undefined) patch.warrantyEnd = data.warrantyEnd ? new Date(data.warrantyEnd) : null;

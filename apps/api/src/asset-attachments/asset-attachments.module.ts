@@ -15,6 +15,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { assertTenantRefs } from '../tenancy/assert-tenant-refs';
 
 const uploadDir = process.env.UPLOAD_DIR || path.resolve(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -53,7 +54,9 @@ class AssetAttachmentsService {
   }
 
   async create(data: { assetId: string; filename: string; url: string; size: number; mimeType: string; kind: string; uploadedById: string }) {
-    return this.ctx.prisma().assetAttachment.create({ data: { ...data, tenantId: this.ctx.tenantId! } });
+    const db = this.ctx.prisma();
+    await assertTenantRefs(db, { asset: data.assetId });
+    return db.assetAttachment.create({ data: { ...data, tenantId: this.ctx.tenantId! } });
   }
 
   async remove(id: string) {

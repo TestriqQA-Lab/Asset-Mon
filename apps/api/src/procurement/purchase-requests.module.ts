@@ -10,6 +10,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { assertTenantRefs } from '../tenancy/assert-tenant-refs';
 import { ModuleGuard } from '../tenant-settings/module.guard';
 import { RequireModule } from '../tenant-settings/require-module.decorator';
 import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
@@ -70,6 +71,10 @@ export class PurchaseRequestsService {
 
   async create(data: any, requestedById: string) {
     const db = this.ctx.prisma();
+    await assertTenantRefs(db, { department: data.departmentId });
+    for (const i of (data.items || []) as any[]) {
+      await assertTenantRefs(db, { category: i.categoryId });
+    }
     const number = await this.nextNumber();
     const items = (data.items || []) as Array<{ description: string; quantity: number; unitPriceEstimate?: number; categoryId?: string }>;
     const total = items.reduce((s, i) => s + (i.unitPriceEstimate || 0) * (i.quantity || 0), 0);

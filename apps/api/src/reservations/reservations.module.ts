@@ -9,6 +9,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { assertTenantRefs } from '../tenancy/assert-tenant-refs';
 import { LifecycleService } from '../assets/lifecycle.service';
 import { AssetsModule } from '../assets/assets.module';
 import { ModuleGuard } from '../tenant-settings/module.guard';
@@ -73,6 +74,8 @@ class ReservationsService {
     if (actor.role === 'EMPLOYEE' && data.userId !== actor.userId) {
       throw new ForbiddenException('Employees can only request reservations for themselves');
     }
+    const db = this.ctx.prisma();
+    await assertTenantRefs(db, { asset: data.assetId, user: data.userId });
     const start = new Date(data.startAt);
     const end = new Date(data.endAt);
     if (end <= start) throw new BadRequestException('endAt must be after startAt');

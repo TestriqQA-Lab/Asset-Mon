@@ -9,6 +9,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { assertTenantRefs } from '../tenancy/assert-tenant-refs';
 import { ModuleGuard } from '../tenant-settings/module.guard';
 import { RequireModule } from '../tenant-settings/require-module.decorator';
 import { NavPermissionsGuard } from '../tenant-settings/nav-permissions.guard';
@@ -107,7 +108,8 @@ class LicensesService {
     });
   }
 
-  create(d: any) {
+  async create(d: any) {
+    await assertTenantRefs(this.ctx.prisma(), { software: d.softwareId, vendor: d.vendorId });
     return this.ctx.prisma().softwareLicense.create({
       data: {
         tenantId: this.ctx.tenantId!,

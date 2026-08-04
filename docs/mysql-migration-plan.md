@@ -55,11 +55,12 @@ Prisma's DMMF and failing when the set drifts from the schema. Both run in CI.
 | 10 | `tenantId`-leading composite indexes | ✅ |
 | 11 | CI tenant-safety gate | ✅ |
 | 12 | Consolidation + integrity scripts | ✅ |
-| 13 | Cross-tenant isolation test suite | ⬜ Phase 3 |
-| 14 | Seat-license concurrency test | ⚠️ written, not yet run green |
+| 13 | Cross-tenant isolation test suite | ✅ |
+| 14 | Seat-license concurrency test | ✅ |
 
-Phases 1 and 2 are complete: the API boots on MySQL, `npm run verify` is green.
-Phase 3 (data + testing) is next; Phase 4 is cutover.
+Phases 1–3 are complete: the API boots on MySQL, `npm run verify` is green,
+`tools/verify-tenant-isolation.sh` passes 36/36, and all six concurrency scenarios
+in `apps/api/test-concurrency.ts` pass. Phase 4 is cutover.
 
 ---
 
@@ -94,9 +95,10 @@ also better than restoring Serializable, since MySQL's SERIALIZABLE turns plain 
 into shared locks and a read-then-write on one row deadlocks on the S→X upgrade.
 
 **§8.4 — `seq` renumbering is safe, but ordering must be explicit.** The plan correctly
-established that `seq` is not a hash input. `consolidate-data.ts` sorts `AuditLog` by
-`createdAt` before insert so the renumbered sequence matches chain order. `PlatformAuditLog`
-does **not** yet get the same treatment — see Phase 3 below.
+established that `seq` is not a hash input. What the plan did not say is that the
+*ordering* has to be made explicit: `consolidate-data.ts` now sorts both `AuditLog` and
+`PlatformAuditLog` by `createdAt` before insert, so the renumbered sequence matches
+chain order. `PlatformAuditLog` was relying on physical row order until Phase 3.
 
 ---
 
@@ -140,26 +142,47 @@ typed.
 
 ## Phase 3 — data and testing
 
-Outstanding work before cutover:
+**Done.**
 
-- **`consolidate-data.ts`: `SET FOREIGN_KEY_CHECKS=0` is connection-scoped** and Prisma
-  pools connections, so the load may run on connections where checks are still on. Use a
-  single dedicated connection, or drop and recreate the constraints around the load.
-- **`consolidate-data.ts`: sort `PlatformAuditLog` by `createdAt`** before insert, as
-  `AuditLog` already is. It is read in `ORDER BY CTID` (physical) order, and its counter
-  is then seeded from `ORDER BY seq DESC LIMIT 1` — so if physical order ever diverges
-  from insertion order, the counter points at the wrong tail and the next platform audit
-  append forks the chain.
-- **Expect row-count parity failures from collation.** Postgres allowed `AM-001` and
-  `am-001` as distinct asset tags; MySQL's `general_ci` does not, and the load uses
-  `skipDuplicates: true`, which drops the loser without an error. The §8.3 parity check
-  is what catches this — decide the reconciliation rule before cutover, not during.
-- **Step 13, cross-tenant isolation suite.** Not started. This is the test that actually
-  proves the migration; do not cut over without it.
-- **Step 14, seat-license concurrency test.** Written (`apps/api/test-concurrency.ts`,
-  6 scenarios) but never run green, since it was blocked on the Postgres-syntax lock.
+Three defects in `consolidate-data.ts`:
 
----
+- `SET FOREIGN_KEY_CHECKS=0` is SESSION state and Prisma pools connections, so the
+  setting applied to one connection while inserts ran on others. Measured: with the
+  default pool, 20 of 25 queries still saw checks ON — the disable was very nearly a
+  no-op, and earlier runs only succeeded because the model insertion order happened
+  to satisfy dependencies. Fixed by forcing `connection_limit=1`, with an assertion
+  that the setting actually stuck.
+- `PlatformAuditLog` was read in CTID (physical) order and its `seq` re-assigned on
+  insert, so chain order could diverge from sequence order after any VACUUM FULL or
+  dump/restore — and its counter is seeded from `ORDER BY seq DESC LIMIT 1`. Now
+  sorted by `createdAt`, as `AuditLog` already was.
+- `createMany({ skipDuplicates: true })` silently dropped rows rejected by a unique
+  constraint. Shortfalls are now collected per model and reported at the end with a
+  non-zero exit, since migrating fewer rows than the source held without saying so is
+  the worst available outcome.
+
+**Cross-tenant isolation suite** (`tools/verify-tenant-isolation.sh`, 36 checks):
+provisions two workspaces, seeds a row of each type in one, then attacks it with the
+other's session — read by id, mutate by id, list leakage, cross-tenant foreign-key
+references, and independent audit-chain verification.
+
+It found two real defects on its first run, both invisible under database-per-tenant
+because the referenced row simply did not exist in your database:
+
+- Tenant A could create an asset citing tenant B's `categoryId` — and since
+  `assets.get()` does `include: { category: true }`, B's category was rendered back
+  in A's response. Cross-tenant data disclosure.
+- Tenant A could open a ticket against tenant B's asset.
+
+Fixed by `apps/api/src/tenancy/assert-tenant-refs.ts`, which validates supplied ids
+through the *scoped* client — where "not found" and "not yours" are the same answer —
+and is applied to assets, tickets, reservations, maintenance, attachments, software
+licences and both procurement paths. It also returns an identical message either way,
+so the error cannot be used to probe whether a row exists in another tenant.
+
+A third finding was a wrong status code rather than a leak: `PATCH /tickets/:id`
+returned 400 for a foreign ticket where every other resource returns 404, which is
+itself an existence oracle. Now 404.
 
 ## Phase 4 — cutover
 

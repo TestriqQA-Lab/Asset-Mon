@@ -6,6 +6,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { assertTenantRefs } from '../tenancy/assert-tenant-refs';
 import { EventBusService } from '../events/events.module';
 import { ModuleGuard } from '../tenant-settings/module.guard';
 import { RequireModule } from '../tenant-settings/require-module.decorator';
@@ -78,6 +79,11 @@ class TicketsService {
 
   async create(data: any, openedById: string, openedByRole?: string) {
     const db = this.ctx.prisma();
+    await assertTenantRefs(db, {
+      asset: data.assetId,
+      user: data.assignedToId,
+      vendor: data.vendorId,
+    });
     const ticketNumber = await this.nextTicketNumber();
     // EMPLOYEE may only raise a ticket — they cannot pre-assign or pick a vendor.
     // Drop those fields on input so a crafted body cannot escalate by setting an
@@ -160,7 +166,10 @@ class TicketsService {
   async update(id: string, data: any, performedById: string) {
     const db = this.ctx.prisma();
     const before = await db.serviceTicket.findUnique({ where: { id } });
-    if (!before) throw new BadRequestException('Ticket not found');
+    // 404, not 400: the scoped client returns nothing both for a ticket that does not
+    // exist and for one belonging to another tenant, and those must look identical.
+    if (!before) throw new NotFoundException('Ticket not found');
+    await assertTenantRefs(db, { user: data.assignedToId, vendor: data.vendorId });
     const patch: any = { ...data };
     if (data.cost !== undefined) patch.cost = data.cost === null || data.cost === '' ? null : Number(data.cost);
     if (data.status && data.status !== before.status) {

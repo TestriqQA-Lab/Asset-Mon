@@ -10,6 +10,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { assertTenantRefs } from '../tenancy/assert-tenant-refs';
 import { AssetsService } from '../assets/assets.service';
 import { AssetsModule } from '../assets/assets.module';
 import { ModuleGuard } from '../tenant-settings/module.guard';
@@ -88,6 +89,8 @@ export class PurchaseOrdersService {
     const db = this.ctx.prisma();
     const poNumber = await this.nextPoNumber();
     const items = (data.items || []) as any[];
+    await assertTenantRefs(db, { vendor: data.vendorId });
+    for (const i of items) await assertTenantRefs(db, { category: i.categoryId });
     const total = items.reduce((s, i) => s + (i.unitCost || 0) * (i.quantity || 0), 0);
     // Flat transaction: each create goes through the Prisma extension individually
     // (nested relation writes bypass the extension's $allOperations hook).
