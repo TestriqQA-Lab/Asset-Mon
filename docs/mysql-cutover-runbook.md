@@ -149,10 +149,12 @@ Rehearsed locally on 2026-08-05 and proven end to end: a `dist` built in a full 
 booted from an `--omit=dev` tree and answered health 200 / login 401 against MySQL. The
 numbers below are measured, not estimated.
 
-**Deploy the whole repo.** This is a monorepo and the API imports `@assetmon/db`,
-`@assetmon/db-catalog`, `@assetmon/db-tenant` and `@assetmon/shared` as workspace
-packages. Installing from `apps/api` alone dies with `E404 @assetmon/db` — npm tries the
-public registry because there is no workspace root to resolve the link against.
+**Deploy the workspace, not the whole repo.** This is a monorepo and the API imports
+`@assetmon/db`, `@assetmon/db-catalog`, `@assetmon/db-tenant` and `@assetmon/shared` as
+workspace packages. Installing from `apps/api` alone dies with `E404 @assetmon/db` — npm
+tries the public registry because there is no workspace root to resolve the link
+against. But npm needs the workspace *root and manifests*, not the source tree that
+surrounds them; see "What to deploy" below.
 
 **Install from the repo root, scoped to the API:**
 
@@ -176,16 +178,62 @@ production install — `nest`, `typescript`, `ts-node` and `jest` are all absent
 (verified). Run `npm -w @assetmon/api run build` on your machine and upload the
 resulting `dist` (2.1 MB).
 
+### What to deploy
+
+Installed and booted from exactly this tree: health 200, login 401 against MySQL, and
+`platform-bootstrap-admin.js` resolves its imports. `apps/web` being absent is fine —
+the install completes at 219 packages instead of 222.
+
+```
+package.json
+package-lock.json
+.env                                            from .env.production.example, never committed
+packages/db/                                    package.json, prisma/, src/index.*, post-migrate-collations.sql
+packages/shared/                                package.json, src/
+packages/db-catalog/                            package.json only
+packages/db-tenant/                             package.json only
+apps/api/package.json
+apps/api/dist/                                  built locally
+apps/api/scripts/platform-bootstrap-admin.js
+```
+
+2.8 MB before install. Leave out `docs/`, `ci/`, `tools/`, `.github/`, `apps/web/`,
+`apps/api/src/`, `apps/api/test/`, the `.ts` scripts under `apps/api/scripts/`, the
+Docker files, the `Caddyfile`, `run-local.sh`, `verify-deploy.sh` and the root `*.md`.
+
+**This is not a disk-space measure** — `node_modules` is 216 MB either way, so the
+saving is about 1 MB. The reason is that `docs/` describes the infrastructure and the
+cutover procedure and `tools/` contains scripts that provision workspaces; neither
+belongs on a production host.
+
+Two things that look droppable and are not:
+
+- **`packages/db-catalog` and `packages/db-tenant`.** Nothing imports them any more —
+  zero references in `apps/api/src`, and the migration scripts talk to Postgres through
+  `pg` directly — but they are still listed in `apps/api/package.json`, so npm needs the
+  directories present to resolve the workspace links. One `package.json` each is enough;
+  their `prisma/` trees and generated clients are not. Retiring them properly (see the
+  end of this document) removes even that.
+- **`apps/api/scripts/platform-bootstrap-admin.js`.** This creates the first platform
+  super-admin on a fresh database. It is plain JS, so unlike the `.ts` migration scripts
+  it runs on the host — and it loads `../dist/platform/platform-audit-hash`, so it needs
+  `apps/api/dist` beside it.
+
+**Do not flatten the tree.** `main.ts` resolves the environment file as
+`path.resolve(__dirname, '../../../.env')` — from `apps/api/dist` that lands on the repo
+root. Placing `dist` at any other depth silently loses every environment variable.
+
 **Still open — confirm on the plan before the first deploy:**
 
 - **Node version.** The app targets Node 20 (`engines: >=20`); the rehearsal ran on
   Node 24. Confirm what the plan offers and pin it if the panel allows.
-- **Where `.env` loads from.** The app expects it at the repo root. Verify that holds
-  once Hostinger sets the application root.
 - **Symlinks.** If you ever upload a prebuilt `node_modules` instead of installing on
   the host, workspace packages are symlinks — confirm the transfer preserves them.
   Installing on the host avoids the question entirely, which is why it is the
   documented path.
+- **`UPLOAD_DIR`.** Must be an absolute path that exists and is writable by the app
+  user. Attachment uploads otherwise fall back to `<cwd>/uploads`, which moves with
+  whatever directory the process was started in.
 - **Running one-off commands.** Step 1 (schema) is a `prisma` invocation and the CLI
   *is* in the production tree, so it can run on the host if you have shell access.
   Steps 2 to 4 are TypeScript scripts run through `ts-node`, which is **not** there —
