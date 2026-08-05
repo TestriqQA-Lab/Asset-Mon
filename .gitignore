@@ -77,3 +77,6 @@ packages/*/.prisma/
 /docs/deployment-fly-vs-aws.md
 /docs/snipeit-analysis-report.md
 verify-deploy.override.tmp.yml
+
+# Output of tools/build-deploy-archive.sh — rebuildable, and it carries a dist.
+/dist-deploy/

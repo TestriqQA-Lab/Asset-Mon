@@ -143,6 +143,12 @@ The API runs as a managed Node process, not a container. `docker-compose.yml`,
 development tooling** — nothing in production uses them. Hostinger fronts the app with
 its own web server and provides the MariaDB.
 
+> **The hosting-side plan is [hostinger-deployment-plan.md](./hostinger-deployment-plan.md)**
+> — panel specifics, Node version, email provider, domain strategy and the order to do
+> things in. Read it alongside this section. Note especially that production starts from
+> an **empty** database: steps 2 to 4 above are a migration rehearsal and are skipped for
+> the real deployment.
+
 ### Packaging
 
 Rehearsed locally on 2026-08-05 and proven end to end: a `dist` built in a full tree
