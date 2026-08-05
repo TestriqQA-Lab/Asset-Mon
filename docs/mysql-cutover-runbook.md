@@ -143,28 +143,55 @@ The API runs as a managed Node process, not a container. `docker-compose.yml`,
 development tooling** — nothing in production uses them. Hostinger fronts the app with
 its own web server and provides the MariaDB.
 
-**Unverified — check these before the first deploy.** This section is written from the
-shape of the app, not from a completed Hostinger deployment, and each of these could
-change the steps:
+### Packaging
 
-- **Node version.** The app is developed against Node 20. Confirm the plan offers 20+
-  and pin it if the panel allows.
-- **npm workspaces.** This is a monorepo: the API imports `@assetmon/db` and
-  `@assetmon/shared` as workspace packages. If the Node hosting installs only a
-  subdirectory, the workspace links will not resolve and the app will not start. This
-  is the single most likely thing to bite.
-- **A build step.** `nest build` needs devDependencies. If the platform installs with
-  `--omit=dev` there is no `nest` and no `prisma` CLI. Either build locally and upload
-  `apps/api/dist` plus a production `node_modules`, or ensure the install includes dev
-  dependencies.
-- **The Prisma client is generated, not committed.** A `postinstall` in the root
-  `package.json` runs `npm -w @assetmon/db run generate`, which covers a normal
-  install — but it needs the `prisma` CLI present (a devDependency of `packages/db`).
-  If the platform strips dev dependencies, move `prisma` to `dependencies` there.
-- **Running one-off commands.** Steps 1 to 4 above are CLI scripts. They need shell
-  access to the host, or to be run from your machine against the database with Remote
-  MySQL temporarily enabled and your IP allowlisted. That allowlist is for the
-  *migration*, not for the running app.
+Rehearsed locally on 2026-08-05 and proven end to end: a `dist` built in a full tree
+booted from an `--omit=dev` tree and answered health 200 / login 401 against MySQL. The
+numbers below are measured, not estimated.
+
+**Deploy the whole repo.** This is a monorepo and the API imports `@assetmon/db`,
+`@assetmon/db-catalog`, `@assetmon/db-tenant` and `@assetmon/shared` as workspace
+packages. Installing from `apps/api` alone dies with `E404 @assetmon/db` — npm tries the
+public registry because there is no workspace root to resolve the link against.
+
+**Install from the repo root, scoped to the API:**
+
+```bash
+npm install -w @assetmon/api --include-workspace-root --omit=dev
+```
+
+222 packages, ~211 MB (`du`; 161 MB by file-size sum). `-w` keeps Next.js and React
+out — verified absent from the resulting tree; a plain root `npm install --omit=dev`
+pulls in the whole web app for 589 MB. `--include-workspace-root` is what makes the
+workspace links resolve, and it is also what runs the root `postinstall`
+(`npm -w @assetmon/db run generate`), which generates the Prisma client on the host.
+
+`prisma` is a production dependency of `packages/db`, so the CLI is present in this
+tree. It used to be a devDependency that survived `--omit=dev` only because it is an
+optional *peer* of `@prisma/client` — true on npm 10 and 11, but implicit. Making it
+explicit costs nothing and removes the dependence on that behaviour.
+
+**Build locally, upload `apps/api/dist`.** You cannot build on the host from a
+production install — `nest`, `typescript`, `ts-node` and `jest` are all absent
+(verified). Run `npm -w @assetmon/api run build` on your machine and upload the
+resulting `dist` (2.1 MB).
+
+**Still open — confirm on the plan before the first deploy:**
+
+- **Node version.** The app targets Node 20 (`engines: >=20`); the rehearsal ran on
+  Node 24. Confirm what the plan offers and pin it if the panel allows.
+- **Where `.env` loads from.** The app expects it at the repo root. Verify that holds
+  once Hostinger sets the application root.
+- **Symlinks.** If you ever upload a prebuilt `node_modules` instead of installing on
+  the host, workspace packages are symlinks — confirm the transfer preserves them.
+  Installing on the host avoids the question entirely, which is why it is the
+  documented path.
+- **Running one-off commands.** Step 1 (schema) is a `prisma` invocation and the CLI
+  *is* in the production tree, so it can run on the host if you have shell access.
+  Steps 2 to 4 are TypeScript scripts run through `ts-node`, which is **not** there —
+  run those from your machine against the database with Remote MySQL temporarily
+  enabled and your IP allowlisted. That allowlist is for the *migration*, not for the
+  running app.
 
 **Start command:** `node apps/api/dist/main.js` (`apps/api/package.json` exposes it as
 `npm start`). The app reads `.env` from the repo root — see `.env.production.example`.

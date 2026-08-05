@@ -65,8 +65,10 @@ Phases 1–3 are complete and Phase 4 is rehearsed end to end (see
 49/49, and the schema deploys unchanged to MySQL 8.4.11, MariaDB 10.11.18 and MariaDB
 11.8.8 — the last being what Hostinger actually runs.
 
-What remains is not code: provisioning the production database, and confirming
-Hostinger's Node.js hosting can build a monorepo with a generated Prisma client.
+What remains is not code. Packaging is settled — the monorepo installs and generates its
+Prisma client from a production-only install, and the build happens locally (see
+"Packaging" in the runbook). Left: provisioning the production database in hPanel, then
+running the runbook.
 
 ---
 
@@ -205,8 +207,9 @@ itself an existence oracle. Now 404.
   provides. Docker is local tooling only — `docker-compose.yml`, the `Caddyfile` and
   `apps/api/Dockerfile` play no part in production. API and database share a host, so
   `DATABASE_URL` is a localhost connection needing no Remote MySQL or IP allowlist for
-  the app. The monorepo and build-step caveats that still need checking are listed under
-  "Deploying to Hostinger Node hosting" in the runbook.
+  the app. The monorepo and build-step questions are answered — install command, what
+  the production tree does and does not contain, and what has to be built locally are
+  under "Packaging" in the runbook.
 - **The production engine is MariaDB 11.8.8** (confirmed 2026-08-04). The schema deploys
   to it unchanged — the table default is `utf8mb4_bin`, which both engines have.
 - **Then retire the legacy estate:** the `postgres` compose service and `pgdata` volume,
