@@ -95,7 +95,9 @@ path" that does not exist.
 ### Provider: Brevo
 
 Free tier, 300 emails/day (9,000/month), `smtp-relay.brevo.com` port 587, no card
-required.
+required. Note that `SMTP_USER` is **not** the account email — Brevo issues a separate
+SMTP login of the form `<digits>@smtp-brevo.com`, shown under `SMTP & API → SMTP`
+alongside the key.
 
 **No code change is needed.** `events.module.ts:50` builds the transport with
 `port: SMTP_PORT || 587` and `secure: false`, which is STARTTLS on 587 — exactly what
@@ -142,6 +144,59 @@ count — five managers and twenty tickets in a day is 100 emails, a third of th
 and it competes with login codes. Note that `tickets.module.ts:145` already raises an
 **in-app** notification for the same event, so the email is duplicative: if the quota
 gets tight, removing it costs no signal.
+
+### Tested against the real account — 2026-08-07
+
+An account exists and a real message was sent through it, using the transport the app
+itself builds (`smtp-relay.brevo.com:587`, `secure: false`, so STARTTLS — the same
+construction as `events.module.ts:50`). The prediction held: **no code change is
+needed.**
+
+```
+connection + auth OK
+accepted : ["ratnesh.waghare@testriq.com"]
+response : 250 2.0.0 OK: queued
+```
+
+It arrived **in the inbox, not spam**, and Brevo's free tier added **no branding or
+footer of its own** — that question is closed.
+
+**But Gmail showed it as `AssetMon via 11843703.brevosend.com`, with a "this looks
+suspicious" warning and a report-spam prompt. That is a blocker for real users.**
+
+The cause is not a misconfiguration, it is the consequence of a decision taken on
+purpose: the sender is a *verified single sender*, not an authenticated domain, so the
+message is signed by Brevo's domain while claiming to be from `testriq.com`. Gmail
+flags exactly that gap. Measured on the day: `testriq.com` publishes
+`v=DMARC1; p=none;` with no `rua`, and an SPF of
+`include:_spf.google.com include:_spf.mail.hostinger.com ~all` — Brevo appears in
+neither, so nothing aligns.
+
+`p=none` is why it was delivered at all rather than rejected.
+
+**What this is and is not good enough for:**
+
+| | |
+|---|---|
+| The plumbing — SMTP, auth, the app's own code path | works |
+| Testing, and the operator logging in during setup | fine |
+| Sending a login code to a real user | **not acceptable** |
+
+A one-time code that arrives under a suspicion banner is worse than a cosmetic problem.
+Users distrust it, some press *Report spam*, and that feeds back into sender reputation
+until the rest of the mail starts landing in spam too.
+
+**The fix, when the account moves to the company:** authenticate the domain — Brevo's
+DKIM record plus `include:spf.brevo.com` in the SPF for `testriq.com`. Both the `via`
+line and the warning go away. That is live corporate mail DNS on Google Workspace, so it
+needs the company account and IT sign-off, which is why it was deliberately not done as
+part of a personal test account.
+
+**Two things that must move with it.** The current SMTP credentials belong to a Brevo
+account registered to one employee's address. If that arrangement is still in place when
+real users arrive, the company's login email depends on a personal account — losing it
+takes sign-in with it. And the sender verified today is a person's mailbox; production
+should send as something like `no-reply@`, not from an individual.
 
 ### Why email is not optional
 
@@ -284,6 +339,10 @@ node -e "for(let i=0;i<6;i++)console.log(require('crypto').randomBytes(32).toStr
 
 - **The website limit.** Two Node apps are needed (API + web). Whether the plan allows a
   second was never confirmed — creating the first app will show it.
+- **Domain authentication for email, before any real user signs in.** Tested and
+  working, but sending as an unauthenticated domain makes Gmail label the login code
+  suspicious — see "Tested against the real account" above. Fine for setup and testing;
+  not something to leave in place once other people have accounts.
 - **Build and start command fields.** Whether they can be overridden decides whether the
   root `start` script has to live in the repo rather than only in the archive.
 - **Brevo branding.** Whether the free tier stamps transactional email. A test send
