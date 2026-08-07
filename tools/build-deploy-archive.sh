@@ -62,6 +62,11 @@ done
 mkdir -p "$STAGE/apps/api/scripts"
 cp apps/api/package.json "$STAGE/apps/api/"
 cp -r apps/api/dist "$STAGE/apps/api/"
+# Source maps carry the original TypeScript. Nothing serves them -- the API registers
+# no static-file middleware -- but they are of no use in production either, so they do
+# not go on the host. Stack traces then point at the compiled JS, which is fine there.
+find "$STAGE/apps/api/dist" -name '*.js.map' -delete
+find "$STAGE/apps/api/dist" -name '*.tsbuildinfo' -delete
 # Plain JS, so unlike the .ts migration scripts this one runs on the host. It creates
 # the first platform super-admin and loads ../dist/platform/platform-audit-hash.
 cp apps/api/scripts/platform-bootstrap-admin.js "$STAGE/apps/api/scripts/"
