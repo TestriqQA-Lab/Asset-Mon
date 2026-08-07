@@ -241,17 +241,41 @@ node -e "for(let i=0;i<6;i++)console.log(require('crypto').randomBytes(32).toStr
 
 ## Open before the first deploy
 
-- **The port.** `main.ts:175` reads `API_PORT` only — it does **not** read `PORT`.
-  Managed Node hosting commonly injects `PORT` and expects the app to listen there. If
-  Hostinger does that, the app binds 4000, the proxy finds nothing, and the site returns
-  502 while the app looks healthy. Check on the app's settings screen. The fix is one
-  line: `process.env.PORT || process.env.API_PORT || 4000`.
 - **The website limit.** Two Node apps are needed (API + web). Whether the plan allows a
   second was never confirmed — creating the first app will show it.
 - **Build and start command fields.** Whether they can be overridden decides whether the
   root `start` script has to live in the repo rather than only in the archive.
 - **Brevo branding.** Whether the free tier stamps transactional email. A test send
   answers it. Another provider's logo on a login code is not acceptable.
+
+## Settled by the readiness pass
+
+A pre-deployment audit on 2026-08-07 ran the project's own gates and reviewed the
+production entry point, the auth surface and the dependency tree. Two of the four
+"open" items above were closed by fixing them; one was closed by deciding not to.
+
+- **The port is handled** (`ec72f28`). `main.ts` now reads `PORT` first and falls back
+  to `API_PORT`. Verified: with `PORT` set the app listens there and ignores the
+  `API_PORT` the repo's own `.env` supplies — the precedence a managed host needs.
+- **Shutdown hooks are enabled** (`50ba3dd`). `GlobalPrismaService.onModuleDestroy()`
+  had always called `$disconnect()` but Nest never invoked it, so connections leaked on
+  every restart. The signal path is unverifiable on Windows; confirm on the host by
+  watching the connection count across a restart.
+- **The two `js-yaml` advisories are accepted, not fixed.** `@nestjs/swagger` 11.4.5
+  pulls `js-yaml` 4.3.0 and 11.4.6 pulls 5.2.1; both are flagged, so the bump only
+  swaps one DoS advisory for another and npm's own suggested fix is to go back. A clean
+  tree needs `js-yaml` ≥ 5.2.2, which npm will not resolve through an `overrides` entry
+  without regenerating the whole lockfile — too broad a change to make immediately
+  before a first deployment. Exposure is close to zero regardless: Swagger is disabled
+  when `NODE_ENV=production` unless `SWAGGER_ENABLED=1`, and `js-yaml` there serialises
+  a generated document rather than parsing anything a caller controls. Revisit during
+  the next dependency-upgrade pass, when the lockfile is being refreshed anyway.
+
+Verified green in the same pass: `npm run verify` 48/48, `tools/verify-tenant-isolation.sh`
+**36/36** against a live API on MySQL, `apps/api/test-concurrency.ts` 6/6, and all 250
+HTTP routes checked for guard coverage — 231 guarded, and every one of the 19 unguarded
+routes is either an auth entry point, the health check, a signed-and-ownership-checked
+file route, or the HMAC-verified Razorpay webhook.
 
 ## Risks worth carrying
 
@@ -268,3 +292,11 @@ node -e "for(let i=0;i<6;i++)console.log(require('crypto').randomBytes(32).toStr
 - **`utf8mb4_general_ci` folds accents.** The 12 relaxed columns treat `José` and `Jose`
   as equal, including for UNIQUE enforcement on `Tenant.slug`, `User.email` and
   `Asset.assetTag`. See the runbook.
+- **Auth coverage has no automated check.** `JwtAuthGuard` and `RolesGuard` are applied
+  per-controller, not globally — only `ThrottlerGuard` is an `APP_GUARD`. A new
+  controller that omits `@UseGuards` is public, silently. Tenant scoping has a drift
+  check that fails the build (`scoped-client.spec.ts` reads Prisma's DMMF); the
+  equivalent for auth does not exist. All 250 current routes were checked by hand.
+- **No backups exist.** No dump script, no schedule, no restore procedure — and uploads
+  live on local disk, so they are not covered either. This is the largest gap in the
+  deployment and it is not a code defect.
