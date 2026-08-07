@@ -42,7 +42,9 @@ npm -w @assetmon/api run build >/dev/null
 ok "apps/api/dist built"
 
 hdr "2. Stage the deploy tree"
-cp package.json package-lock.json "$STAGE/"
+# The repo's package-lock.json describes a workspace tree and does not match the flat
+# manifest written in step 3, so it is not copied. A fresh lock is generated there instead.
+cp package.json "$STAGE/"
 
 mkdir -p "$STAGE/packages/db/src" "$STAGE/packages/shared"
 cp packages/db/package.json packages/db/post-migrate-collations.sql "$STAGE/packages/db/"
@@ -72,19 +74,62 @@ find "$STAGE/apps/api/dist" -name '*.tsbuildinfo' -delete
 cp apps/api/scripts/platform-bootstrap-admin.js "$STAGE/apps/api/scripts/"
 ok "staged $(find "$STAGE" -type f | wc -l | tr -d ' ') files"
 
-hdr "3. Rewrite the root scripts (archive only)"
-STAGE_PKG="$STAGE/package.json" node -e '
+hdr "3. Write a flat app manifest (archive only)"
+# The repo root is an npm workspace root: it declares no dependencies of its own, so
+# to a host that identifies a project by reading the root package.json it looks like
+# no framework at all. Hostinger's uploader rejects it outright with "Unsupported
+# framework or invalid project structure".
+#
+# So the archive gets a manifest shaped like an ordinary NestJS app: the API's real
+# dependencies at the root, with the four @assetmon/* packages resolved as `file:`
+# links to the copies bundled alongside. npm links those the same way it links
+# workspaces, so nothing about resolution changes at runtime.
+#
+# apps/api/dist stays where it is. main.ts finds the environment file at
+# ../../../.env relative to __dirname, and that only lands on the archive root while
+# dist sits three levels down.
+STAGE_PKG="$STAGE/package.json" API_PKG="apps/api/package.json" node -e '
   const fs = require("fs");
-  const p = process.env.STAGE_PKG;
-  const j = JSON.parse(fs.readFileSync(p, "utf8"));
-  j.scripts.start = "node apps/api/dist/main.js";
-  j.scripts.build = "echo \"dist is prebuilt and shipped in this archive; nothing to build\"";
-  fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
-'
-ok "start -> node apps/api/dist/main.js"
-ok "build -> no-op"
+  const api = JSON.parse(fs.readFileSync(process.env.API_PKG, "utf8"));
 
-hdr "4. Pack"
+  const deps = {};
+  for (const [name, range] of Object.entries(api.dependencies)) {
+    deps[name] = name.startsWith("@assetmon/")
+      ? "file:./packages/" + name.slice("@assetmon/".length)
+      : range;
+  }
+
+  fs.writeFileSync(process.env.STAGE_PKG, JSON.stringify({
+    name: "assetmon-api",
+    version: api.version,
+    private: true,
+    scripts: {
+      // No workspace syntax here — there are no workspaces in this tree. The schema
+      // declares its own output path, so the client still lands in packages/db/src/generated.
+      postinstall: "prisma generate --schema=packages/db/prisma/schema.prisma",
+      build: "echo \"dist is prebuilt and shipped in this archive; nothing to build\"",
+      start: "node apps/api/dist/main.js",
+    },
+    dependencies: deps,
+    engines: { node: ">=20" },
+  }, null, 2) + "\n");
+
+  console.log("   dependencies: " + Object.keys(deps).length +
+    " (" + Object.keys(deps).filter(d => d.startsWith("@assetmon/")).length + " local via file:)");
+'
+ok "root manifest now declares @nestjs/core — detectable as NestJS"
+ok "start -> node apps/api/dist/main.js"
+
+hdr "4. Resolve a lockfile for that manifest"
+# Without one the host resolves versions afresh at install time, so two deploys of the
+# same archive can end up with different transitive dependencies.
+# --ignore-scripts: lock-only resolution installs nothing, so the postinstall would run
+# `prisma` before it exists and fail the whole step.
+( cd "$STAGE" && npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 ) \
+  && ok "package-lock.json generated" \
+  || { printf '  \033[33m!\033[0m could not resolve a lockfile (offline?); shipping without one\n'; rm -f "$STAGE/package-lock.json"; }
+
+hdr "5. Pack"
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
 # tar, not zip: PowerShell's Compress-Archive writes backslash separators on Windows,
@@ -100,8 +145,10 @@ printf '\n\033[1mArchive:\033[0m %s (%s)\n' "$OUT" "$(du -h "$OUT" | cut -f1)"
 cat <<'EOF'
 
 On the host:
-  npm install -w @assetmon/api --include-workspace-root --omit=dev
+  npm install --omit=dev
   npm start
+
+(The archive is a flat app, not a workspace, so no -w / --include-workspace-root.)
 
 The database must exist and the schema must be deployed first, or Prisma raises P1001
 and the process exits. Set the environment variables in the hosting panel, not in a

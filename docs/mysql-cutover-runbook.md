@@ -155,29 +155,38 @@ Rehearsed locally on 2026-08-05 and proven end to end: a `dist` built in a full 
 booted from an `--omit=dev` tree and answered health 200 / login 401 against MySQL. The
 numbers below are measured, not estimated.
 
-**Deploy the workspace, not the whole repo.** This is a monorepo and the API imports
-`@assetmon/db`, `@assetmon/db-catalog`, `@assetmon/db-tenant` and `@assetmon/shared` as
-workspace packages. Installing from `apps/api` alone dies with `E404 @assetmon/db` — npm
-tries the public registry because there is no workspace root to resolve the link
-against. But npm needs the workspace *root and manifests*, not the source tree that
-surrounds them; see "What to deploy" below.
+**Do not deploy a workspace.** The repo root declares no dependencies of its own — it
+is only a workspace root — so a host that identifies a project by reading the root
+`package.json` sees no framework at all. Hostinger's uploader rejects it outright:
 
-**Install from the repo root, scoped to the API:**
-
-```bash
-npm install -w @assetmon/api --include-workspace-root --omit=dev
+```
+Unsupported framework or invalid project structure.
 ```
 
-222 packages, ~211 MB (`du`; 161 MB by file-size sum). `-w` keeps Next.js and React
-out — verified absent from the resulting tree; a plain root `npm install --omit=dev`
-pulls in the whole web app for 589 MB. `--include-workspace-root` is what makes the
-workspace links resolve, and it is also what runs the root `postinstall`
-(`npm -w @assetmon/db run generate`), which generates the Prisma client on the host.
+**The archive therefore ships a flat manifest**, written by
+`tools/build-deploy-archive.sh` and never committed to the repo: the API's own
+dependencies at the root, so `@nestjs/core` is visible and the project reads as NestJS,
+with `@assetmon/db`, `@assetmon/db-catalog`, `@assetmon/db-tenant` and
+`@assetmon/shared` declared as `file:./packages/…`. npm links those exactly as it links
+workspaces, so nothing about resolution changes at runtime. A lockfile is resolved for
+that manifest at build time, so the host installs the same versions every deploy.
 
-`prisma` is a production dependency of `packages/db`, so the CLI is present in this
-tree. It used to be a devDependency that survived `--omit=dev` only because it is an
-optional *peer* of `@prisma/client` — true on npm 10 and 11, but implicit. Making it
-explicit costs nothing and removes the dependence on that behaviour.
+**On the host:**
+
+```bash
+npm install --omit=dev
+```
+
+218 packages. No `-w`, no `--include-workspace-root` — there are no workspaces in this
+tree. The root `postinstall` runs
+`prisma generate --schema=packages/db/prisma/schema.prisma`; the schema declares its own
+output path, so the client still lands in `packages/db/src/generated`, which is where
+`@assetmon/db` requires it from.
+
+`prisma` is a production dependency of `packages/db`, so the CLI is present. It used to
+be a devDependency that survived `--omit=dev` only because it is an optional *peer* of
+`@prisma/client` — true on npm 10 and 11, but implicit. Making it explicit costs nothing
+and removes the dependence on that behaviour.
 
 **Build locally, upload `apps/api/dist`.** You cannot build on the host from a
 production install — `nest`, `typescript`, `ts-node` and `jest` are all absent
@@ -186,40 +195,46 @@ resulting `dist` (2.1 MB).
 
 ### What to deploy
 
-Installed and booted from exactly this tree: health 200, login 401 against MySQL, and
-`platform-bootstrap-admin.js` resolves its imports. `apps/web` being absent is fine —
-the install completes at 219 packages instead of 222.
+Built by `tools/build-deploy-archive.sh`. Installed and booted from exactly this tree:
+218 packages, health 200, `/docs` 404, login 401 against MySQL, and
+`platform-bootstrap-admin.js` resolves its imports.
 
 ```
-package.json
-package-lock.json
-.env                                            from .env.production.example, never committed
+package.json                                    flat manifest, generated — not the repo's
+package-lock.json                               resolved for that manifest at build time
 packages/db/                                    package.json, prisma/, src/index.*, post-migrate-collations.sql
 packages/shared/                                package.json, src/
 packages/db-catalog/                            package.json only
 packages/db-tenant/                             package.json only
 apps/api/package.json
-apps/api/dist/                                  built locally
+apps/api/dist/                                  built locally, source maps stripped
 apps/api/scripts/platform-bootstrap-admin.js
 ```
 
-2.8 MB before install. Leave out `docs/`, `ci/`, `tools/`, `.github/`, `apps/web/`,
+No `.env` — environment variables come from the hosting panel, and `dotenv` does not
+override what is already set.
+
+`apps/api/dist` keeps that exact depth on purpose: `main.ts` looks for the environment
+file at `../../../.env` relative to `__dirname`, which only reaches the archive root
+from three levels down.
+
+172 KB compressed. Left out: `docs/`, `ci/`, `tools/`, `.github/`, `apps/web/`,
 `apps/api/src/`, `apps/api/test/`, the `.ts` scripts under `apps/api/scripts/`, the
 Docker files, the `Caddyfile`, `run-local.sh`, `verify-deploy.sh` and the root `*.md`.
 
-**This is not a disk-space measure** — `node_modules` is 216 MB either way, so the
-saving is about 1 MB. The reason is that `docs/` describes the infrastructure and the
-cutover procedure and `tools/` contains scripts that provision workspaces; neither
-belongs on a production host.
+**This is not a disk-space measure** — `node_modules` dominates either way. The reason
+is that `docs/` describes the infrastructure and the cutover procedure and `tools/`
+contains scripts that provision workspaces; neither belongs on a production host.
 
 Two things that look droppable and are not:
 
 - **`packages/db-catalog` and `packages/db-tenant`.** Nothing imports them any more —
   zero references in `apps/api/src`, and the migration scripts talk to Postgres through
-  `pg` directly — but they are still listed in `apps/api/package.json`, so npm needs the
-  directories present to resolve the workspace links. One `package.json` each is enough;
-  their `prisma/` trees and generated clients are not. Retiring them properly (see the
-  end of this document) removes even that.
+  `pg` directly — but they are still listed in `apps/api/package.json`, which is what the
+  flat manifest is generated from, so npm needs the directories present to resolve the
+  `file:` links. One `package.json` each is enough; their `prisma/` trees and generated
+  clients are not. Retiring them properly (see the end of this document) removes even
+  that.
 - **`apps/api/scripts/platform-bootstrap-admin.js`.** This creates the first platform
   super-admin on a fresh database. It is plain JS, so unlike the `.ts` migration scripts
   it runs on the host — and it loads `../dist/platform/platform-audit-hash`, so it needs
