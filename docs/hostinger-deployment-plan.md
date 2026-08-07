@@ -153,9 +153,23 @@ The platform super-admin login chain is password → **emailed OTP** → TOTP
 - not in the logs — only `Sent email to <addr>: <subject>` is written
 - not in the response — `devCode` is suppressed when `NODE_ENV=production`
 
-The first login is unaffected: a freshly bootstrapped admin is not yet enrolled, so
-`login()` returns `MFA_SETUP_REQUIRED` and goes to the setup wizard. **Every login after
-enrolment needs the email.**
+**Working email is a prerequisite of the first login, not a later concern.** A freshly
+bootstrapped admin is not yet enrolled, so `login()` returns `MFA_SETUP_REQUIRED` and
+hands over to the setup wizard — and the wizard cannot be completed without email
+either. Its first step is `primary-email/send` → `primary-email/verify`, and
+`mfaSetupComplete()` (`platform-mfa.util.ts:32`) requires **both**
+`primaryEmailVerifiedAt` and `recoveryEmailVerifiedAt` alongside TOTP and the backup
+codes. `login()` keeps returning `MFA_SETUP_REQUIRED` until all of them are set, so with
+no working SMTP the wizard stalls at step one and there is no way into the platform
+console at all.
+
+Two consequences for the order of work:
+
+- **Set up Brevo before creating the super-admin**, not after. Domain verification is
+  DNS, so it is also the slowest thing to start.
+- **Two different receiving mailboxes are needed** — a primary and a recovery, and the
+  recovery has to be a different address or it recovers nothing. These are ordinary
+  inboxes and need no setup; Brevo is only the sending side.
 
 Tenant users are better off — the tenant-scoped `EmailLog` does store `body`
 (`schema.prisma:963`), so their codes can be read out of the database in a pinch.
@@ -219,6 +233,9 @@ Three things that decide whether this is actually a backup:
 
 ## Order
 
+0. **Set up Brevo first** — account, sending domain verified (SPF/DKIM), SMTP key in
+   hand. It goes first because domain verification waits on DNS, and because step 7
+   cannot be completed without it.
 1. **Create the MariaDB database and user** in hPanel.
 2. **Deploy the schema** — runbook step 1. Runnable on the host over SSH (`prisma` is a
    production dependency, so the CLI is in the tree) or from a laptop with Remote MySQL
