@@ -172,6 +172,12 @@ async function bootstrap() {
     SwaggerModule.setup('docs', app, doc);
   }
 
+  // GlobalPrismaService.onModuleDestroy() calls $disconnect(), but Nest only runs
+  // that hook if shutdown hooks are enabled. Without this, SIGTERM kills the
+  // process outright and the database connections are left for the server to reap
+  // — which matters on hosting that restarts the app routinely.
+  app.enableShutdownHooks();
+
   const port = Number(process.env.API_PORT || 4000);
   await app.listen(port);
   // eslint-disable-next-line no-console
