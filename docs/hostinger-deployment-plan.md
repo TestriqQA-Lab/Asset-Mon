@@ -193,6 +193,30 @@ one — email does not force the domain decision early.
 
 ---
 
+## Backups
+
+Hostinger's Business plan backs up automatically and that is what this deployment
+uses — no dump script, no cron. Daily backups kept 7 days, weekly kept 6 weeks,
+**databases included, not only files**. Restore and download from
+`hPanel → Websites → Dashboard → Backups`.
+
+Three things that decide whether this is actually a backup:
+
+- **`UPLOAD_DIR` has to sit inside the backed-up area.** It must be outside the deployed
+  tree so a redeploy does not wipe it, *and* inside the account's file space so the
+  backup picks it up. Put it under the home directory, beside the app rather than in it.
+  Somewhere outside both and attachments are the one thing with no copy anywhere.
+- **Restore once before trusting it.** A backup nobody has restored is a belief, not a
+  backup. Restore into a scratch database and confirm the tables and row counts, while
+  it costs nothing to be wrong.
+- **Know what it does not cover.** Same vendor, same account: if the account is lost or
+  suspended, the backups go with it, so this is protection against mistakes and
+  corruption rather than against losing the provider. Recovery granularity is 24 hours,
+  and anything noticed more than six weeks late is gone. If the data ever justifies
+  more, the answer is a periodic off-site copy, not a different plan.
+
+---
+
 ## Order
 
 1. **Create the MariaDB database and user** in hPanel.
@@ -271,6 +295,19 @@ production entry point, the auth surface and the dependency tree. Two of the fou
   a generated document rather than parsing anything a caller controls. Revisit during
   the next dependency-upgrade pass, when the lockfile is being refreshed anyway.
 
+- **Route authentication now fails the build** (`3d01b28`). A spec walks the source and
+  asserts every route is behind a guard that establishes an identity, or is listed as
+  public with a reason. The list is checked both ways, so it cannot rot. Proven to fail
+  before it was trusted: a temporary unguarded controller, a list entry naming a deleted
+  route, and a list entry for a route that has since gained a guard are each reported.
+- **`categories/image/:name` deliberately has no ownership check**, unlike the logo and
+  asset-file routes, and this is not an oversight to correct. The logo URL is rendered
+  from *saved* settings, so the file is never referenced before it exists in the
+  database. The category form renders `form.imageUrl` straight from the upload response
+  as a preview, before the category is saved — adding an ownership check would 404 that
+  preview. The route is hardened by other means: a 24-hex random filename, path
+  containment, `nosniff` and a sandbox CSP.
+
 Verified green in the same pass: `npm run verify` 48/48, `tools/verify-tenant-isolation.sh`
 **36/36** against a live API on MySQL, `apps/api/test-concurrency.ts` 6/6, and all 250
 HTTP routes checked for guard coverage — 231 guarded, and every one of the 19 unguarded
@@ -292,11 +329,7 @@ file route, or the HMAC-verified Razorpay webhook.
 - **`utf8mb4_general_ci` folds accents.** The 12 relaxed columns treat `José` and `Jose`
   as equal, including for UNIQUE enforcement on `Tenant.slug`, `User.email` and
   `Asset.assetTag`. See the runbook.
-- **Auth coverage has no automated check.** `JwtAuthGuard` and `RolesGuard` are applied
-  per-controller, not globally — only `ThrottlerGuard` is an `APP_GUARD`. A new
-  controller that omits `@UseGuards` is public, silently. Tenant scoping has a drift
-  check that fails the build (`scoped-client.spec.ts` reads Prisma's DMMF); the
-  equivalent for auth does not exist. All 250 current routes were checked by hand.
-- **No backups exist.** No dump script, no schedule, no restore procedure — and uploads
-  live on local disk, so they are not covered either. This is the largest gap in the
-  deployment and it is not a code defect.
+- **Guards are still per-controller, not global.** Only `ThrottlerGuard` is an
+  `APP_GUARD`. The coverage spec now catches an omission at build time, but the default
+  for a newly written controller is still "public" — the check reports the mistake, it
+  does not prevent it.
