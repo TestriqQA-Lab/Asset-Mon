@@ -178,7 +178,11 @@ async function bootstrap() {
   // — which matters on hosting that restarts the app routinely.
   app.enableShutdownHooks();
 
-  const port = Number(process.env.API_PORT || 4000);
+  // PORT first: managed Node hosting assigns a port and routes its proxy at it, so
+  // ignoring it means the app binds somewhere the proxy never looks and every
+  // request 502s while the process itself looks healthy. API_PORT stays as the
+  // local-development knob and the fallback for platforms that inject nothing.
+  const port = Number(process.env.PORT || process.env.API_PORT || 4000);
   await app.listen(port);
   // eslint-disable-next-line no-console
   console.log(`[api] listening on http://localhost:${port}`);
