@@ -33,8 +33,24 @@ export class GlobalPrismaService extends PrismaClient implements OnModuleInit, O
     return this;
   }
 
-  async onModuleInit() {
-    await this.$connect();
+  /**
+   * Warm the connection without blocking startup.
+   *
+   * Prisma connects lazily on first query, so the explicit connect only moves that cost
+   * earlier — measured at 30ms, which buys nothing. Awaiting it does cost something
+   * though: any failure inside the engine becomes a startup failure. On Hostinger's
+   * shared hosting the engine panics here with "PANIC: timer has gone away", which took
+   * the whole application down before it could serve anything, including /health.
+   *
+   * Firing it off instead keeps the process alive and lets the failure surface on the
+   * request that actually needs the database, where the exception filter can turn it
+   * into a 500 rather than a dead process.
+   */
+  onModuleInit() {
+    this.$connect().catch((e) => {
+      // eslint-disable-next-line no-console
+      console.error(`[prisma] initial connect failed: ${e?.message || e}`);
+    });
   }
 
   async onModuleDestroy() {
