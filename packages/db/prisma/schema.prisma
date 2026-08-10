@@ -1,6 +1,12 @@
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated"
+  // "native" covers development machines. rhel-openssl-1.1.x is for CloudLinux, which
+  // Hostinger's shared hosting runs: Prisma cannot identify that distro
+  // ("Distro is undefined") and falls back to its Debian engine, which loads and then
+  // panics with "PANIC: timer has gone away". Building the RHEL engine as well gives
+  // src/index.js something correct to point at.
+  binaryTargets = ["native", "rhel-openssl-1.1.x"]
 }
 
 datasource db {
