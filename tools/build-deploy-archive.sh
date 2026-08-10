@@ -90,6 +90,23 @@ sed "s#require('\.\./dist/#require('../#g" apps/api/scripts/platform-bootstrap-a
   > "$STAGE/dist/scripts/platform-bootstrap-admin.js"
 grep -q "require('\.\./platform/platform-audit-hash')" "$STAGE/dist/scripts/platform-bootstrap-admin.js" \
   || { echo "  bootstrap CLI require paths were not rewritten as expected"; exit 1; }
+# Ship the CloudLinux query engine rather than trusting the host to fetch it.
+#
+# Prisma cannot identify CloudLinux ("Distro is undefined") and falls back to its Debian
+# engine, which loads and then panics with "PANIC: timer has gone away" on every query.
+# packages/db/src/index.js points PRISMA_QUERY_ENGINE_LIBRARY at the RHEL build instead —
+# but only if the file is there, and a `prisma generate` on the host is not guaranteed to
+# download an extra binaryTarget. Carrying it in the archive removes that dependency.
+RHEL_ENGINE="libquery_engine-rhel-openssl-1.1.x.so.node"
+if [ -f "packages/db/src/generated/$RHEL_ENGINE" ]; then
+  mkdir -p "$STAGE/dist/engines"
+  cp "packages/db/src/generated/$RHEL_ENGINE" "$STAGE/dist/engines/"
+  ok "bundled the CloudLinux engine ($(du -h "$STAGE/dist/engines/$RHEL_ENGINE" | cut -f1))"
+else
+  echo "  $RHEL_ENGINE missing — run: npm -w @assetmon/db run generate"
+  exit 1
+fi
+
 ok "staged $(find "$STAGE" -type f | wc -l | tr -d ' ') files (everything under dist/)"
 
 hdr "3. Write a flat app manifest (archive only)"
