@@ -89,6 +89,20 @@ async function bootstrap() {
   // for a process that is about to abort would advertise a service that will never come up.
   assertSecretsOrWarn();
 
+  // Report the connection the process actually received, without the password. A hosting
+  // panel showing one value while the running app uses another is otherwise invisible,
+  // and "authentication failed" alone does not say which credentials were tried.
+  for (const key of ['DATABASE_URL', 'CATALOG_DATABASE_URL']) {
+    const raw = process.env[key];
+    if (!raw) { log.warn(`${key} is NOT SET`); continue; }
+    try {
+      const u = new URL(raw);
+      log.info(`${key} -> user=${u.username} host=${u.hostname}:${u.port || '3306'} db=${u.pathname.slice(1)}`);
+    } catch {
+      log.warn(`${key} is set but is not a parseable URL`);
+    }
+  }
+
   const server = express();
   let ready = false;
 
