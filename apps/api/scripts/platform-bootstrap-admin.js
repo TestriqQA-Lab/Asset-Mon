@@ -26,9 +26,10 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..');
 require('dotenv').config({ path: path.join(repoRoot, '.env') });
 
 const bcrypt = require('bcryptjs');
-// Catalog and tenant data share one MySQL database now; @assetmon/db-catalog
-// still declares provider="postgresql" and cannot talk to it.
-const { PrismaClient } = require('@assetmon/db');
+// Catalog and tenant data share one MySQL database, so there is a single client.
+// Prisma 7 has no query engine, so the client is built with a driver adapter — see
+// makeAdapter in packages/db/src/index.js.
+const { PrismaClient, makeAdapter } = require('@assetmon/db');
 
 function parseArgs(argv) {
   const out = {};
@@ -162,7 +163,7 @@ async function resetMfaFlow(args, email) {
   const { clearMfaUserData } = require('../dist/platform/platform-mfa-clear');
   const { hashPlatformEntry } = require('../dist/platform/platform-audit-hash');
 
-  const prisma = new PrismaClient({ datasources: { db: { url: process.env.CATALOG_DATABASE_URL } } });
+  const prisma = new PrismaClient({ adapter: makeAdapter(process.env.CATALOG_DATABASE_URL) });
   try {
     await prisma.$connect();
     const user = await prisma.platformUser.findUnique({ where: { email } });
@@ -254,7 +255,7 @@ async function resetMfaFlow(args, email) {
     process.exit(2);
   }
 
-  const prisma = new PrismaClient({ datasources: { db: { url: process.env.CATALOG_DATABASE_URL } } });
+  const prisma = new PrismaClient({ adapter: makeAdapter(process.env.CATALOG_DATABASE_URL) });
   try {
     await prisma.$connect();
     

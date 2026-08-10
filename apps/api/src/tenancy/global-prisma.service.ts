@@ -1,5 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { PrismaClient } from '@assetmon/db';
+import { PrismaClient, makeAdapter } from '@assetmon/db';
 import { scopedClient, type ScopedPrismaClient } from './scoped-client';
 
 /**
@@ -13,6 +13,15 @@ import { scopedClient, type ScopedPrismaClient } from './scoped-client';
  */
 @Injectable()
 export class GlobalPrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  /**
+   * There is no query engine to fall back on, so the adapter is not optional: a client
+   * built without one throws before it can run a single query. See makeAdapter in
+   * packages/db/src/index.js for why the connection is assembled there.
+   */
+  constructor() {
+    super({ adapter: makeAdapter() });
+  }
+
   /** Tenant-confined access. Every query is filtered and stamped with `tenantId`. */
   forTenant(tenantId: string): ScopedPrismaClient {
     return scopedClient(this, tenantId);
@@ -38,9 +47,9 @@ export class GlobalPrismaService extends PrismaClient implements OnModuleInit, O
    *
    * Prisma connects lazily on first query, so the explicit connect only moves that cost
    * earlier — measured at 30ms, which buys nothing. Awaiting it does cost something
-   * though: any failure inside the engine becomes a startup failure. On Hostinger's
-   * shared hosting the engine panics here with "PANIC: timer has gone away", which took
-   * the whole application down before it could serve anything, including /health.
+   * though: a database that is unreachable at boot becomes a startup failure, and the
+   * process dies before it can serve anything, including /health. That is how the first
+   * Hostinger deploys presented — as a 503 behind a deployment marked Completed.
    *
    * Firing it off instead keeps the process alive and lets the failure surface on the
    * request that actually needs the database, where the exception filter can turn it

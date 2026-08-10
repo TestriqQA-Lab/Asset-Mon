@@ -11,11 +11,15 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies using only the workspace manifests first (better layer caching).
+#
+# The Prisma schema and its config come along even though they are not manifests: the
+# root package.json runs `npm -w @assetmon/db run generate` as a postinstall, so npm
+# install fails outright without them. It did fail, silently and for a long time, because
+# nothing in CI builds this image.
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
-COPY packages/db/package.json packages/db/
-COPY packages/db-catalog/package.json packages/db-catalog/
-COPY packages/db-tenant/package.json packages/db-tenant/
+COPY packages/db/package.json packages/db/prisma.config.ts packages/db/
+COPY packages/db/prisma packages/db/prisma
 COPY packages/shared/package.json packages/shared/
 RUN npm install
 
@@ -25,10 +29,6 @@ COPY . .
 # Generate the unified Prisma client, then compile the API. The client output is
 # gitignored and .dockerignore'd, so without this the build fails with a few
 # hundred type errors from the missing @assetmon/db module.
-#
-# db-catalog / db-tenant are deliberately NOT generated: nothing imports them any
-# more, and their schemas still declare provider="postgresql". They are removed
-# once cutover is signed off (see docs/mysql-cutover-runbook.md).
 RUN npm -w @assetmon/db run generate
 RUN npm -w @assetmon/api run build
 

@@ -16,7 +16,7 @@
  *     npx ts-node tools/totp-codes.ts [emailSubstring]
  */
 import { authenticator } from 'otplib';
-import { PrismaClient } from '@assetmon/db';
+import { PrismaClient, makeAdapter } from '@assetmon/db';
 import { decryptSecret } from '../apps/api/src/common/crypto';
 
 function required(name: string): string {
@@ -25,7 +25,7 @@ function required(name: string): string {
   return v;
 }
 
-const db = new PrismaClient({ datasources: { db: { url: required('DATABASE_URL') } } });
+const db = new PrismaClient({ adapter: makeAdapter(required('DATABASE_URL')) });
 const filter = process.argv[2];
 
 async function main() {

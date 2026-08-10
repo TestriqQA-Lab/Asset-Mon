@@ -17,7 +17,7 @@
  *   npx ts-node scripts/verify-integrity.ts
  */
 import { Pool as PgPool } from 'pg';
-import { PrismaClient } from '@assetmon/db';
+import { PrismaClient, makeAdapter } from '@assetmon/db';
 import crypto from 'crypto';
 
 function required(name: string): string {
@@ -27,7 +27,7 @@ function required(name: string): string {
 }
 
 const POSTGRES_URL = required('POSTGRES_URL');
-const mysql = new PrismaClient({ datasources: { db: { url: required('DATABASE_URL') } } });
+const mysql = new PrismaClient({ adapter: makeAdapter(required('DATABASE_URL')) });
 
 function normalizeValue(val: any): any {
   if (val === null || val === undefined) return null;

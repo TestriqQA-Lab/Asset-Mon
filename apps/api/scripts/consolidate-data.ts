@@ -9,7 +9,7 @@
  *   npx ts-node scripts/consolidate-data.ts
  */
 import { Pool as PgPool } from 'pg';
-import { PrismaClient } from '@assetmon/db';
+import { PrismaClient, makeAdapter } from '@assetmon/db';
 
 function required(name: string): string {
   const v = process.env[name];
@@ -25,17 +25,17 @@ const POSTGRES_URL = required('POSTGRES_URL');
  * setting lands on one connection while the inserts that depend on it run on others,
  * and the load fails on the first row whose parent has not been copied yet.
  *
- * Forcing the pool to a single connection makes the session settings and every
- * statement share one connection. This is a single-threaded batch script, so there is
- * nothing to gain from a larger pool anyway.
+ * Pinning the pool to a single connection makes the session settings and every statement
+ * share one connection. This is a single-threaded batch script, so there is nothing to
+ * gain from a larger pool anyway.
+ *
+ * The limit is set on the adapter rather than as `connection_limit` on the URL, because
+ * that is a Prisma parameter and the mariadb driver ignores it without saying so — which
+ * would leave this script silently running its session settings on the wrong connection.
  */
-function singleConnection(url: string): string {
-  const u = new URL(url);
-  u.searchParams.set('connection_limit', '1');
-  return u.toString();
-}
-
-const mysql = new PrismaClient({ datasources: { db: { url: singleConnection(required('DATABASE_URL')) } } });
+const mysql = new PrismaClient({
+  adapter: makeAdapter(required('DATABASE_URL'), { connectionLimit: 1, minimumIdle: 1 }),
+});
 
 /** Models whose rows must be inserted in chain order — see the sort below. */
 const HASH_CHAINED = new Set(['AuditLog', 'PlatformAuditLog']);

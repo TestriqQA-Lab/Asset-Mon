@@ -1,4 +1,4 @@
-import { PrismaClient } from '@assetmon/db';
+import { PrismaClient, makeAdapter } from '@assetmon/db';
 import { writeAuditEntry } from './src/common/audit-hash';
 import * as crypto from 'crypto';
 
@@ -8,7 +8,7 @@ function required(name: string): string {
   return v;
 }
 
-const db = new PrismaClient({ datasources: { db: { url: required('DATABASE_URL') } } });
+const db = new PrismaClient({ adapter: makeAdapter(required('DATABASE_URL')) });
 const catalog = db;
 
 // Basic tenant extension mock for testing

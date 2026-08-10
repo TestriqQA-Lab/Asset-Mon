@@ -21,7 +21,7 @@
  *   DATABASE_URL=mysql://USER:PASSWORD@HOST:3306/DBNAME \
  *     npx ts-node scripts/rebuild-audit-chains.ts [--dry-run]
  */
-import { PrismaClient } from '@assetmon/db';
+import { PrismaClient, makeAdapter } from '@assetmon/db';
 import { computeEntryHash, AUDIT_HASH_VERSION } from '../src/common/audit-hash';
 
 function required(name: string): string {
@@ -30,7 +30,7 @@ function required(name: string): string {
   return v;
 }
 
-const db = new PrismaClient({ datasources: { db: { url: required('DATABASE_URL') } } });
+const db = new PrismaClient({ adapter: makeAdapter(required('DATABASE_URL')) });
 const DRY = process.argv.includes('--dry-run');
 
 /** Mirrors AuditService.verifyChain() so before/after can be compared here. */

@@ -134,8 +134,17 @@ done
 echo ""; echo "6) Migrate + signup provisions a fully-formed tenant"
 if $COMPOSE exec -T api npm -w @assetmon/db run migrate:deploy >/tmp/am_mig.log 2>&1; then ok "schema + collations applied"; else bad "migrate FAILED - see /tmp/am_mig.log"; fi
 
+# Resolve the database client once. MariaDB 11 ships `mariadb` and no longer provides a
+# `mysql` binary, and because every query below sends stderr to /dev/null, a missing
+# client does not announce itself — it turns each check into an empty string, which reads
+# as "the row was never created". That is exactly how a working application once produced
+# eight failures here, so this fails loudly instead.
+DBCLI=$($COMPOSE exec -T mysql sh -c 'command -v mariadb || command -v mysql' 2>/dev/null | tr -d '\r' | tr -d '[:space:]')
+[ -n "$DBCLI" ] || bad "no mariadb/mysql client inside the database container — the SQL checks below cannot run"
+DBCLI="${DBCLI:-mariadb}"
+
 # Helper: one-shot SQL against the app database, scalar result.
-q(){ $COMPOSE exec -T mysql mysql -uroot -p"$PW" -N -B -e "$1" assetmon 2>/dev/null | tr -d '
+q(){ $COMPOSE exec -T mysql "$DBCLI" -uroot -p"$PW" -N -B -e "$1" assetmon 2>/dev/null | tr -d '
 ' | tr -d '[:space:]'; }
 
 # The searchable columns must be case-insensitive, or search silently regresses to
