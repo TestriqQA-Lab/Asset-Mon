@@ -3,21 +3,29 @@ import * as path from 'path';
 import * as dotenv from 'dotenv';
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
-import { NestFactory } from '@nestjs/core';
-import { Logger, ValidationPipe } from '@nestjs/common';
-import { AppModule } from './app.module';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import helmet from 'helmet';
-import { json, urlencoded } from 'express';
+import express from 'express';
+import * as http from 'http';
 import * as crypto from 'crypto';
-import { AllExceptionsFilter } from './common/all-exceptions.filter';
+
+// Nothing heavy is imported at the top of this file on purpose.
+//
+// A static `import { AppModule }` pulls the whole ~1550-file module graph before the
+// first line of bootstrap() runs, which spends the startup budget before the port can
+// be bound — measured at 2338ms to bind with static imports, against a 3000ms limit.
+// Everything below the listen() call is loaded with `await import(...)` instead, so the
+// port opens first and the application is assembled afterwards.
 
 // Make Prisma BigInt columns (e.g. PlatformUser.lastTotpStep) JSON-serializable
 // app-wide. Without this, JSON.stringify throws "Do not know how to serialize a
 // BigInt" on any non-null BigInt field that reaches a response.
 (BigInt.prototype as any).toJSON = function () { return this.toString(); };
 
-const log = new Logger('bootstrap');
+// Plain console rather than Nest's Logger: this runs before @nestjs/common is loaded.
+const log = {
+  info: (m: string) => console.log(`[bootstrap] ${m}`),
+  warn: (m: string) => console.warn(`[bootstrap] ${m}`),
+  error: (m: string, stack?: string) => console.error(`[bootstrap] ${m}${stack ? '\n' + stack : ''}`),
+};
 
 function assertSecretsOrWarn() {
   const env = process.env.NODE_ENV || 'development';
@@ -59,10 +67,77 @@ function assertSecretsOrWarn() {
   }
 }
 
+/**
+ * Bind the port before building the application.
+ *
+ * Managed Node hosting gives a process a few seconds to start listening and kills it if
+ * it does not — Hostinger's window is 3 seconds, measured and confirmed by them as not
+ * configurable. This API needs about 3.05s to reach `listen()` on an idle machine: 1.4s
+ * to load a ~1550-file module graph and the rest for Nest to wire ~250 routes. Neither
+ * is removable, and deferring the Prisma connect saves nothing (measured: 30ms).
+ *
+ * So the order is inverted. An Express instance starts listening immediately, and Nest is
+ * attached to that same instance afterwards with `init()` rather than `listen()`. The
+ * port is open in milliseconds; the application arrives a few seconds later.
+ *
+ * Requests that land in that gap get 503 with Retry-After rather than a 404 from an
+ * Express app with no routes yet — a 404 would tell a caller the endpoint does not
+ * exist, which is a different and wrong answer.
+ */
 async function bootstrap() {
+  // Stays first: it throws on weak or missing secrets in production, and binding a port
+  // for a process that is about to abort would advertise a service that will never come up.
   assertSecretsOrWarn();
 
-  const app = await NestFactory.create(AppModule, { cors: false });
+  const server = express();
+  let ready = false;
+
+  server.use((_req: any, res: any, next: any) => {
+    if (ready) return next();
+    res.setHeader('Retry-After', '5');
+    res.status(503).json({
+      statusCode: 503,
+      error: 'Service Unavailable',
+      message: 'Starting up, retry shortly',
+    });
+  });
+
+  // PORT first: managed Node hosting assigns a port and routes its proxy at it, so
+  // ignoring it means the app binds somewhere the proxy never looks and every request
+  // 502s while the process itself looks healthy. API_PORT stays as the local-development
+  // knob and the fallback for platforms that inject nothing.
+  const port = Number(process.env.PORT || process.env.API_PORT || 4000);
+  const httpServer = http.createServer(server);
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once('error', reject);
+    httpServer.listen(port, resolve);
+  });
+  // The elapsed figure is the number that matters on a host with a bind deadline — it
+  // says how much of the budget was spent, without anyone having to reproduce it.
+  log.info(`port ${port} bound after ${Math.round(process.uptime() * 1000)}ms; loading application`);
+
+  // Everything below this line is deferred until the port is open. These imports are
+  // what cost 1.4s; running them here rather than at module scope is the whole point.
+  const [
+    { NestFactory },
+    { ValidationPipe },
+    { ExpressAdapter },
+    { SwaggerModule, DocumentBuilder },
+    { default: helmet },
+    { AppModule },
+    { AllExceptionsFilter },
+  ] = await Promise.all([
+    import('@nestjs/core'),
+    import('@nestjs/common'),
+    import('@nestjs/platform-express'),
+    import('@nestjs/swagger'),
+    import('helmet'),
+    import('./app.module'),
+    import('./common/all-exceptions.filter'),
+  ]);
+  const { json, urlencoded } = express;
+
+  const app = await NestFactory.create(AppModule, new ExpressAdapter(server), { cors: false });
 
   // Honour X-Forwarded-* from the configured number of trusted reverse-proxy hops
   // so req.ip / rate limiting / IPv6 truncation work behind load balancers.
@@ -178,14 +253,15 @@ async function bootstrap() {
   // — which matters on hosting that restarts the app routinely.
   app.enableShutdownHooks();
 
-  // PORT first: managed Node hosting assigns a port and routes its proxy at it, so
-  // ignoring it means the app binds somewhere the proxy never looks and every
-  // request 502s while the process itself looks healthy. API_PORT stays as the
-  // local-development knob and the fallback for platforms that inject nothing.
-  const port = Number(process.env.PORT || process.env.API_PORT || 4000);
-  await app.listen(port);
-  // eslint-disable-next-line no-console
-  console.log(`[api] listening on http://localhost:${port}`);
+  // init(), not listen() — the server bound the port before any of this ran.
+  await app.init();
+  ready = true;
+  log.info(`ready on port ${port} after ${Math.round(process.uptime() * 1000)}ms`);
 }
 
-bootstrap();
+bootstrap().catch((err) => {
+  // Without this the process can sit with a bound port and a half-built application,
+  // answering 503 forever instead of failing and letting the platform restart it.
+  log.error(`[api] failed to start: ${err?.message || err}`, err?.stack);
+  process.exit(1);
+});
