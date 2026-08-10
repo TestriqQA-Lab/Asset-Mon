@@ -277,9 +277,13 @@ class TenantLogoPublicController {
 
     // Authoritative ownership check: only serve a logo whose URL is published
     // by some tenant's settings. Random-but-orphaned files on disk are not served.
+    //
+    // `path` is a MySQL JSONPath string. The array form is the Postgres shape and
+    // Prisma rejects it here before the query is sent, which threw past the 404
+    // below and turned every logo request into a 500.
     const publicUrl = `/api/tenant-settings/logo/${safe}`;
     const owner = await this.catalog.tenant.findFirst({
-      where: { settings: { path: ['branding', 'logoUrl'], equals: publicUrl } as any },
+      where: { settings: { path: '$.branding.logoUrl', equals: publicUrl } },
       select: { id: true },
     });
     if (!owner) { res.status(404).send('Not found'); return; }
