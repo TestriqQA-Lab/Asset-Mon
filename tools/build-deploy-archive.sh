@@ -97,15 +97,20 @@ grep -q "require('\.\./platform/platform-audit-hash')" "$STAGE/dist/scripts/plat
 # packages/db/src/index.js points PRISMA_QUERY_ENGINE_LIBRARY at the RHEL build instead —
 # but only if the file is there, and a `prisma generate` on the host is not guaranteed to
 # download an extra binaryTarget. Carrying it in the archive removes that dependency.
-RHEL_ENGINE="libquery_engine-rhel-openssl-1.1.x.so.node"
-if [ -f "packages/db/src/generated/$RHEL_ENGINE" ]; then
-  mkdir -p "$STAGE/dist/engines"
-  cp "packages/db/src/generated/$RHEL_ENGINE" "$STAGE/dist/engines/"
-  ok "bundled the CloudLinux engine ($(du -h "$STAGE/dist/engines/$RHEL_ENGINE" | cut -f1))"
-else
-  echo "  $RHEL_ENGINE missing — run: npm -w @assetmon/db run generate"
+mkdir -p "$STAGE/dist/engines"
+engines_bundled=0
+for RHEL_ENGINE in "query-engine-rhel-openssl-1.1.x" "libquery_engine-rhel-openssl-1.1.x.so.node"; do
+  if [ -f "packages/db/src/generated/$RHEL_ENGINE" ]; then
+    cp "packages/db/src/generated/$RHEL_ENGINE" "$STAGE/dist/engines/"
+    chmod 755 "$STAGE/dist/engines/$RHEL_ENGINE"
+    ok "bundled $RHEL_ENGINE ($(du -h "$STAGE/dist/engines/$RHEL_ENGINE" | cut -f1))"
+    engines_bundled=$((engines_bundled + 1))
+  fi
+done
+[ "$engines_bundled" -gt 0 ] || {
+  echo "  no rhel engine found — run: npm -w @assetmon/db run generate"
   exit 1
-fi
+}
 
 ok "staged $(find "$STAGE" -type f | wc -l | tr -d ' ') files (everything under dist/)"
 

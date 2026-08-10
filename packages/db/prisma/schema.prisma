@@ -7,6 +7,12 @@ generator client {
   // panics with "PANIC: timer has gone away". Building the RHEL engine as well gives
   // src/index.js something correct to point at.
   binaryTargets = ["native", "rhel-openssl-1.1.x"]
+  // The default "library" engine runs inside the Node process and dies on CloudLinux
+  // with "PANIC: timer has gone away" — proven with both the Debian and the RHEL build,
+  // so it is the environment rather than the binary. "binary" runs the engine as its own
+  // process instead, with its own runtime, which is the remaining way to get a working
+  // engine on this host.
+  engineType = "binary"
 }
 
 datasource db {

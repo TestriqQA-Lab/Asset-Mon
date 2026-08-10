@@ -17,19 +17,32 @@ const path = require('path');
 // a copy shipped inside the deploy archive. The shipped copy exists because the host's
 // generate is not guaranteed to fetch the extra target — if it does not, the first path
 // is simply absent and the second one answers.
-if (!process.env.PRISMA_QUERY_ENGINE_LIBRARY && process.platform === 'linux') {
-  const ENGINE = 'libquery_engine-rhel-openssl-1.1.x.so.node';
-  const candidates = [
-    path.join(__dirname, 'generated', ENGINE),
-    // dist/engines/, four levels up from dist/packages/db/src
-    path.join(__dirname, '..', '..', '..', 'engines', ENGINE),
+// The schema asks for the binary engine (see engineType there), so the variable to set is
+// PRISMA_QUERY_ENGINE_BINARY. The library variable is set too when that file is around,
+// which costs nothing and keeps this working if the engine type is ever changed back.
+if (process.platform === 'linux') {
+  const engines = [
+    ['PRISMA_QUERY_ENGINE_BINARY', 'query-engine-rhel-openssl-1.1.x'],
+    ['PRISMA_QUERY_ENGINE_LIBRARY', 'libquery_engine-rhel-openssl-1.1.x.so.node'],
   ];
-  const found = candidates.find((p) => fs.existsSync(p));
-  if (found) {
-    process.env.PRISMA_QUERY_ENGINE_LIBRARY = found;
-  } else {
-    // Silence here would look identical to the override having worked.
-    console.warn(`[prisma] no ${ENGINE} found; falling back to Prisma's own platform detection`);
+  for (const [envVar, file] of engines) {
+    if (process.env[envVar]) continue;
+    const found = [
+      path.join(__dirname, 'generated', file),
+      // dist/engines/, three levels up from dist/packages/db/src
+      path.join(__dirname, '..', '..', '..', 'engines', file),
+    ].find((p) => fs.existsSync(p));
+    if (found) {
+      // The binary engine is spawned, so it has to be executable. A copy that arrived
+      // through a zip may have lost that bit.
+      if (envVar.endsWith('_BINARY')) {
+        try { fs.chmodSync(found, 0o755); } catch { /* already fine, or not ours to change */ }
+      }
+      process.env[envVar] = found;
+    } else if (envVar.endsWith('_BINARY')) {
+      // Silence here would look identical to the override having worked.
+      console.warn(`[prisma] no ${file} found; falling back to Prisma's own platform detection`);
+    }
   }
 }
 
