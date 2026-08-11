@@ -52,7 +52,11 @@ export default function SignupPage() {
             <span className="text-ink-400">Spin one up in seconds.</span>
           </h2>
           <ul className="space-y-3">
-            <Bullet icon={<Boxes className="h-4 w-4" />} text="Your own isolated database — provisioned on signup" />
+            {/* Not "your own database": workspaces share one database and are separated
+                by tenantId, enforced on every query by the scoping client in
+                apps/api/src/tenancy. Promising a dedicated database would be a claim
+                the product no longer meets. */}
+            <Bullet icon={<Boxes className="h-4 w-4" />} text="Your data, isolated from every other workspace" />
             <Bullet icon={<ShieldCheck className="h-4 w-4" />} text="RBAC, audit log, API keys, webhooks out of the box" />
             <Bullet icon={<Sparkles className="h-4 w-4" />} text="From check-out to depreciation — one tool" />
           </ul>
@@ -63,18 +67,23 @@ export default function SignupPage() {
       <div className="flex items-center justify-center p-6 lg:p-10">
         <div className="w-full max-w-md">
           <h1 className="text-2xl font-semibold tracking-tight text-ink-900">Create workspace</h1>
-          <p className="mt-1 text-sm text-ink-500">A fresh dedicated database will be provisioned for you.</p>
+          <p className="mt-1 text-sm text-ink-500">Ready to use in seconds — no setup, no credit card.</p>
 
           <form onSubmit={submit} className="mt-8 space-y-4">
             <Field label="Workspace name">
               <input className={inputClass} name="workspaceName" autoComplete="organization" required value={form.workspaceName} onChange={onChange} />
             </Field>
+            {/* The dash in `pattern` is escaped because browsers compile that attribute
+                with the RegExp `v` flag, which rejects an unescaped `-` inside a
+                character class. An invalid pattern is discarded silently — Chrome only
+                logs it — so the field validated nothing at all, and a bad slug reached
+                the server and came back as a generic "could not create workspace". */}
             <Field label="Workspace slug" hint="3+ lowercase letters, numbers, or dashes — used in your workspace URL">
               <input
                 className={inputClass}
                 name="slug"
                 autoComplete="off"
-                pattern="^[a-z0-9-]{3,40}$"
+                pattern="^[a-z0-9\-]{3,40}$"
                 minLength={3}
                 maxLength={40}
                 required
