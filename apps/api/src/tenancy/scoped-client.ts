@@ -19,6 +19,25 @@ export const TENANT_SCOPED_MODELS = new Set([
   'AssetRequest', 'AssetRequestItem', 'AuditCounter',
 ]);
 
+/**
+ * Models that carry a `tenantId` but are deliberately not auto-scoped, because they
+ * are read across tenants by design. The reasoning for each lives beside the
+ * assertion in scoped-client.spec.ts.
+ */
+export const INTENTIONALLY_UNSCOPED_MODELS = ['TenantUser', 'SupportRequest'] as const;
+
+/**
+ * Every model whose rows belong to a tenant — scoped or not.
+ *
+ * Deleting a workspace has to clear all of them; enumerating them anywhere else
+ * would drift, and a model missed by that list survives the delete as an orphan
+ * nobody can reach. scoped-client.spec.ts asserts this covers the schema.
+ */
+export const TENANT_OWNED_MODELS: readonly string[] = [
+  ...TENANT_SCOPED_MODELS,
+  ...INTENTIONALLY_UNSCOPED_MODELS,
+];
+
 /** Operations whose `where` must be narrowed to the tenant. */
 const WHERE_OPS = new Set([
   'findMany', 'findFirst', 'findFirstOrThrow', 'findUnique', 'findUniqueOrThrow',

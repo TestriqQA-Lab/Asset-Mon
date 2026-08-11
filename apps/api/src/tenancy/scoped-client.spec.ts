@@ -1,5 +1,5 @@
 import { Prisma } from '@assetmon/db';
-import { TENANT_SCOPED_MODELS, scopedClient } from './scoped-client';
+import { TENANT_SCOPED_MODELS, TENANT_OWNED_MODELS, scopedClient } from './scoped-client';
 
 /** Every model in the schema that actually carries a `tenantId` column. */
 function modelsWithTenantId(): string[] {
@@ -37,6 +37,15 @@ describe('TENANT_SCOPED_MODELS stays in step with the schema', () => {
     const withTenantId = new Set(modelsWithTenantId());
     const stale = Object.keys(INTENTIONALLY_UNSCOPED).filter((m) => !withTenantId.has(m));
     expect(stale).toEqual([]);
+  });
+
+  test('deleting a workspace can reach every model that carries a tenantId', () => {
+    // PlatformTenantsService.hardDelete walks TENANT_OWNED_MODELS. A model missing
+    // from it is not merely unscoped — its rows survive the workspace they belong
+    // to, unreachable and undeletable, which is the wrong answer to "delete my
+    // data". The delete used to remove two rows and orphan everything else.
+    const uncovered = modelsWithTenantId().filter((m) => !TENANT_OWNED_MODELS.includes(m));
+    expect(uncovered).toEqual([]);
   });
 
   test('nothing is scoped that has no tenantId column to filter on', () => {

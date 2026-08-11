@@ -11,6 +11,7 @@ import * as crypto from 'crypto';
 import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { TenantProvisioningService } from '../tenancy/tenant-provisioning.service';
+import { TENANT_OWNED_MODELS } from '../tenancy/scoped-client';
 import { PlatformAuditService } from './platform-audit.service';
 import { assertSuperAdmin } from './platform-mfa.util';
 import { PLANS, type PlanKey } from '../billing/plans';
@@ -137,17 +138,44 @@ export class PlatformTenantsService {
     if (!t) throw new NotFoundException();
     if (t.slug !== confirmSlug) throw new BadRequestException('Confirmation slug does not match');
 
-    // Order: drop DB first, then the catalog rows. If the DB drop fails we keep
-    // the catalog row so the operator can retry; orphaning catalog without DB
-    // is preferable to orphaning a DB without catalog (no way to find it later).
-    await this.provisioning.dropDatabase(t.dbName).catch((e) => {
-      this.log.warn(`dropDatabase failed for ${t.dbName}: ${e?.message}`);
-    });
-    await this.catalog.tenantUser.deleteMany({ where: { tenantId: id } });
-    await this.catalog.tenant.delete({ where: { id } });
+    // This used to call dropDatabase() and then delete TenantUser + Tenant, which
+    // was right when every workspace had its own database. Since the MySQL
+    // migration they share one, separated by tenantId, and dropDatabase() is a
+    // no-op — so "delete tenant" removed two rows and left the workspace's assets,
+    // users, audit log and everything else behind, permanently, under a tenantId
+    // that no longer resolved. For a customer exercising a deletion right that is
+    // not a cosmetic bug.
+    //
+    // The model list is not repeated here. TENANT_OWNED_MODELS is derived from what
+    // the scoping client enforces, and scoped-client.spec.ts fails if it drifts from
+    // the schema — so a model added later is covered by this delete automatically.
+    //
+    // Four foreign keys are RESTRICT and all of them point at User (AssetRequest,
+    // Reservation, PurchaseRequest, Assignment), so User goes last. Everything else
+    // is CASCADE or SET NULL and needs no ordering.
+    const ordered = [...TENANT_OWNED_MODELS.filter((m) => m !== 'User'), 'User'];
+
+    const removed: Record<string, number> = {};
+    await this.catalog.$transaction(
+      async (tx) => {
+        for (const model of ordered) {
+          const delegate = (tx as any)[model.charAt(0).toLowerCase() + model.slice(1)];
+          if (!delegate?.deleteMany) throw new Error(`No Prisma delegate for model ${model}`);
+          const { count } = await delegate.deleteMany({ where: { tenantId: id } });
+          if (count) removed[model] = count;
+        }
+        await tx.tenant.delete({ where: { id } });
+      },
+      // A busy workspace is a lot of rows and the default 5s is not enough; a
+      // partial delete is exactly the orphaning this exists to prevent.
+      { timeout: 120_000, maxWait: 15_000 },
+    );
+
+    const totalRows = Object.values(removed).reduce((a, b) => a + b, 0);
+    this.log.warn(`Tenant ${t.slug} (${id}) hard-deleted: ${totalRows} rows across ${Object.keys(removed).length} tables`);
     await this.audit.record(actor, 'tenant.delete', { type: 'tenant', id },
-      { slug: t.slug, name: t.name, dbName: t.dbName }, req);
-    return { ok: true };
+      { slug: t.slug, name: t.name, totalRows, removed }, req);
+    return { ok: true, totalRows, removed };
   }
 
   async updatePlan(actor: { id: string; email: string; role?: string }, id: string, plan: PlanKey, req?: any) {
