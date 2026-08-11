@@ -14,7 +14,7 @@
     "build": "npm -w @assetmon/api run build && npm -w @assetmon/web run build",
     "platform:bootstrap-admin": "npm -w @assetmon/api run platform:bootstrap-admin --",
     "check:tenant-safety": "bash ci/check-tenant-safety.sh",
-    "verify": "npm run check:tenant-safety && npx tsc -p apps/api/tsconfig.json --noEmit && npx jest --config apps/api/jest.config.js"
+    "verify": "npm run check:tenant-safety && npx tsc -p apps/api/tsconfig.json --noEmit && npx tsc -p apps/web/tsconfig.json --noEmit && npx jest --config apps/api/jest.config.js && npx jest --config apps/web/jest.config.js"
   },
   "engines": {
     "node": ">=20.19"

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { papi, setPlatformSession, type PlatformSession } from '@/lib/platform-api';
 import { copyToClipboard } from '@/lib/clipboard';
+import { friendlyError, isExpiredSession, resendCooldown, resumeStep, type MfaSetupState } from '@/lib/mfa';
 import { Field, inputClass, Button } from '@/components/ui';
 import { Mail, ShieldCheck, KeyRound, Copy, Download, LifeBuoy, Check, AlertTriangle, RefreshCw } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -45,6 +46,10 @@ export default function PlatformMfaSetupPage() {
   // step 2 — authenticator
   const [totp, setTotp] = useState<{ secret: string; otpauth: string } | null>(null);
   const [totpCode, setTotpCode] = useState('');
+  // Set from the server state. Starting the authenticator step mints a NEW secret
+  // and clears totpEnabled, so an already-enrolled operator must never be walked
+  // through it again by accident — their working app entry would stop matching.
+  const [totpDone, setTotpDone] = useState(false);
   // step 3 — recovery email
   const [recEmail, setRecEmail] = useState('');
   const [recWarn, setRecWarn] = useState<string | null>(null);
@@ -68,18 +73,22 @@ export default function PlatformMfaSetupPage() {
     setTicket(t);
   }, [r]);
 
-  // Resume to the first incomplete step.
+  // Resume to the first incomplete step. See resumeStep in @/lib/mfa for why the
+  // shape of this response matters more than it looks.
   useEffect(() => {
     if (!ticket) return;
-    sapi<any>('/platform/mfa/setup/state')
+    sapi<MfaSetupState>('/platform/mfa/setup/state')
       .then((st) => {
-        if (!st.primaryEmailVerifiedAt) setStep(1);
-        else if (!st.totpEnabled) setStep(2);
-        else if (!st.recoveryEmailVerifiedAt) setStep(3);
-        else setStep(4);
+        setTotpDone(!!st?.totp?.enabled);
+        setStep(resumeStep(st));
         setReady(true);
       })
-      .catch(() => { toast.error('Your setup session expired — please sign in again.'); r.replace('/platform/login'); });
+      .catch((e: any) => {
+        // Only an invalid ticket means "sign in again"; a network blip does not.
+        if (isExpiredSession(e)) return expire();
+        toast.error('Could not load your setup progress — please retry.');
+        setReady(true);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticket]);
 
@@ -87,34 +96,52 @@ export default function PlatformMfaSetupPage() {
   useEffect(() => { if (resendIn <= 0) return; const t = setTimeout(() => setResendIn(resendIn - 1), 1000); return () => clearTimeout(t); }, [resendIn]);
 
   // Auto-start the authenticator + backup-code steps when reached.
-  useEffect(() => { if (ready && step === 2 && ticket && !totp) void startTotp(); /* eslint-disable-next-line */ }, [ready, step, ticket]);
+  useEffect(() => { if (ready && step === 2 && ticket && !totp && !totpDone) void startTotp(); /* eslint-disable-next-line */ }, [ready, step, ticket, totpDone]);
   useEffect(() => { if (ready && step === 4 && ticket && !codes) void genCodes(); /* eslint-disable-next-line */ }, [ready, step, ticket]);
 
   const expire = () => { toast.error('Your setup session expired — please sign in again.'); r.replace('/platform/login'); };
+
+  /**
+   * One place that turns a failure into the right reaction.
+   *
+   * An expired ticket, a resend cooldown and a genuine send failure all used to
+   * print the same sentence here, which made a 45-second wait indistinguishable
+   * from a broken mailer. Now the ticket sends you back to sign-in, a cooldown
+   * starts the visible countdown, and anything else says what it was.
+   */
+  function fail(e: any, fallback: string) {
+    if (isExpiredSession(e)) return expire();
+    const wait = resendCooldown(e);
+    if (wait !== null) setResendIn((s) => (s > 0 ? s : wait));
+    toast.error(friendlyError(e) || fallback);
+  }
 
   async function sendEmail() {
     setLoading(true);
     try {
       const res = await sapi<any>('/platform/mfa/setup/primary-email/send', { method: 'POST' });
       setEmailSent(true); setEmailMasked(res.maskedEmail || null); setEmailDev(res.devCode || null); setEmailCode(''); setResendIn(res.resendIn || 60);
-    } catch { toast.error('Could not send the code — please try again.'); }
+    } catch (e) { fail(e, 'Could not send the code — please try again.'); }
     finally { setLoading(false); }
   }
   async function verifyEmail() {
     setLoading(true);
     try { await sapi('/platform/mfa/setup/primary-email/verify', { method: 'POST', body: JSON.stringify({ code: emailCode.trim() }) }); setStep(2); }
-    catch (e: any) { e?.status === 401 ? expire() : toast.error('Incorrect code.'); }
+    catch (e) { fail(e, 'Incorrect code.'); }
     finally { setLoading(false); }
   }
 
   async function startTotp() {
     try { const res = await sapi<any>('/platform/mfa/setup/totp/start', { method: 'POST' }); setTotp({ secret: res.secret, otpauth: res.otpauth }); }
-    catch { toast.error('Could not start authenticator setup — please try again.'); }
+    catch (e) { fail(e, 'Could not start authenticator setup — please try again.'); }
   }
   async function verifyTotp() {
     setLoading(true);
-    try { await sapi('/platform/mfa/setup/totp/verify', { method: 'POST', body: JSON.stringify({ token: totpCode.trim() }) }); setTotpCode(''); setStep(3); }
-    catch (e: any) { e?.status === 401 ? expire() : toast.error('Incorrect code.'); }
+    try {
+      await sapi('/platform/mfa/setup/totp/verify', { method: 'POST', body: JSON.stringify({ token: totpCode.trim() }) });
+      setTotpCode(''); setTotpDone(true); setStep(3);
+    }
+    catch (e) { fail(e, 'Incorrect code.'); }
     finally { setLoading(false); }
   }
 
@@ -124,19 +151,20 @@ export default function PlatformMfaSetupPage() {
       const res = await sapi<any>('/platform/mfa/setup/recovery-email/send', { method: 'POST', body: JSON.stringify({ email: recEmail.trim().toLowerCase(), acknowledgeRisk: ack }) });
       if (res?.needsAck) { setRecWarn('A different email provider than your primary is more secure for recovery — but you can use this one anyway.'); return; }
       setRecWarn(null); setRecSent(true); setRecMasked(res.maskedEmail || null); setRecDev(res.devCode || null); setRecCode('');
-    } catch { toast.error('Could not send the code — please try again.'); }
+      setResendIn(res.resendIn || 60);
+    } catch (e) { fail(e, 'Could not send the code — please try again.'); }
     finally { setLoading(false); }
   }
   async function verifyRecovery() {
     setLoading(true);
     try { await sapi('/platform/mfa/setup/recovery-email/verify', { method: 'POST', body: JSON.stringify({ code: recCode.trim() }) }); setStep(4); }
-    catch (e: any) { e?.status === 401 ? expire() : toast.error('Incorrect code.'); }
+    catch (e) { fail(e, 'Incorrect code.'); }
     finally { setLoading(false); }
   }
 
   async function genCodes() {
     try { const res = await sapi<any>('/platform/mfa/setup/backup-codes/generate', { method: 'POST' }); setCodes(Array.isArray(res.codes) ? res.codes : []); setSaved(false); }
-    catch { toast.error('Could not generate backup codes — please try again.'); }
+    catch (e) { fail(e, 'Could not generate backup codes — please try again.'); }
   }
   async function finish() {
     setLoading(true);
@@ -146,7 +174,7 @@ export default function PlatformMfaSetupPage() {
       if (typeof window !== 'undefined') sessionStorage.removeItem(SETUP_TICKET_KEY);
       toast.success('Setup complete.');
       r.push('/platform');
-    } catch (e: any) { e?.status === 401 ? expire() : toast.error('Could not finish setup — please try again.'); }
+    } catch (e) { fail(e, 'Could not finish setup — please try again.'); }
     finally { setLoading(false); }
   }
 
@@ -259,8 +287,14 @@ export default function PlatformMfaSetupPage() {
                     <p className="text-sm text-ink-500">Enter the code we sent to <span className="font-medium text-ink-700">{recMasked || 'your recovery email'}</span>.</p>
                     {recDev && <p className="text-xs text-ink-400">Dev only — code: <span className="font-mono">{recDev}</span></p>}
                     <Field label="Code"><input className={inputClass + ' font-mono tracking-widest'} maxLength={6} inputMode="numeric" autoFocus value={recCode} onChange={(e) => setRecCode(e.target.value.replace(/\D/g, ''))} /></Field>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <Button onClick={verifyRecovery} loading={loading} disabled={recCode.length !== 6}>Verify</Button>
+                      {/* Without this the only way to re-send was "Use a different email",
+                          retyping the same address and hitting Send — which lands inside the
+                          60s cooldown and used to report a generic failure. */}
+                      <Button variant="secondary" icon={<RefreshCw className="h-3.5 w-3.5" />} disabled={resendIn > 0 || loading} onClick={() => sendRecovery(true)}>
+                        {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend'}
+                      </Button>
                       <Button variant="ghost" onClick={() => { setRecSent(false); setRecCode(''); }}>Use a different email</Button>
                     </div>
                   </>

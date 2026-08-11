@@ -31,5 +31,14 @@ jobs:
       - name: Typecheck (API)
         run: npx tsc -p apps/api/tsconfig.json --noEmit
 
+      # The web app was typechecked only as a side effect of `next build`, which
+      # CI does not run — so a page could read a response shape the API never
+      # sends and nothing would notice. The MFA setup wizard did exactly that.
+      - name: Typecheck (web)
+        run: npx tsc -p apps/web/tsconfig.json --noEmit
+
       - name: Unit tests (API)
         run: npx jest --config apps/api/jest.config.js
+
+      - name: Unit tests (web)
+        run: npx jest --config apps/web/jest.config.js

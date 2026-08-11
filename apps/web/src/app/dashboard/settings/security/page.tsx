@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { ShieldCheck, KeyRound, Copy, Mail, Download, AlertTriangle, RefreshCw } from 'lucide-react';
 import { api, setSession } from '@/lib/api';
 import { copyToClipboard } from '@/lib/clipboard';
+import { friendlyError } from '@/lib/mfa';
 import { Card, SectionHeader, Button, Field, inputClass, Pill } from '@/components/ui';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -45,21 +46,8 @@ const METHOD_LABEL: Record<MfaStatus['mfaMethod'], string> = {
   EMAIL_TOTP: "You'll be asked for an email code and an authenticator-app code when you sign in.",
 };
 
-// Turn known HTTP errors into plain-language copy so we never surface raw server
-// text (e.g. the rate-limiter's "ThrottlerException: Too Many Requests").
-// Returns null for anything we don't specifically recognise.
-function friendlyError(e: any): string | null {
-  // App-level "wait before resending" cooldown — carries the seconds left.
-  if (e?.payload?.code === 'EMAIL_RATELIMIT') {
-    const s = e?.payload?.resendIn;
-    return typeof s === 'number'
-      ? `Please wait ${s}s before requesting another code.`
-      : 'Please wait a moment before requesting another code.';
-  }
-  // Hard rate limiter (too many attempts in a short window).
-  if (e?.status === 429) return 'Too many attempts — please wait a minute and try again.';
-  return null;
-}
+// friendlyError now lives in @/lib/mfa-errors so the platform setup wizard uses
+// the same copy; it also covers the code-rejection cases this page can hit.
 
 export default function SecuritySettingsPage() {
   const qc = useQueryClient();
