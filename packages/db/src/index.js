@@ -24,9 +24,11 @@ const { PrismaMariaDb } = require('@prisma/adapter-mariadb');
  *     ER_GET_CONNECTION_TIMEOUT, which reads like a dead host rather than a bad option.
  *   - idleTimeout 60s, so connections are not held across an idle period.
  *
- * `overrides` exists for batch scripts that need a different pool — see
- * apps/api/scripts/consolidate-data.ts, which pins the pool to one connection so that
- * session state stays on the connection that set it.
+ * `overrides` exists for batch scripts that need a different pool — e.g. pinning it to a
+ * single connection so that session state stays on the connection that set it. It has no
+ * caller today: the one script that used it (the Postgres consolidation) is gone. Kept as
+ * the escape hatch rather than rediscovering the pool settings above the next time a batch
+ * job needs different ones.
  */
 function makeAdapter(url = process.env.DATABASE_URL, overrides = {}) {
   // Not necessarily DATABASE_URL: the bootstrap CLI passes CATALOG_DATABASE_URL, so the

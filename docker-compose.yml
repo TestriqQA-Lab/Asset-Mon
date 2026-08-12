@@ -35,26 +35,6 @@ services:
       retries: 10
       start_period: 30s
 
-  # Legacy source database — kept only to migrate data OUT of, not to serve the app.
-  # Not started by default; bring it up explicitly while running the consolidation:
-  #   docker compose --profile legacy up -d postgres
-  # Retire it (and the pgdata volume) once cutover is signed off.
-  postgres:
-    image: postgres:16
-    profiles: ["legacy"]
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-legacy_migration_only}
-      POSTGRES_DB: assetmon_catalog
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   api:
     build:
       context: .
@@ -82,7 +62,6 @@ services:
 
 volumes:
   mysqldata:
-  pgdata:
   uploads:
   caddy_data:
   caddy_config:

@@ -316,7 +316,7 @@ These are the things most likely to bite when moving off the dev laptop.
 The checked-in dev values that need to change before deploying:
 - `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` = the **public defaults** (boot fails in prod).
 - `ENCRYPTION_KEY` = **unset** (boot fails in prod).
-- `POSTGRES_PASSWORD=sandeep` (weak).
+- `MYSQL_ROOT_PASSWORD` = a weak dev value (local compose only).
 - `UPLOAD_DIR=C:/AssetMon/uploads` (Windows path).
 - `WEB_ORIGIN` / `NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_SITE_URL` point at localhost/LAN IPs and
   disagree on port (4001 vs 3000) — reconcile to the real public origins.

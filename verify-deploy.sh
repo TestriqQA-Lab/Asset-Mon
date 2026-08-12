@@ -20,10 +20,9 @@ cd "$(dirname "$0")" || exit 1
 # Runs under its OWN compose project name, deliberately.
 #
 # The cleanup below is `down -v`, which removes the project's named volumes. Under a
-# shared project name that would delete `pgdata` — the original per-tenant Postgres
-# databases, which are still the migration source AND the only rollback position until
-# cutover is signed off. A separate project gets its own throwaway volumes, so a
-# self-check can never destroy real data.
+# shared project name that would delete `mysqldata` and `uploads` — the local dev
+# database and every file uploaded against it. A separate project gets its own
+# throwaway volumes, so a self-check can never destroy real data.
 VERIFY_PROJECT="assetmon-verify"
 VERIFY_PORT=4010
 

@@ -47,8 +47,6 @@ schema → consolidate → INTEGRITY CHECK → rebuild chains → verify chains 
       "Deploying to Hostinger Node hosting" below for what to check first.
 - [ ] `.env` populated from `.env.production.example`, with `DATABASE_URL` and
       `CATALOG_DATABASE_URL` pointing at the **same** database.
-- [ ] The source Postgres reachable from wherever you run the consolidation
-      (`docker compose --profile legacy up -d postgres` locally).
 
 ---
 
@@ -71,49 +69,39 @@ SELECT TABLE_NAME, COLUMN_NAME, COLLATION_NAME
 -- PlatformAuditLog.action
 ```
 
-## 2. Consolidate
+## 2. Consolidate — RETIRED, never run
 
-```bash
-cd apps/api
-POSTGRES_URL=postgresql://USER:PASSWORD@HOST:5432 \
-DATABASE_URL=mysql://USER:PASSWORD@HOST:3306/DBNAME \
-  npx ts-node scripts/consolidate-data.ts
-```
+`consolidate-data.ts` copied rows out of the per-tenant Postgres databases. It was never
+run: what happened in the end was a **first deployment, not a cutover** — every tenant in
+the dev database was a test artifact, so production started empty. The script has been
+deleted along with the rest of the Postgres estate. The headings for steps 2-4 are kept so
+the step numbers other documents refer to still mean the same thing.
 
-Exits non-zero and prints a per-model breakdown if any row was dropped. A shortfall is
-almost always a collation collision — values Postgres treated as distinct that
-`utf8mb4_general_ci` does not, e.g. asset tags `AM-001` and `am-001`. **Resolve those in
-the source and re-run**; the script is idempotent.
+Kept for the record, because it is the failure mode to expect if this is ever done again:
+a row shortfall was almost always a collation collision — values Postgres treated as
+distinct that `utf8mb4_general_ci` does not, e.g. asset tags `AM-001` and `am-001`.
+Rehearsal figures were 1538 rows across 30 tenants, no rows dropped.
 
-Rehearsal: 1538 rows across 30 tenants, no rows dropped.
+## 3. Integrity check — RETIRED, never run
 
-## 3. Integrity check — the gate
+`verify-integrity.ts` was the gate on step 2 and is deleted with it. It compared row
+counts, primary keys and checksums between the two engines, which is meaningless without
+a Postgres source. Rehearsal: 423 passed, 0 failed.
 
-```bash
-POSTGRES_URL=... DATABASE_URL=... npx ts-node scripts/verify-integrity.ts
-```
+## 4. Rebuild audit chains — not needed for a fresh deployment
 
-Row-count and primary-key parity per tenant and model, deterministic checksums for
-Asset/User/AuditLog, FK validation including cross-tenant references, audit-chain
-verification, and counter seeding.
-
-**Do not continue unless this is 0 failures.** Rehearsal: 423 passed, 0 failed.
-
-## 4. Rebuild audit chains
+`apps/api/scripts/rebuild-audit-chains.ts` **still exists** and still works: it runs on
+MySQL through Prisma and has no Postgres dependency. It is no longer part of this runbook's
+happy path — a database that starts empty has no chains predating the stable-JSON hash
+recipe — but it is kept as a repair tool for the day `/audit/verify` reports a broken chain.
 
 ```bash
 DATABASE_URL=... npx ts-node scripts/rebuild-audit-chains.ts --dry-run   # inspect
 DATABASE_URL=... npx ts-node scripts/rebuild-audit-chains.ts             # apply
 ```
 
-Migrated chains do not verify and never did — they predate the stable-JSON hash recipe.
-That is not migration damage (they fail against the Postgres source too), but the
-acceptance test in step 6 is "every chain verifies", so this pass is required.
-
 It cannot reconstruct history; it re-establishes a verifiable chain going forward, and
 appends an `audit.chain.rebuild` marker so the rebuild is itself on the chain.
-
-Rehearsal: 22 already intact, 8 rebuilt, 0 failed.
 
 ## 5. Deploy the API
 
@@ -320,26 +308,41 @@ is every comparison the application makes. A quick `SELECT 'A'='a'` in phpMyAdmi
 return 1 and look alarming; `SELECT 'A'='a' COLLATE utf8mb4_bin` returns 0 and is the
 relevant answer.
 
-## Rolling back
+## Rolling back — no longer available
 
-Postgres is untouched by all of the above — the consolidation only reads from it. Until
-the `postgres` compose service and its `pgdata` volume are removed, rollback is simply
-pointing the API back at Postgres with the pre-migration code.
+This said, correctly at the time, that rollback meant pointing the API back at Postgres.
+That position is gone: nothing was ever migrated out of Postgres, and the whole Postgres
+estate has now been retired (see below). Production has been running on MariaDB since
+2026-08-10 and the only recovery position is **Hostinger's backups** — daily, 7 days, plus
+weekly for 6 weeks, databases included, at hPanel → the site → Files → Backups.
 
-**Keep Postgres until the new database has been serving successfully for long enough to
-trust it.** It is the only copy of the original `entryHash` values, and it is what let a
-mistaken bulk rebuild be repaired during development.
+**The restore path has never actually been exercised.** Doing it once, before real users
+exist, is the outstanding item.
 
 ---
 
-## Retire the legacy estate (only after step 6 holds)
+## Retire the legacy estate
 
-- the `postgres` service in `docker-compose.yml` and the `pgdata` volume (local tooling,
-  but it is the last thing keeping the old databases reachable)
-- the `pg` dependency in `apps/api/package.json`
-- `packages/db-tenant` and `packages/db-catalog`
-- `Tenant.dbName` — still required until this point, since `consolidate-data.ts` uses it
-  to locate each source database
-- the `CatalogPrismaService` alias, folding its ~20 call sites onto `GlobalPrismaService`
-- `apps/api/scripts/seed-postgres.ts` and the `POSTGRES_URL` entries in the env templates
+Done:
+
+- ~~the `postgres` service in `docker-compose.yml` and the `pgdata` volume~~ — removed,
+  along with the `postgres` port mapping in `docker-compose.local.yml`
+- ~~the `pg` dependency in `apps/api/package.json`~~ — removed; it was a *production*
+  dependency, so it was being installed on the host as well
+- ~~`packages/db-tenant` and `packages/db-catalog`~~ — deleted during the Prisma 7 migration
+- ~~`apps/api/scripts/seed-postgres.ts` and the `POSTGRES_URL` entries in the env
+  templates~~ — deleted, together with `consolidate-data.ts` and `verify-integrity.ts`,
+  the only other two files that imported `pg`
+
+Still to do:
+
+- `Tenant.dbName` — the last reason to keep it (`consolidate-data.ts` used it to locate
+  each source database) is gone. It is now a **fabricated** value: signup computes
+  `assetmon_t_<slug>` for a database that does not exist, stores it, signs it into the JWT
+  as the `db` claim, and the operator UI displays it as "DB". Removing it needs a schema
+  migration against production.
+- the `CatalogPrismaService` alias, folding its ~40 references across 20 files onto
+  `GlobalPrismaService`
+- `TenantProvisioningService.createDatabase` / `dropDatabase` — no-op stubs since the
+  migration; retire once nothing calls them
 

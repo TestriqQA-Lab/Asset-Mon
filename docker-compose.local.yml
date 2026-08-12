@@ -15,7 +15,3 @@ services:
     # the api container reaches it as `mysql:3306` over the compose network.
     ports:
       - "3307:3306"
-  postgres:
-    # Only present under `--profile legacy`, for reading migration source data.
-    ports:
-      - "5432:5432"

@@ -63,7 +63,7 @@ A machine-readable version of this notice is published at `/.well-known/security
 | `JWT_REFRESH_SECRET` | Refresh signing | Random 64-char, distinct from access |
 | `ENCRYPTION_KEY` | At-rest crypto for 2FA secrets | Random 64-char (`openssl rand -hex 32`) |
 | `RAZORPAY_WEBHOOK_SECRET` | Webhook auth | Copy from the Razorpay dashboard |
-| `POSTGRES_PASSWORD` | DB auth | Strong, unique |
+| `DATABASE_URL` | DB auth (the password is embedded in the URL) | Strong, unique, and alphanumeric — `%`, `@`, `:` and `#` misparse in a URL |
 
 Set `NODE_ENV=production` to make these checks fail fast on startup.
 
