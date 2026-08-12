@@ -137,7 +137,9 @@ Write-Host "`n=== J: Information disclosure ===" -ForegroundColor Magenta
 
 $me = Hit GET '/api/me' $null $adminH
 $meBody = $me.body
-Assert "J1 /me does not leak dbName" { ($meBody -notmatch 'dbName') -and ($meBody -notmatch 'razorpay') }
+# dbName was the original example here and no longer exists, so matching on it could
+# never fail. These are the server-side fields that would actually indicate a leak.
+Assert "J1 /me leaks no server-side fields" { $meBody -notmatch '(razorpay|inviteToken|settings|subscriptionStatus|passwordHash|totpSecret)' }
 
 $docs = Hit GET '/docs' $null
 Assert "J2 /docs reachable in dev" { $docs.code -in 200,301,302 }

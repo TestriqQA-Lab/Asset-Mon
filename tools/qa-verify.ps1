@@ -9,7 +9,7 @@ Remove-Item $tmp
 $lo = $loginResp | ConvertFrom-Json
 if (-not $lo.accessToken) { Write-Host "LOGIN FAILED: $loginResp"; exit 1 }
 $tok = $lo.accessToken
-"Logged in: tenant=$($lo.tenant.slug) role=$($lo.user.role) | /me.tenant has dbName? $($lo.tenant.dbName -ne $null)"
+"Logged in: tenant=$($lo.tenant.slug) role=$($lo.user.role) | login tenant fields: $(($lo.tenant.PSObject.Properties.Name) -join ',')"
 
 function Hit { param([string]$M,[string]$P,$B=$null,[hashtable]$EH=@{})
   $h = @{ Authorization="Bearer $tok" }
@@ -90,11 +90,14 @@ PrintTest 'logo bad-pattern filename'      $logoTraverse 400 '(H2 fix)'
 $photoNoSig = Hit 'GET' '/api/assets/file-public/deadbeefdeadbeefdeadbeefdeadbeef.jpg'
 PrintTest 'photo serve without signature'  $photoNoSig 403 '(H3 fix)'
 
-# /me no longer leaks dbName
+# /me must expose only the tenant fields the client actually needs.
+# This used to assert the absence of dbName specifically. That column no longer exists
+# anywhere, so the check could never fail again — it passed without testing anything.
+# Asserting the whole shape catches any server-side field added to the select later.
 $meResp = Hit 'GET' '/api/me'
 $meObj = $meResp.b | ConvertFrom-Json
-$dbLeak = $meObj.tenant.dbName -ne $null
-PrintTest '/me no dbName leak'             ([pscustomobject]@{c=$(if($dbLeak){500}else{200});b=$meResp.b}) 200 '(L11 fix)'
+$extraFields = @($meObj.tenant.PSObject.Properties.Name | Where-Object { $_ -notin @('id','slug','name') })
+PrintTest '/me tenant is id/slug/name only' ([pscustomobject]@{c=$(if($extraFields.Count){500}else{200});b="unexpected fields: $($extraFields -join ',')"}) 200 '(L11 fix)'
 
 # Useful life cap
 $cap = Hit 'POST' '/api/assets' '{"name":"DoS","categoryId":"00000000-0000-0000-0000-000000000000","usefulLifeMonths":999999999,"depreciationMethod":"DECLINING_BALANCE","purchaseCost":1,"salvageValue":0}'

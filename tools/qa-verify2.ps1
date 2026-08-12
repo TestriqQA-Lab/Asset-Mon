@@ -135,8 +135,11 @@ $inviteEmail = "invite-$(Get-Random -Maximum 999999)@qa.test"
 $accept = Hit 'POST' "/api/auth/invite/$inv" (@{ email=$inviteEmail; password='Sup3rSecret!I'; firstName='I'; lastName='X' } | ConvertTo-Json -Compress) -Tok ''
 T 'accept invite works' $accept 201
 
-# 14. Re-verify /me has no dbName
+# 14. /me must expose only the tenant fields the client actually needs. Asserting the
+#     absence of dbName stopped meaning anything once the column was dropped, so this
+#     asserts the whole shape instead.
 $me = (Hit 'GET' '/api/me').b | ConvertFrom-Json
-T '/me no dbName field' ([pscustomobject]@{c=$(if($me.tenant.dbName){500}else{200});b=$me.tenant.dbName}) 200
+$extraFields = @($me.tenant.PSObject.Properties.Name | Where-Object { $_ -notin @('id','slug','name') })
+T '/me tenant is id/slug/name only' ([pscustomobject]@{c=$(if($extraFields.Count){500}else{200});b="unexpected fields: $($extraFields -join ',')"}) 200
 
 Write-Host "`n=== Verification complete ===" -ForegroundColor Cyan
