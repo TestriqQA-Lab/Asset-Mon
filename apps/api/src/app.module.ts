@@ -3,7 +3,6 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard, ThrottlerModuleOptions } from '@nestjs/throttler';
 import { HealthController } from './health.controller';
-import { CatalogModule } from './catalog/catalog.module';
 import { TenancyModule } from './tenancy/tenancy.module';
 import { AuthModule } from './auth/auth.module';
 import { MeController } from './me/me.controller';
@@ -70,7 +69,6 @@ function normaliseIpKey(raw: any): string {
       // Custom tracker: keys IPv6 by /64 so :1-style address rotation cannot bypass.
       getTracker: (req: any) => normaliseIpKey(req.ip || req.headers?.['x-forwarded-for']),
     } as ThrottlerModuleOptions),
-    CatalogModule,
     TenancyModule,
     WorkspaceInviteModule,
     AuthModule,

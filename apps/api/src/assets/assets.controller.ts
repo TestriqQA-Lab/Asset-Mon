@@ -19,7 +19,6 @@ import { AssetsService } from './assets.service';
 import { LifecycleService } from './lifecycle.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { GlobalPrismaService } from '../tenancy/global-prisma.service';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { CreateAssetDto, UpdateAssetDto, ListAssetsQueryDto, CheckoutDto, BulkIdsDto, BulkUpdateDto } from './dto';
 import { signFileToken, verifySignedFileToken } from '../common/signed-url';
 
@@ -315,7 +314,6 @@ export class AssetsController {
 @Controller('assets/file-public')
 export class AssetsPublicFileController {
   constructor(
-    private readonly catalog: CatalogPrismaService,
     private readonly globalPrisma: GlobalPrismaService,
   ) {}
 
@@ -331,7 +329,7 @@ export class AssetsPublicFileController {
     // asset in *that* tenant DB actually references the file. Without this
     // step the tenantId embedded in the signed URL would be decorative — any
     // valid signature would serve any file.
-    const tenant = await this.catalog.tenant.findUnique({
+    const tenant = await this.globalPrisma.tenant.findUnique({
       where: { id: ver.tenantId },
       select: { id: true, status: true },
     }).catch(() => null);

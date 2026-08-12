@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { TenantContextService } from '../tenancy/tenant-context.service';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { BillingService } from '../billing/billing.module';
 import { writeAuditEntry } from '../common/audit-hash';
 import { clearTenantMfaUserData } from '../auth/tenant-mfa-clear';
@@ -13,7 +13,7 @@ type Actor = { id: string; role: string };
 export class UsersService {
   constructor(
     private readonly ctx: TenantContextService,
-    private readonly catalog: CatalogPrismaService,
+    private readonly catalog: GlobalPrismaService,
     private readonly billing: BillingService,
     private readonly notifications: NotificationsService,
   ) {}

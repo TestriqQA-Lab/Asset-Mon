@@ -1,14 +1,12 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwt: JwtService,
-    private readonly catalog: CatalogPrismaService,
     private readonly globalPrisma: GlobalPrismaService,
   ) {}
 
@@ -34,7 +32,7 @@ export class JwtAuthGuard implements CanActivate {
     } catch {
       throw new UnauthorizedException('Invalid token');
     }
-    const tenant = await this.catalog.tenant.findUnique({ where: { id: payload.tid } });
+    const tenant = await this.globalPrisma.tenant.findUnique({ where: { id: payload.tid } });
     if (!tenant || tenant.status !== 'ACTIVE') throw new UnauthorizedException('Workspace not active');
 
     // Verify the token-version embedded in the JWT still matches the user's
@@ -54,7 +52,7 @@ export class JwtAuthGuard implements CanActivate {
 
   private async authenticateApiKey(req: any, apiKey: string, slug: string): Promise<boolean> {
     if (!slug) throw new UnauthorizedException('X-Tenant-Slug header required for API key auth');
-    const tenant = await this.catalog.tenant.findUnique({ where: { slug } });
+    const tenant = await this.globalPrisma.tenant.findUnique({ where: { slug } });
     if (!tenant || tenant.status !== 'ACTIVE') throw new UnauthorizedException('Workspace not active');
     const db = this.globalPrisma;
     const hash = crypto.createHash('sha256').update(apiKey).digest('hex');

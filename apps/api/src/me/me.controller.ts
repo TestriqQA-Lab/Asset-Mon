@@ -2,7 +2,7 @@ import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantContextService } from '../tenancy/tenant-context.service';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 
 @ApiTags('me')
 @ApiBearerAuth()
@@ -11,7 +11,7 @@ import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 export class MeController {
   constructor(
     private readonly ctx: TenantContextService,
-    private readonly catalog: CatalogPrismaService,
+    private readonly catalog: GlobalPrismaService,
   ) {}
 
   @Get()

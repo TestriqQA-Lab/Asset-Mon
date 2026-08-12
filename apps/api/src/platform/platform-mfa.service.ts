@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { authenticator } from 'otplib';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { MailerService } from '../events/events.module';
 import { PlatformAuditService } from './platform-audit.service';
 import { PlatformAuthService } from './platform-auth.service';
@@ -63,7 +63,7 @@ export class PlatformMfaService {
   private readonly log = new Logger(PlatformMfaService.name);
 
   constructor(
-    private readonly catalog: CatalogPrismaService,
+    private readonly catalog: GlobalPrismaService,
     private readonly mailer: MailerService,
     private readonly audit: PlatformAuditService,
     private readonly auth: PlatformAuthService,

@@ -3,7 +3,6 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { authenticator } from 'otplib';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { SignupDto, LoginDto, AcceptInviteDto } from './dto';
 import { decryptSecret } from '../common/crypto';
@@ -34,7 +33,6 @@ export class AuthService {
   private readonly log = new Logger(AuthService.name);
 
   constructor(
-    private readonly catalog: CatalogPrismaService,
     private readonly globalPrisma: GlobalPrismaService,
     private readonly jwt: JwtService,
     private readonly invites: WorkspaceInviteService,
@@ -78,7 +76,7 @@ export class AuthService {
 
     // Compensating-write order: catalog mapping FIRST so a failure leaves no orphan
     // tenant-DB user; then the tenant-DB user, rolling the catalog row back if that fails.
-    await this.catalog.tenantUser.upsert({
+    await this.globalPrisma.tenantUser.upsert({
       where: { email_tenantId: { email, tenantId: tenant.id } },
       update: {},
       create: { email, tenantId: tenant.id },
@@ -98,7 +96,7 @@ export class AuthService {
         },
       });
     } catch (e) {
-      await this.catalog.tenantUser.delete({ where: { email_tenantId: { email, tenantId: tenant.id } } }).catch(() => {});
+      await this.globalPrisma.tenantUser.delete({ where: { email_tenantId: { email, tenantId: tenant.id } } }).catch(() => {});
       throw e;
     }
     return this.issueTokens(tenant.id, tenant.slug, user.id, user.role, user.email, user.tokenVersion);
@@ -205,7 +203,7 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const email = dto.email.toLowerCase();
-    const mappings = await this.catalog.tenantUser.findMany({
+    const mappings = await this.globalPrisma.tenantUser.findMany({
       where: { email },
       include: { tenant: true },
     });
@@ -352,7 +350,7 @@ export class AuthService {
     // through this endpoint.
     if (payload.imp || payload.impersonatedBy) throw new UnauthorizedException('Invalid refresh token');
 
-    const tenant = await this.catalog.tenant.findUnique({ where: { id: payload.tid } });
+    const tenant = await this.globalPrisma.tenant.findUnique({ where: { id: payload.tid } });
     if (!tenant || tenant.status !== 'ACTIVE') throw new UnauthorizedException();
     const db = this.globalPrisma;
 
@@ -398,7 +396,7 @@ export class AuthService {
       let payload: any;
       try { payload = this.jwt.verify(refreshToken, { secret: process.env.JWT_REFRESH_SECRET }); } catch { return { ok: true }; }
       if (payload.jti && payload.tid) {
-        const tenant = await this.catalog.tenant.findUnique({ where: { id: payload.tid } });
+        const tenant = await this.globalPrisma.tenant.findUnique({ where: { id: payload.tid } });
         if (tenant) {
           const db = this.globalPrisma;
           await db.refreshTokenJti.upsert({
@@ -419,7 +417,7 @@ export class AuthService {
   }
 
   async logoutAll(tid: string, sub: string) {
-    const tenant = await this.catalog.tenant.findUnique({ where: { id: tid } });
+    const tenant = await this.globalPrisma.tenant.findUnique({ where: { id: tid } });
     if (!tenant) return { ok: true };
     const db = this.globalPrisma;
     await db.user.update({ where: { id: sub }, data: { tokenVersion: { increment: 1 } } }).catch(() => {});
@@ -520,7 +518,7 @@ export class AuthService {
   async loginMfaEmail(ticket: string, code: string) {
     const claims = this.mfaTicket.verify(ticket, MFA_TICKET_PURPOSE.PENDING);
     if (claims.scope !== 'tenant' || !claims.nonce || !claims.tid) throw new UnauthorizedException({ code: 'MFA_RESTART' });
-    const tenant = await this.catalog.tenant.findUnique({ where: { id: claims.tid } });
+    const tenant = await this.globalPrisma.tenant.findUnique({ where: { id: claims.tid } });
     if (!tenant || tenant.status !== 'ACTIVE') throw new UnauthorizedException({ code: 'MFA_RESTART' });
     const db = this.globalPrisma;
     const outcome = await db.$transaction(async (tx: any) => {
@@ -569,7 +567,7 @@ export class AuthService {
   async loginMfaTotp(ticket: string, code: string) {
     const claims = this.mfaTicket.verify(ticket, MFA_TICKET_PURPOSE.PENDING);
     if (claims.scope !== 'tenant' || !claims.nonce || !claims.tid) throw new UnauthorizedException({ code: 'MFA_RESTART' });
-    const tenant = await this.catalog.tenant.findUnique({ where: { id: claims.tid } });
+    const tenant = await this.globalPrisma.tenant.findUnique({ where: { id: claims.tid } });
     if (!tenant || tenant.status !== 'ACTIVE') throw new UnauthorizedException({ code: 'MFA_RESTART' });
     const db = this.globalPrisma;
     const outcome = await db.$transaction(async (tx: any) => {

@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { mfaSetupComplete } from './platform-mfa.util';
 
 /**
@@ -17,7 +17,7 @@ import { mfaSetupComplete } from './platform-mfa.util';
 export class PlatformAuthGuard implements CanActivate {
   constructor(
     private readonly jwt: JwtService,
-    private readonly catalog: CatalogPrismaService,
+    private readonly catalog: GlobalPrismaService,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {

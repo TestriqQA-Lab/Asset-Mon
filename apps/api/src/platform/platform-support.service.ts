@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { PlatformAuditService } from './platform-audit.service';
 import { assertSuperAdmin } from './platform-mfa.util';
 
@@ -11,7 +11,7 @@ const STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED'];
 @Injectable()
 export class PlatformSupportService {
   constructor(
-    private readonly catalog: CatalogPrismaService,
+    private readonly catalog: GlobalPrismaService,
     private readonly audit: PlatformAuditService,
   ) {}
 

@@ -2,7 +2,7 @@ import {
   CanActivate, ExecutionContext, ForbiddenException, Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import {
   mergePermissions, navForRole, type NavKey,
 } from './tenant-settings.types';
@@ -23,7 +23,7 @@ import { REQUIRE_NAV_KEY } from './require-nav.decorator';
 export class NavPermissionsGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly catalog: CatalogPrismaService,
+    private readonly catalog: GlobalPrismaService,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {

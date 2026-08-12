@@ -1,12 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 
 // Company-side support: a tenant ADMIN opens/lists/reads help requests + posts messages.
 // Everything is scoped to the caller's tenant id via loadOwned() (404 on mismatch), so
 // one company can never see or touch another company's requests.
 @Injectable()
 export class SupportService {
-  constructor(private readonly catalog: CatalogPrismaService) {}
+  constructor(private readonly catalog: GlobalPrismaService) {}
 
   private async loadOwned(tenantId: string, requestId: string) {
     const r = await this.catalog.supportRequest.findUnique({ where: { id: requestId } });

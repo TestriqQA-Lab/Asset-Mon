@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { PlatformAuditService } from './platform-audit.service';
 import { assertSuperAdmin } from './platform-mfa.util';
 
@@ -24,7 +24,7 @@ export interface AnnouncementInput {
 @Injectable()
 export class PlatformAnnouncementsService {
   constructor(
-    private readonly catalog: CatalogPrismaService,
+    private readonly catalog: GlobalPrismaService,
     private readonly audit: PlatformAuditService,
   ) {}
 

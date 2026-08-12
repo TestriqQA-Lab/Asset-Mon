@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import * as crypto from 'crypto';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 
 // The DB column `inviteToken` now stores the HMAC of the real token rather than the
 // raw secret, so a catalog-DB leak does not immediately leak usable invite links.
@@ -19,7 +19,7 @@ const plaintextCache = new Map<string, { token: string; hash: string }>();
 
 @Injectable()
 export class WorkspaceInviteService {
-  constructor(private readonly catalog: CatalogPrismaService) {}
+  constructor(private readonly catalog: GlobalPrismaService) {}
 
   private newToken() {
     return crypto.randomBytes(24).toString('base64url');

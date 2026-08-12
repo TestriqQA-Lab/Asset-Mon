@@ -1,5 +1,5 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { MfaTicketService, MFA_TICKET_PURPOSE } from '../common/mfa/mfa-ticket.service';
 
 /**
@@ -13,7 +13,7 @@ import { MfaTicketService, MFA_TICKET_PURPOSE } from '../common/mfa/mfa-ticket.s
 export class PlatformSetupTicketGuard implements CanActivate {
   constructor(
     private readonly mfaTicket: MfaTicketService,
-    private readonly catalog: CatalogPrismaService,
+    private readonly catalog: GlobalPrismaService,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {

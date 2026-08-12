@@ -8,7 +8,6 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { TENANT_OWNED_MODELS } from '../tenancy/scoped-client';
 import { PlatformAuditService } from './platform-audit.service';
@@ -25,7 +24,6 @@ export class PlatformTenantsService {
   private readonly log = new Logger(PlatformTenantsService.name);
 
   constructor(
-    private readonly catalog: CatalogPrismaService,
     private readonly globalPrisma: GlobalPrismaService,
     private readonly jwt: JwtService,
     private readonly audit: PlatformAuditService,
@@ -42,7 +40,7 @@ export class PlatformTenantsService {
         { slug: { contains: filter.search } },
       ];
     }
-    const tenants = await this.catalog.tenant.findMany({
+    const tenants = await this.globalPrisma.tenant.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       select: {
@@ -76,7 +74,7 @@ export class PlatformTenantsService {
   async attentionCount() {
     const nextWeek = new Date();
     nextWeek.setDate(nextWeek.getDate() + 7);
-    return this.catalog.tenant.count({
+    return this.globalPrisma.tenant.count({
       where: {
         OR: [
           { status: 'SUSPENDED' },
@@ -87,7 +85,7 @@ export class PlatformTenantsService {
   }
 
   async getById(id: string) {
-    const t = await this.catalog.tenant.findUnique({ where: { id } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
 
     let stats: any = { userCount: 0, assetCount: 0, ticketCount: 0, lastActivityAt: null };
@@ -121,10 +119,10 @@ export class PlatformTenantsService {
 
   async setStatus(actor: { id: string; email: string; role?: string }, id: string, status: 'ACTIVE' | 'SUSPENDED', req?: any) {
     assertSuperAdmin(actor);
-    const t = await this.catalog.tenant.findUnique({ where: { id } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
     if (t.status === 'DELETED') throw new ConflictException('Tenant is deleted; restore is not supported.');
-    const updated = await this.catalog.tenant.update({ where: { id }, data: { status } });
+    const updated = await this.globalPrisma.tenant.update({ where: { id }, data: { status } });
     await this.audit.record(actor, status === 'SUSPENDED' ? 'tenant.suspend' : 'tenant.activate',
       { type: 'tenant', id }, { previousStatus: t.status }, req);
     return updated;
@@ -132,7 +130,7 @@ export class PlatformTenantsService {
 
   async hardDelete(actor: { id: string; email: string; role?: string }, id: string, confirmSlug: string, req?: any) {
     assertSuperAdmin(actor);
-    const t = await this.catalog.tenant.findUnique({ where: { id } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
     if (t.slug !== confirmSlug) throw new BadRequestException('Confirmation slug does not match');
 
@@ -154,7 +152,7 @@ export class PlatformTenantsService {
     const ordered = [...TENANT_OWNED_MODELS.filter((m) => m !== 'User'), 'User'];
 
     const removed: Record<string, number> = {};
-    await this.catalog.$transaction(
+    await this.globalPrisma.$transaction(
       async (tx) => {
         for (const model of ordered) {
           const delegate = (tx as any)[model.charAt(0).toLowerCase() + model.slice(1)];
@@ -179,9 +177,9 @@ export class PlatformTenantsService {
   async updatePlan(actor: { id: string; email: string; role?: string }, id: string, plan: PlanKey, req?: any) {
     assertSuperAdmin(actor);
     if (!PLANS[plan]) throw new BadRequestException('Unknown plan');
-    const t = await this.catalog.tenant.findUnique({ where: { id } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
-    const updated = await this.catalog.tenant.update({
+    const updated = await this.globalPrisma.tenant.update({
       where: { id },
       data: { plan, subscriptionStatus: plan === 'starter' ? 'free' : t.subscriptionStatus },
     });
@@ -196,13 +194,13 @@ export class PlatformTenantsService {
     req?: any,
   ) {
     assertSuperAdmin(actor);
-    const t = await this.catalog.tenant.findUnique({ where: { id } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
     const data: any = {};
     if (patch.subscriptionStatus) data.subscriptionStatus = patch.subscriptionStatus;
     if (patch.trialEndsAt !== undefined) data.trialEndsAt = patch.trialEndsAt ? new Date(patch.trialEndsAt) : null;
     if (patch.currentPeriodEnd !== undefined) data.currentPeriodEnd = patch.currentPeriodEnd ? new Date(patch.currentPeriodEnd) : null;
-    const updated = await this.catalog.tenant.update({ where: { id }, data });
+    const updated = await this.globalPrisma.tenant.update({ where: { id }, data });
     await this.audit.record(actor, 'tenant.updateSubscription', { type: 'tenant', id }, patch, req);
     return updated;
   }
@@ -218,14 +216,14 @@ export class PlatformTenantsService {
   ) {
     assertSuperAdmin(actor);
     if (!Number.isInteger(days) || days < 1 || days > 365) throw new BadRequestException('days must be an integer 1–365');
-    const t = await this.catalog.tenant.findUnique({ where: { id } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
     // Extend from the later of "now" and the current trial end, so a future trial is
     // pushed forward (never shortened) and a null/expired one is based off now.
     const now = new Date();
     const base = t.trialEndsAt && t.trialEndsAt > now ? t.trialEndsAt : now;
     const trialEndsAt = new Date(base.getTime() + days * 86_400_000);
-    const updated = await this.catalog.tenant.update({
+    const updated = await this.globalPrisma.tenant.update({
       where: { id },
       data: { trialEndsAt, subscriptionStatus: 'trialing' },
     });
@@ -238,7 +236,7 @@ export class PlatformTenantsService {
   // Readable by SUPER_ADMIN and SUPPORT (no assertSuperAdmin); returns ONLY the
   // merged module map — no plan-tier comparison (the old "beyond plan" idea was a bug).
   async getModules(id: string) {
-    const t = await this.catalog.tenant.findUnique({ where: { id }, select: { settings: true } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id }, select: { settings: true } });
     if (!t) throw new NotFoundException();
     return { modules: mergeSettings(t.settings).modules };
   }
@@ -250,7 +248,7 @@ export class PlatformTenantsService {
     req?: any,
   ) {
     assertSuperAdmin(actor);
-    const t = await this.catalog.tenant.findUnique({ where: { id } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
     if (t.status === 'DELETED') throw new ConflictException('Tenant is deleted.');
     const current = mergeSettings(t.settings);
@@ -263,7 +261,7 @@ export class PlatformTenantsService {
     const changed = MODULE_KEYS
       .filter((k) => current.modules[k] !== nextModules[k])
       .map((k) => ({ key: k, from: current.modules[k], to: nextModules[k] }));
-    await this.catalog.tenant.update({
+    await this.globalPrisma.tenant.update({
       where: { id },
       data: { settings: { ...current, modules: nextModules } as any },
     });
@@ -272,7 +270,7 @@ export class PlatformTenantsService {
   }
 
   async listTenantUsers(id: string) {
-    const t = await this.catalog.tenant.findUnique({ where: { id } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id } });
     if (!t) throw new NotFoundException();
     if (t.status === 'DELETED') {
       throw new ConflictException('Tenant has been deleted');
@@ -291,7 +289,7 @@ export class PlatformTenantsService {
 
   async resetTenantUserPassword(actor: { id: string; email: string; role?: string }, tenantId: string, userId: string, req?: any) {
     assertSuperAdmin(actor); // SUPPORT is read-only — cannot reset tenant-user passwords (Option B)
-    const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
     const db = this.globalPrisma;
@@ -328,7 +326,7 @@ export class PlatformTenantsService {
   // is already 3FA-gated and super-admin-only.
   async resetTenantUserMfa(actor: { id: string; email: string; role?: string }, tenantId: string, userId: string, req?: any) {
     assertSuperAdmin(actor);
-    const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
     const db = this.globalPrisma;
@@ -350,7 +348,7 @@ export class PlatformTenantsService {
   // tokenVersion — unlocking is "let them retry", not a compromise reset.
   async unlockTenantUser(actor: { id: string; email: string; role?: string }, tenantId: string, userId: string, req?: any) {
     assertSuperAdmin(actor);
-    const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
     const db = this.globalPrisma;
@@ -367,14 +365,14 @@ export class PlatformTenantsService {
   // ── Workspace invite link (operator side) ──
   // Read-only status (SUPPORT may view). Non-minting — looking never creates a link.
   async getTenantInvite(tenantId: string) {
-    const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     return this.invites.status(tenantId);
   }
 
   async regenerateTenantInvite(actor: { id: string; email: string; role?: string }, tenantId: string, req?: any) {
     assertSuperAdmin(actor);
-    const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
     const r = await this.invites.rotate(tenantId);
@@ -384,7 +382,7 @@ export class PlatformTenantsService {
 
   async disableTenantInvite(actor: { id: string; email: string; role?: string }, tenantId: string, req?: any) {
     assertSuperAdmin(actor);
-    const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     const r = await this.invites.disable(tenantId);
     await this.audit.record(actor, 'tenant.inviteDisable', { type: 'tenant', id: tenantId }, { tenantSlug: t.slug }, req);
@@ -398,7 +396,7 @@ export class PlatformTenantsService {
    */
   async impersonate(actor: { id: string; email: string; role?: string }, tenantId: string, userId: string, req?: any) {
     assertSuperAdmin(actor); // SUPPORT cannot impersonate tenant users
-    const t = await this.catalog.tenant.findUnique({ where: { id: tenantId } });
+    const t = await this.globalPrisma.tenant.findUnique({ where: { id: tenantId } });
     if (!t) throw new NotFoundException('Tenant not found');
     if (t.status !== 'ACTIVE') throw new ConflictException('Tenant is not active');
     const db = this.globalPrisma;
@@ -435,12 +433,12 @@ export class PlatformTenantsService {
   /** Aggregate dashboard counters across the whole platform. */
   async metrics() {
     const [tenants, byStatus, byPlan] = await Promise.all([
-      this.catalog.tenant.count(),
-      this.catalog.tenant.groupBy({ by: ['status'], _count: true }),
-      this.catalog.tenant.groupBy({ by: ['plan'], _count: true }),
+      this.globalPrisma.tenant.count(),
+      this.globalPrisma.tenant.groupBy({ by: ['status'], _count: true }),
+      this.globalPrisma.tenant.groupBy({ by: ['plan'], _count: true }),
     ]);
 
-    const active = await this.catalog.tenant.findMany({
+    const active = await this.globalPrisma.tenant.findMany({
       where: { status: 'ACTIVE' },
       select: { id: true },
     });
@@ -454,7 +452,7 @@ export class PlatformTenantsService {
       } catch { errors++; }
     }));
 
-    const recentTenants = await this.catalog.tenant.findMany({
+    const recentTenants = await this.globalPrisma.tenant.findMany({
       where: { createdAt: { gte: new Date(Date.now() - 7 * 86_400_000) } },
       select: { id: true, slug: true, name: true, createdAt: true, plan: true, status: true },
       orderBy: { createdAt: 'desc' },
@@ -490,7 +488,7 @@ export class PlatformTenantsService {
     if (filter.targetType) where.targetType = filter.targetType;
     if (filter.targetId) where.targetId = filter.targetId;
     const take = Math.max(1, Math.min(filter.limit || 50, 500));
-    return this.catalog.platformAuditLog.findMany({
+    return this.globalPrisma.platformAuditLog.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       take,

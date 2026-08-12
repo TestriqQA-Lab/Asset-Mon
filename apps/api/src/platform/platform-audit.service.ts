@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { hashPlatformEntry } from './platform-audit-hash';
 
 /**
@@ -14,7 +14,7 @@ import { hashPlatformEntry } from './platform-audit-hash';
  */
 @Injectable()
 export class PlatformAuditService {
-  constructor(private readonly catalog: CatalogPrismaService) {}
+  constructor(private readonly catalog: GlobalPrismaService) {}
 
   /**
    * Stable hash of an entry. We intentionally hash *normalised* metadata (JSON

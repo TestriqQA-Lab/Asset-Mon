@@ -9,7 +9,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { PLANS, type PlanKey } from './plans';
 import { RazorpayService } from './razorpay.service';
@@ -17,7 +17,7 @@ import { RazorpayService } from './razorpay.service';
 @Injectable()
 export class BillingService {
   constructor(
-    private readonly catalog: CatalogPrismaService,
+    private readonly catalog: GlobalPrismaService,
     private readonly ctx: TenantContextService,
     private readonly razorpay: RazorpayService,
   ) {}

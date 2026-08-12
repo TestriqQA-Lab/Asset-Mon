@@ -343,8 +343,14 @@ Done:
   no-op; the runner called one of them on each boot, and `PlatformTenantsService` injected the
   service without ever calling it.
 
-Still to do:
+- ~~the `CatalogPrismaService` alias~~ — deleted, along with the deliberately-empty
+  `CatalogModule`. It was a re-export of `GlobalPrismaService`, so this was a retype
+  rather than a behaviour change. The injected property is still named `catalog` in the
+  services that only reach platform-level data, because that name is accurate: every one
+  of its ~150 call sites queries either a table with no `tenantId` at all or one of the
+  two models in `INTENTIONALLY_UNSCOPED_MODELS`. The four files that injected both names
+  were merged onto `globalPrisma`.
 
-- the `CatalogPrismaService` alias, folding its ~40 references across 20 files onto
-  `GlobalPrismaService`
+That completes the legacy estate. `CATALOG_DATABASE_URL` stays: the bootstrap CLI
+connects with it and `main.ts` logs it, so it is a live variable rather than a leftover.
 

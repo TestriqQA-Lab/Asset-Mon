@@ -11,7 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { authenticator } from 'otplib';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { MailerService } from '../events/events.module';
 import { PlatformAuditService } from './platform-audit.service';
 import { MfaTicketService, MFA_TICKET_PURPOSE } from '../common/mfa/mfa-ticket.service';
@@ -73,7 +73,7 @@ export class PlatformAuthService {
   private readonly log = new Logger(PlatformAuthService.name);
 
   constructor(
-    private readonly catalog: CatalogPrismaService,
+    private readonly catalog: GlobalPrismaService,
     private readonly jwt: JwtService,
     private readonly audit: PlatformAuditService,
     private readonly mfaTicket: MfaTicketService,

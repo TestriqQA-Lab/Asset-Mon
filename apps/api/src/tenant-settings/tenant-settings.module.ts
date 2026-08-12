@@ -19,7 +19,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser } from '../auth/current-user.decorator';
-import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
+import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import {
   DEFAULT_SETTINGS, mergeSettings, MODULE_KEYS,
   PRESET_IDS, THEME_TOKENS,
@@ -37,7 +37,7 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 @Injectable()
 class TenantSettingsService {
-  constructor(private readonly catalog: CatalogPrismaService) {}
+  constructor(private readonly catalog: GlobalPrismaService) {}
 
   async get(tenantId: string): Promise<TenantSettings> {
     const t = await this.catalog.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
@@ -265,7 +265,7 @@ class TenantSettingsController {
 @ApiTags('tenant-settings')
 @Controller('tenant-settings/logo')
 class TenantLogoPublicController {
-  constructor(private readonly catalog: CatalogPrismaService) {}
+  constructor(private readonly catalog: GlobalPrismaService) {}
 
   @Get(':name')
   async serve(@Param('name') name: string, @Res() res: Response) {

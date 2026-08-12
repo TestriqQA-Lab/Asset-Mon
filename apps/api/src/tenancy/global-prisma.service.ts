@@ -10,6 +10,22 @@ import { scopedClient, type ScopedPrismaClient } from './scoped-client';
  * methods on this service directly — which of the two you pick is a statement
  * about whether the query is tenant-confined, and that statement should be
  * visible at the call site.
+ *
+ * Platform-level data (tenants, platform users, support, announcements) used to live
+ * in its own Postgres database reached through a separate `CatalogPrismaService`. It is
+ * the same database now, and it matters that it is the same *client* rather than two
+ * clients pointed at one database:
+ *
+ *  • A Prisma transaction cannot span two clients. Provisioning has to write Tenant,
+ *    User, TenantUser and the seed rows atomically, which was impossible while the two
+ *    kinds of data were reached through separate connections.
+ *
+ *  • Two datasource URLs meant to be identical will eventually diverge in someone's
+ *    .env, and nothing would report it — the app would quietly read tenants from one
+ *    database and their data from another.
+ *
+ * `CATALOG_DATABASE_URL` still exists, but only for the bootstrap CLI and the startup
+ * log in main.ts. Nothing in the running application reads it.
  */
 @Injectable()
 export class GlobalPrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
