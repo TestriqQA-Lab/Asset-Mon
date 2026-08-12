@@ -21,8 +21,8 @@ export class MeController {
       db.user.findUnique({ where: { id: this.ctx.userId! } }),
       this.catalog.tenant.findUnique({
         where: { id: this.ctx.tenantId! },
-        // The dbName / settings.razorpay* values are server-side concerns; do not
-        // expose them via /me.
+        // The settings.razorpay* values are server-side concerns; do not expose
+        // them via /me.
         select: { id: true, slug: true, name: true },
       }),
     ]);

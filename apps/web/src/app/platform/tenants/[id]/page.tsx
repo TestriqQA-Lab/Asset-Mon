@@ -36,7 +36,6 @@ export default function TenantOverviewPage() {
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-500">Workspace</h3>
               <Row label="ID" value={t.id} mono onCopy={() => copy(t.id)} copied={copied} />
               <Row label="Slug" value={t.slug} mono />
-              <Row label="DB" value={t.dbName} mono />
               <Row label="Created" value={new Date(t.createdAt).toLocaleString()} />
             </Card>
 

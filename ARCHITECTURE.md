@@ -58,63 +58,74 @@ CommonJS, output `apps/api/dist/`, run with `node dist/main.js`.
 
 ---
 
-## 4. The defining architecture: DB-per-tenant
+## 4. The defining architecture: shared tables, scoped at the client
 
 This is the single most important concept for deployment.
 
-### Two database tiers
-- **Catalog DB** (`assetmon_catalog`) — one shared DB. Schema in `packages/db-catalog`.
-  Models: `Tenant` (slug, `dbName`, status, plan, subscription fields, `inviteToken`),
-  `TenantUser` (email → tenant map used to route logins), `PlatformUser` (internal operators),
-  `PlatformAuditLog` (hash-chained), `PlatformRefreshTokenJti`.
-- **Tenant DB** (`assetmon_t_<slug>`) — one per workspace. Schema in `packages/db-tenant`,
-  ~30 models holding all business data (assets, users, tickets, procurement, software,
-  reservations, audits, attachments, webhooks, notifications, audit log, etc.).
+> Until 2026-08 this was a **database-per-tenant** design: a `assetmon_t_<slug>` database per
+> workspace, created on signup by a raw admin connection and migrated by a hand-rolled runner.
+> That is gone. If you find a doc, comment or column that still implies it, it is a leftover —
+> see "Retire the legacy estate" in `docs/mysql-cutover-runbook.md`.
 
-A third DB, `assetmon_tenant_template`, exists only so the Prisma CLI can author/track tenant
-migrations against a real database (`packages/db-tenant/.env` → `TENANT_DATABASE_URL`). The
-running app never queries it at request time.
+### One database
+Everything lives in a single MariaDB database, schema in `packages/db`. Tenant rows are separated
+by a plain `tenantId` column, not by a database boundary:
+
+- **Platform-level rows, no `tenantId`:** `Tenant` (slug, status, plan, subscription fields,
+  `inviteToken`), `PlatformUser` (internal operators), `PlatformAuditLog` (hash-chained),
+  `PlatformRefreshTokenJti`, and the platform MFA tables.
+- **Tenant-owned rows, 37 tables carrying `tenantId`:** all business data — assets, users,
+  tickets, procurement, software, reservations, audits, attachments, webhooks, notifications,
+  the tenant audit log, and so on.
 
 ### How a request resolves its tenant (`apps/api/src/auth/jwt-auth.guard.ts`)
 1. `JwtAuthGuard` verifies the access token, reads `tid` (tenant id) from the JWT, and looks the
-   tenant up in the **catalog** DB (must be `ACTIVE`).
-2. It re-reads the user's `tokenVersion` from the tenant DB and rejects if it ≠ the token's `tv`
-   claim. This makes "logout-all", role changes, password resets, and 2FA changes invalidate
-   live access tokens immediately (at the cost of one extra DB read per request).
-3. It attaches `req.user` (`{sub, tid, slug, db, role, email, tv, …}`) and `req.tenant`.
-4. `TenantContextService` (request-scoped) exposes `prisma()`, which calls
-   `TenantPrismaPool.get(dbName)`. The pool is an **LRU cache of `PrismaClient`s (max 50)**,
-   keyed by tenant DB name (`apps/api/src/tenancy/tenant-prisma.pool.ts`).
-5. **Cross-tenant access is structurally impossible** — a request can only obtain a client for
-   the DB named in its own JWT. (API-key auth resolves the tenant from `X-Tenant-Slug` instead.)
+   tenant up (must be `ACTIVE`).
+2. It re-reads the user's `tokenVersion` and rejects if it ≠ the token's `tv` claim. This makes
+   "logout-all", role changes, password resets and 2FA changes invalidate live access tokens
+   immediately, at the cost of one extra read per request.
+3. It attaches `req.user` (`{sub, tid, slug, role, email, tv, …}`) and `req.tenant`.
+4. `TenantContextService` (request-scoped) exposes `prisma()`, which returns
+   `GlobalPrismaService.forTenant(tid)` — one `PrismaClient` extended with a `$extends` kernel
+   that narrows every query to that tenant. It is memoised per request because `$extends` builds
+   a new client on each call.
+5. **Cross-tenant access is prevented by that kernel, not by a database boundary** — which is why
+   it is the most safety-critical code in the repo. `TENANT_SCOPED_MODELS`
+   (`apps/api/src/tenancy/scoped-client.ts`) lists the 35 models it auto-narrows;
+   `INTENTIONALLY_UNSCOPED_MODELS` names the two read across tenants by design (`TenantUser`,
+   `SupportRequest`), each with its reasoning beside the assertion in `scoped-client.spec.ts`.
+   That spec reads Prisma's DMMF and **fails if any model declaring a `tenantId` is missing from
+   the set**, because the failure mode is otherwise silent: a new model left out is simply
+   readable and writable across every tenant. `tools/verify-tenant-isolation.sh` (36 checks)
+   exercises it against a running API, and `ci/check-tenant-safety.sh` runs on every build.
+   (API-key auth resolves the tenant from `X-Tenant-Slug` instead of a JWT.)
 
-### How a tenant gets provisioned (`tenant-provisioning.service.ts`, `auth.service.ts:signup`)
-1. Insert a catalog `Tenant` row (status `PROVISIONING`, plan `business`, 30-day trial).
-2. Open a **raw `pg` admin connection to the `postgres` maintenance DB** and run
-   `CREATE DATABASE "assetmon_t_<slug>"`.
-3. Run tenant migrations with a **hand-rolled runner** (NOT `prisma migrate`): it reads every
-   `packages/db-tenant/prisma/migrations/*/migration.sql`, applies the unapplied ones inside
-   transactions, and records them in a `_assetmon_migrations` table it manages itself.
-4. Seed default categories + system status defs + demo data; create the first `ADMIN` user;
-   insert the `TenantUser` catalog mapping; flip status to `ACTIVE`.
-5. Issue access + refresh JWTs.
-6. **Full compensating rollback** on any failure (delete catalog row + `DROP DATABASE`).
+### How a tenant gets provisioned (`auth.service.ts:signup`)
+One transaction writes everything that defines a workspace, so a failure leaves no trace:
 
-On API boot, `TenantMigrationRunner.onModuleInit()` loops every ACTIVE/PROVISIONING tenant and
-re-runs the migration runner — so deploying new tenant migrations is "ship code + restart API".
+1. Insert the `Tenant` row (status `ACTIVE`, plan `business`, 30-day trial).
+2. Seed default categories and system status defs, create the first `ADMIN` user, and insert the
+   `TenantUser` email → tenant mapping.
+3. Issue access + refresh JWTs.
 
-> **Deployment implication:** the migrations folder must exist **on disk at runtime** next to the
-> compiled API. The runner resolves `__dirname/../../../../packages/db-tenant/prisma/migrations`
-> from `apps/api/dist/`. You cannot ship only `dist/`; the monorepo's `packages/db-tenant/prisma`
-> must be present in the runtime image.
+Demo content is seeded **outside** the transaction — it is a nicety, not part of what makes a
+workspace valid, so a failure there cannot undo a good signup.
+
+There is no per-tenant database to create, migrate or drop. Schema changes are ordinary Prisma
+migrations against the one database, run from a workstation (see `docs/mysql-cutover-runbook.md`).
+
+> **Deleting a workspace** must clear all 37 tenant-owned tables — `TENANT_OWNED_MODELS` exists
+> for exactly that, and a model missing from it survives the delete as an unreachable orphan.
 
 ---
 
 ## 5. Data model (high level)
 
-**Catalog:** `Tenant`, `TenantUser`, `PlatformUser`, `PlatformAuditLog`, `PlatformRefreshTokenJti`.
+**Platform-level (no `tenantId`):** `Tenant`, `PlatformUser`, `PlatformAuditLog`,
+`PlatformRefreshTokenJti`. (`TenantUser` carries a `tenantId` but is read across tenants by
+design — it is the email → workspace map that routes a login.)
 
-**Tenant (~30 models):** `User` (roles, 2FA, lockout, `tokenVersion`, `scopedDepartmentId`),
+**Tenant-owned (37 tables carrying `tenantId`):** `User` (roles, 2FA, lockout, `tokenVersion`, `scopedDepartmentId`),
 `Department`, `Location` (self-referential tree), `Category` (custom-field *schema* as JSON),
 `Vendor`, `Asset` (depreciation fields, parent/child, custom fields, photo, status def),
 `Assignment` (check-in/out), `MaintenanceSchedule`, `ServiceTicket`, `PurchaseRequest(+Item)`,
@@ -253,31 +264,30 @@ tenant DBs on boot.
 
 These are the things most likely to bite when moving off the dev laptop.
 
-1. **Database privileges.** Tenant signup issues raw `CREATE DATABASE` / `DROP DATABASE` against
-   the `postgres` maintenance DB. The DB role **must have `CREATEDB`** and connect rights to
-   `postgres`. Many managed Postgres offerings (RDS default, Cloud SQL, some Supabase/Neon tiers)
-   restrict this or cap the number of databases — validate this **before** choosing a provider.
-2. **DB-per-tenant scaling.** N tenants = N databases. Each cached `PrismaClient` opens its own
-   connection pool; with up to 50 cached clients you can approach Postgres `max_connections`
-   quickly. Mitigations: a connection pooler (PgBouncer), set `connection_limit` in
-   `TENANT_DB_URL_TEMPLATE`, and/or lower the pool's `maxSize`.
+1. **Database privileges.** Ordinary ones — the app only reads and writes its own tables. It no
+   longer needs `CREATEDB`, and there is no maintenance-database connection. Migrations are run
+   from a workstation, not by the app.
+2. **Connection budget.** One shared pool, deliberately small: `connectionLimit: 3`,
+   `minimumIdle: 1`, `idleTimeout: 60` (`packages/db/src/index.js`). `minimumIdle: 0` is not a
+   valid tuning — it stops the pool opening any connection at all and every query then fails as a
+   connection timeout, which reads like a dead server. Measured, not theorised.
 3. **Stateful, in-memory components on the API.** Throttler storage, **2FA pending-enrollment
    secrets**, the EventBus, `/metrics` counters, and the invite plaintext cache all live in
    process memory. Running **multiple API instances breaks** them (2FA enroll/verify must hit the
    same instance; throttling becomes per-instance; events don't fan out). Either run a **single
    API instance** to start, or add Redis (throttler) + sticky routing / external 2FA-pending store
    before scaling out. (Refresh-token denylist *is* DB-backed, so that part is multi-instance safe.)
-4. **Startup migration race.** `TenantMigrationRunner` migrates every tenant DB on boot. With
-   multiple instances booting together, they can race the custom runner. Prefer single-instance
-   rollouts or a dedicated migration step.
+4. **Migrations are a separate step, on purpose.** The API never migrates on boot. Prisma 7's CLI
+   still carries a Rust schema engine that cannot start on CloudLinux, so `migrate deploy` is run
+   from a workstation over an SSH tunnel — never on the host.
 5. **`NEXT_PUBLIC_API_URL` is build-time.** It's compiled into the web bundle by `next build`. In
    containers, pass it as a build arg, not a runtime env var.
 6. **Uploads on local disk.** `UPLOAD_DIR` is local FS. On ephemeral/containerized hosts files
    vanish on restart and aren't shared across instances. Mount a **persistent volume**, or move to
    S3/Azure Blob (called out as roadmap in README/SECURITY). Also fix the Windows path for Linux.
-7. **Runtime needs the migrations + Prisma client on disk.** Ship the whole monorepo layout (or at
-   least `packages/db-tenant/prisma/migrations` and the generated clients) in the runtime image —
-   not just `apps/api/dist`.
+7. **Runtime needs the generated Prisma client on disk**, but not the migrations — nothing applies
+   them at runtime. The deploy archive puts the local packages inside `dist/` because the host
+   discards everything outside the output directory; see `tools/build-deploy-archive.sh`.
 8. **Secret fail-fast.** With `NODE_ENV=production`, `main.ts` **throws on boot** if
    `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` are missing, equal to the public default, or <32 chars,
    and if `ENCRYPTION_KEY` is unset. The current `.env` still has the literal defaults — rotate

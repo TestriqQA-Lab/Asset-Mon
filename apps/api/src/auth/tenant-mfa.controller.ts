@@ -43,7 +43,7 @@ export class TenantMfaController {
   // so the acting device stays signed in while every other session is dropped.
   // Mirrors the claims already on the request's access token (req.user).
   private reissue(u: any, tokenVersion: number) {
-    return this.auth.issueTokens(u.tid, u.slug, u.db, u.sub, u.role, u.email, tokenVersion);
+    return this.auth.issueTokens(u.tid, u.slug, u.sub, u.role, u.email, tokenVersion);
   }
 
   @Get()

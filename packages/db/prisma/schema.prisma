@@ -14,7 +14,6 @@ model Tenant {
   id                     String           @id @default(uuid())
   slug                   String           @unique
   name                   String
-  dbName                 String           @unique
   status                 TenantStatus     @default(PROVISIONING)
   plan                   String           @default("starter")
   settings               Json             @default("{}")

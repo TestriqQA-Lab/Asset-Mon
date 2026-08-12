@@ -10,7 +10,6 @@ import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { CatalogPrismaService } from '../catalog/catalog-prisma.service';
 import { GlobalPrismaService } from '../tenancy/global-prisma.service';
-import { TenantProvisioningService } from '../tenancy/tenant-provisioning.service';
 import { TENANT_OWNED_MODELS } from '../tenancy/scoped-client';
 import { PlatformAuditService } from './platform-audit.service';
 import { assertSuperAdmin } from './platform-mfa.util';
@@ -28,7 +27,6 @@ export class PlatformTenantsService {
   constructor(
     private readonly catalog: CatalogPrismaService,
     private readonly globalPrisma: GlobalPrismaService,
-    private readonly provisioning: TenantProvisioningService,
     private readonly jwt: JwtService,
     private readonly audit: PlatformAuditService,
     private readonly invites: WorkspaceInviteService,
@@ -48,13 +46,13 @@ export class PlatformTenantsService {
       where,
       orderBy: { createdAt: 'desc' },
       select: {
-        id: true, slug: true, name: true, dbName: true, status: true, plan: true,
+        id: true, slug: true, name: true, status: true, plan: true,
         subscriptionStatus: true, trialEndsAt: true, currentPeriodEnd: true,
         createdAt: true, updatedAt: true,
       },
     });
 
-    // Each tenant is a separate DB — fan out and gather basic counts in parallel.
+    // Counts are per-tenant filters on shared tables — gather them in parallel.
     const enriched = await Promise.all(tenants.map(async (t) => {
       let userCount = 0, assetCount = 0;
       try {
@@ -66,8 +64,8 @@ export class PlatformTenantsService {
           ]);
         }
       } catch (e: any) {
-        // A tenant DB that is unreachable should not block the whole list.
-        this.log.warn(`Stats unavailable for ${t.dbName}: ${e.message}`);
+        // One tenant's counts failing should not block the whole list.
+        this.log.warn(`Stats unavailable for ${t.slug}: ${e.message}`);
       }
       return { ...t, userCount, assetCount };
     }));
@@ -94,8 +92,8 @@ export class PlatformTenantsService {
 
     let stats: any = { userCount: 0, assetCount: 0, ticketCount: 0, lastActivityAt: null };
     let admins: any[] = [];
-    // Suspended tenants still have a live DB — read what we can so support staff
-    // can investigate. Only skip when the DB itself is gone (DELETED).
+    // A suspended tenant's rows are still there — read what we can so support staff
+    // can investigate. Only skip once the rows have been deleted (DELETED).
     if (t.status !== 'DELETED') {
       try {
         const db = this.globalPrisma;
@@ -115,7 +113,7 @@ export class PlatformTenantsService {
           select: { id: true, email: true, firstName: true, lastName: true, active: true, totpEnabled: true, createdAt: true },
         }).catch(() => []);
       } catch (e: any) {
-        this.log.warn(`Failed to read stats for ${t.dbName}: ${e.message}`);
+        this.log.warn(`Failed to read stats for ${t.slug}: ${e.message}`);
       }
     }
     return { ...t, stats, admins };
@@ -416,7 +414,7 @@ export class PlatformTenantsService {
     const ttl = Number(process.env.IMPERSONATE_TTL || 1800);
     const access = this.jwt.sign(
       {
-        sub: u.id, tid: t.id, slug: t.slug, db: t.dbName, role: u.role, email: u.email,
+        sub: u.id, tid: t.id, slug: t.slug, role: u.role, email: u.email,
         tv: u.tokenVersion, imp: true, impersonatedBy: actor.id,
       },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: ttl },
@@ -444,7 +442,7 @@ export class PlatformTenantsService {
 
     const active = await this.catalog.tenant.findMany({
       where: { status: 'ACTIVE' },
-      select: { id: true, dbName: true },
+      select: { id: true },
     });
 
     let users = 0, assets = 0, errors = 0;

@@ -105,9 +105,10 @@ appends an `audit.chain.rebuild` marker so the rebuild is itself on the chain.
 
 ## 5. Deploy the API
 
-Deploy the built API and confirm it boots. `TenantProvisioningService` logging
-`no-op in shared-table mode` is expected — there are no per-tenant databases to create
-any more. See "Deploying to Hostinger Node hosting" below for the specifics.
+Deploy the built API and confirm it boots. Confirm it with something that reaches the
+database — a login with an unknown user returning 401 — because `/api/health` never opens a
+connection and is green on a completely unreachable database. See "Deploying to Hostinger
+Node hosting" below for the specifics.
 
 ## 6. Acceptance
 
@@ -334,15 +335,16 @@ Done:
   templates~~ — deleted, together with `consolidate-data.ts` and `verify-integrity.ts`,
   the only other two files that imported `pg`
 
+- ~~`Tenant.dbName`~~ — dropped by migration `20260812070413_drop_tenant_dbname`. It had become
+  a **fabricated** value: signup computed `assetmon_t_<slug>` for a database that did not exist,
+  stored it, signed it into the access token as the `db` claim, and the operator console showed
+  it as "DB". Nothing ever read it to select a database, so the claim was removed with it.
+- ~~`TenantProvisioningService` and `TenantMigrationRunner`~~ — deleted. Every method was a
+  no-op; the runner called one of them on each boot, and `PlatformTenantsService` injected the
+  service without ever calling it.
+
 Still to do:
 
-- `Tenant.dbName` — the last reason to keep it (`consolidate-data.ts` used it to locate
-  each source database) is gone. It is now a **fabricated** value: signup computes
-  `assetmon_t_<slug>` for a database that does not exist, stores it, signs it into the JWT
-  as the `db` claim, and the operator UI displays it as "DB". Removing it needs a schema
-  migration against production.
 - the `CatalogPrismaService` alias, folding its ~40 references across 20 files onto
   `GlobalPrismaService`
-- `TenantProvisioningService.createDatabase` / `dropDatabase` — no-op stubs since the
-  migration; retire once nothing calls them
 

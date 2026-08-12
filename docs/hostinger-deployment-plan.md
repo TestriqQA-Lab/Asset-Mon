@@ -299,8 +299,9 @@ Three things that decide whether this is actually a backup:
    the archive.
 4. **Set the environment variables** (below). No `.env` file is shipped — `dotenv` does
    not override existing variables, so panel-set values win **(tested)**.
-5. **Start it and check `/api/health`.** `TenantProvisioningService` logging
-   `no-op in shared-table mode` is expected.
+5. **Start it and check `/api/health`.** Then check something that actually touches the
+   database — a login with an unknown user returning 401 proves the query path;
+   `/api/health` never opens a connection.
 6. **Bootstrap the super-admin** —
    `node apps/api/scripts/platform-bootstrap-admin.js --email … --allow-prod`.
 7. **First login → MFA setup wizard → enrol TOTP → save the backup codes.**

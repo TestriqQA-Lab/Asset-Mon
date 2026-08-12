@@ -74,7 +74,6 @@ export class JwtAuthGuard implements CanActivate {
       sub: key.createdById || 'apikey:' + key.id,
       tid: tenant.id,
       slug: tenant.slug,
-      db: tenant.dbName,
       role: key.role || 'ADMIN', // the key's configured role (least-privilege); legacy keys default to ADMIN
       email: 'apikey@' + tenant.slug,
       apiKeyId: key.id,

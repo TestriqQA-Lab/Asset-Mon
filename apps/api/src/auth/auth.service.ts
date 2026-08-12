@@ -101,7 +101,7 @@ export class AuthService {
       await this.catalog.tenantUser.delete({ where: { email_tenantId: { email, tenantId: tenant.id } } }).catch(() => {});
       throw e;
     }
-    return this.issueTokens(tenant.id, tenant.slug, tenant.dbName, user.id, user.role, user.email, user.tokenVersion);
+    return this.issueTokens(tenant.id, tenant.slug, user.id, user.role, user.email, user.tokenVersion);
   }
 
   /**
@@ -118,7 +118,6 @@ export class AuthService {
    */
   async signup(dto: SignupDto) {
     const email = dto.email.toLowerCase();
-    const dbName = `assetmon_t_${dto.slug.replace(/-/g, '_')}`;
     const trialEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
     // Hashing is deliberately done before opening the transaction — at cost 12 it
@@ -130,7 +129,7 @@ export class AuthService {
       ({ tenant, user } = await this.globalPrisma.$transaction(async (tx) => {
         const t = await tx.tenant.create({
           data: {
-            slug: dto.slug, name: dto.workspaceName, dbName, status: 'ACTIVE',
+            slug: dto.slug, name: dto.workspaceName, status: 'ACTIVE',
             plan: 'business', subscriptionStatus: 'trialing', trialEndsAt: trialEnd,
           },
         });
@@ -165,7 +164,7 @@ export class AuthService {
       this.log.warn(`Demo seed failed: ${e.message}`);
     }
 
-    return this.issueTokens(tenant.id, tenant.slug, dbName, user.id, user.role, user.email, user.tokenVersion);
+    return this.issueTokens(tenant.id, tenant.slug, user.id, user.role, user.email, user.tokenVersion);
   }
 
   private async seedDemoData(db: any, tenantId: string, _adminId: string) {
@@ -301,7 +300,7 @@ export class AuthService {
       data: { failedLoginCount: 0, lockedUntil: null, ...(acceptedTotpStep != null ? { lastTotpStep: acceptedTotpStep } : {}) },
     });
 
-    return this.issueTokens(chosen.tenant.id, chosen.tenant.slug, chosen.tenant.dbName, fresh.id, fresh.role, fresh.email, fresh.tokenVersion);
+    return this.issueTokens(chosen.tenant.id, chosen.tenant.slug, fresh.id, fresh.role, fresh.email, fresh.tokenVersion);
   }
 
   private async recordFailedLogin(db: any, user: any) {
@@ -391,7 +390,7 @@ export class AuthService {
       },
     }).catch(() => {});
 
-    return this.issueTokens(tenant.id, tenant.slug, tenant.dbName, user.id, user.role, user.email, user.tokenVersion);
+    return this.issueTokens(tenant.id, tenant.slug, user.id, user.role, user.email, user.tokenVersion);
   }
 
   async logout(refreshToken: string | undefined, _ctx?: { tid?: string; sub?: string }) {
@@ -449,7 +448,7 @@ export class AuthService {
     });
     const ticket = this.mfaTicket.sign(
       MFA_TICKET_PURPOSE.PENDING,
-      { scope: 'tenant', sub: user.id, tid: tenant.id, db: tenant.dbName, nonce, tv: user.tokenVersion },
+      { scope: 'tenant', sub: user.id, tid: tenant.id, nonce, tv: user.tokenVersion },
       600,
     );
     void this.sendTenantLoginEmail(tenantDb, tenant.id, user.email, code); // fire-and-forget
@@ -554,11 +553,11 @@ export class AuthService {
         await tx.tenantMfaPending.update({ where: { id: row.id }, data: { consumedAt: new Date(), backupCodeUsed: row.backupCodeUsed || usedBackup } });
         await tx.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } });
         await tx.tenantMfaPending.deleteMany({ where: { tenantId: tenant.id, userId: user.id, consumedAt: null } });
-        return { tokens: this.issueTokens(tenant.id, tenant.slug, tenant.dbName, user.id, user.role, user.email, user.tokenVersion) };
+        return { tokens: this.issueTokens(tenant.id, tenant.slug, user.id, user.role, user.email, user.tokenVersion) };
       }
       const newNonce = crypto.randomUUID();
       await tx.tenantMfaPending.update({ where: { id: row.id }, data: { stage: 'TOTP', nonce: newNonce, emailOtpHash: null, backupCodeUsed: row.backupCodeUsed || usedBackup } });
-      const next = this.mfaTicket.sign(MFA_TICKET_PURPOSE.PENDING, { scope: 'tenant', sub: user.id, tid: tenant.id, db: tenant.dbName, nonce: newNonce, tv: user.tokenVersion }, 600);
+      const next = this.mfaTicket.sign(MFA_TICKET_PURPOSE.PENDING, { scope: 'tenant', sub: user.id, tid: tenant.id, nonce: newNonce, tv: user.tokenVersion }, 600);
       return { next };
     }, { isolationLevel: 'ReadCommitted' });
     if (outcome.fail) this.throwChainFailure(outcome);
@@ -606,7 +605,7 @@ export class AuthService {
       await tx.tenantMfaPending.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
       await tx.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null, ...(acceptedStep != null ? { lastTotpStep: acceptedStep } : {}) } });
       await tx.tenantMfaPending.deleteMany({ where: { tenantId: tenant.id, userId: user.id, consumedAt: null } });
-      return { tokens: this.issueTokens(tenant.id, tenant.slug, tenant.dbName, user.id, user.role, user.email, user.tokenVersion) };
+      return { tokens: this.issueTokens(tenant.id, tenant.slug, user.id, user.role, user.email, user.tokenVersion) };
     }, { isolationLevel: 'ReadCommitted' });
     if (outcome.fail) this.throwChainFailure(outcome);
     return outcome.tokens;
@@ -648,9 +647,9 @@ export class AuthService {
   // Public so settings flows that bump tokenVersion (e.g. tenant MFA enable/
   // disable) can re-issue the CURRENT session — keeping the acting device signed
   // in while other sessions are invalidated by the version bump.
-  issueTokens(tid: string, slug: string, db: string, sub: string, role: string, email: string, tv: number = 0) {
+  issueTokens(tid: string, slug: string, sub: string, role: string, email: string, tv: number = 0) {
     const access = this.jwt.sign(
-      { sub, tid, slug, db, role, email, tv },
+      { sub, tid, slug, role, email, tv },
       { secret: process.env.JWT_ACCESS_SECRET, expiresIn: Number(process.env.JWT_ACCESS_TTL || 900) },
     );
     const jti = crypto.randomUUID();

@@ -87,7 +87,7 @@ class TwoFAController {
   // Re-issue the caller's own session after a tokenVersion bump (enable/disable),
   // so the acting device stays signed in. Mirrors req.user's claims.
   private reissue(u: any, tokenVersion: number) {
-    return this.auth.issueTokens(u.tid, u.slug, u.db, u.sub, u.role, u.email, tokenVersion);
+    return this.auth.issueTokens(u.tid, u.slug, u.sub, u.role, u.email, tokenVersion);
   }
 
   @Get()

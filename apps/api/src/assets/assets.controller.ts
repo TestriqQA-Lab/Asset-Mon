@@ -333,7 +333,7 @@ export class AssetsPublicFileController {
     // valid signature would serve any file.
     const tenant = await this.catalog.tenant.findUnique({
       where: { id: ver.tenantId },
-      select: { id: true, dbName: true, status: true },
+      select: { id: true, status: true },
     }).catch(() => null);
     if (!tenant || tenant.status === 'DELETED') {
       res.status(404).send('Not found'); return;
