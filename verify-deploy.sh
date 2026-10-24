@@ -167,18 +167,18 @@ grep -q accessToken /tmp/am_signup.json 2>/dev/null && ok "signup issued JWT tok
 # Provisioning no longer creates a database — it writes rows in one transaction. So
 # assert the transaction did ALL of its work, which is a stronger check than the old
 # "a database exists with >=25 tables".
-TID=$(q "SELECT id FROM "Tenant" WHERE slug='$SLUG';")
+TID=$(q "SELECT id FROM \"Tenant\" WHERE slug='$SLUG';")
 [ -n "$TID" ] && ok "Tenant row created" || bad "no Tenant row for $SLUG"
 if [ -n "$TID" ]; then
-  [ "$(q "SELECT COUNT(*) FROM "User" WHERE tenantId='$TID' AND role='ADMIN';")" = "1" ] && ok "admin User created" || bad "admin User missing"
-  [ "$(q "SELECT COUNT(*) FROM "TenantUser" WHERE tenantId='$TID';")" = "1" ] && ok "TenantUser mapping created" || bad "TenantUser mapping missing"
-  [ "$(q "SELECT COUNT(*) FROM "Category" WHERE tenantId='$TID';")" = "5" ] && ok "5 default categories seeded" || bad "categories seeded: $(q "SELECT COUNT(*) FROM "Category" WHERE tenantId='$TID';")/5"
-  [ "$(q "SELECT COUNT(*) FROM "AssetStatusDef" WHERE tenantId='$TID';")" = "7" ] && ok "7 status definitions seeded" || bad "status defs seeded: $(q "SELECT COUNT(*) FROM "AssetStatusDef" WHERE tenantId='$TID';")/7"
+  [ "$(q "SELECT COUNT(*) FROM \"User\" WHERE \"tenantId\"='$TID' AND role='ADMIN';")" = "1" ] && ok "admin User created" || bad "admin User missing"
+  [ "$(q "SELECT COUNT(*) FROM \"TenantUser\" WHERE \"tenantId\"='$TID';")" = "1" ] && ok "TenantUser mapping created" || bad "TenantUser mapping missing"
+  [ "$(q "SELECT COUNT(*) FROM \"Category\" WHERE \"tenantId\"='$TID';")" = "5" ] && ok "5 default categories seeded" || bad "categories seeded: $(q "SELECT COUNT(*) FROM \"Category\" WHERE \"tenantId\"='$TID';")/5"
+  [ "$(q "SELECT COUNT(*) FROM \"AssetStatusDef\" WHERE \"tenantId\"='$TID';")" = "7" ] && ok "7 status definitions seeded" || bad "status defs seeded: $(q "SELECT COUNT(*) FROM \"AssetStatusDef\" WHERE \"tenantId\"='$TID';")/7"
   # Without this row every audited action throws — it is the single most important
   # thing provisioning must not skip.
-  [ "$(q "SELECT COUNT(*) FROM "AuditCounter" WHERE tenantId='$TID';")" = "1" ] && ok "AuditCounter seeded (audit writes will work)" || bad "AuditCounter MISSING — audited actions will fail"
+  [ "$(q "SELECT COUNT(*) FROM \"AuditCounter\" WHERE \"tenantId\"='$TID';")" = "1" ] && ok "AuditCounter seeded (audit writes will work)" || bad "AuditCounter MISSING — audited actions will fail"
   # No row anywhere may carry a tenantId with no Tenant behind it.
-  ORPH=$(q "SELECT COUNT(*) FROM "User" u LEFT JOIN "Tenant" t ON u.tenantId=t.id WHERE t.id IS NULL;")
+  ORPH=$(q "SELECT COUNT(*) FROM \"User\" u LEFT JOIN \"Tenant\" t ON u.\"tenantId\"=t.id WHERE t.id IS NULL;")
   [ "$ORPH" = "0" ] && ok "no orphaned rows" || bad "$ORPH orphaned User row(s)"
 fi
 
