@@ -1,3 +1,15 @@
+> **HISTORICAL — superseded on 2026-10-24.** This is the runbook for the MySQL cutover, and the database has
+> since moved back to PostgreSQL. Nothing here describes the current system: the
+> `mysql://` URLs, the `utf8mb4` collations, `post-migrate-collations.sql` (deleted),
+> the backtick-and-`?` raw SQL and the Hostinger host it all targeted are all gone.
+>
+> It is kept because it is the best record of **what was changed and why**, which is
+> exactly what the reverse migration had to undo — see
+> `docs/postgres-migration-plan.md`. The one thing that did NOT revert is the
+> architecture: tenants still share tables with a row-level `tenantId`, and
+> database-per-tenant is not coming back.
+
+---
 # MySQL cutover runbook
 
 Companion to [mysql-migration-plan.md](./mysql-migration-plan.md). Every step below was

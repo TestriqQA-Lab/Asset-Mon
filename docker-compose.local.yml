@@ -8,10 +8,11 @@ services:
       - "4000:4000"
   caddy:
     profiles: ["never"]
-  mysql:
-    # 3307 on the host, deliberately not 3306: the standalone `assetmon-mysql` dev
-    # container already holds 3306, and two servers fighting over one port is a
-    # confusing way to lose an afternoon. Host tooling reaches THIS one on 3307;
-    # the api container reaches it as `mysql:3306` over the compose network.
+  db:
+    # 5433 on the host, deliberately not 5432: `assetmon-source-postgres-1` — the
+    # stopped container left over from the pre-MySQL era — is still mapped to 5432,
+    # and two servers fighting over one port is a confusing way to lose an afternoon.
+    # Host tooling reaches THIS one on 5433; the api container reaches it as `db:5432`
+    # over the compose network.
     ports:
-      - "3307:3306"
+      - "5433:5432"

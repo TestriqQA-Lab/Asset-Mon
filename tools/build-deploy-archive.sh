@@ -7,8 +7,10 @@
 # workspace manifests to resolve @assetmon/* links, but nothing else around them --
 # and docs/ describes this infrastructure while tools/ holds scripts that provision
 # workspaces, neither of which belongs on a production host. See "What to deploy" in
-# docs/mysql-cutover-runbook.md for what is in here and why, and
-# docs/hostinger-deployment-plan.md for the deployment itself.
+# docs/mysql-cutover-runbook.md for what is in here and why — that doc is retired, but
+# its "What to deploy" section is still the record of this archive's contents. The
+# Hostinger host it targeted is gone; see docs/postgres-migration-plan.md for where the
+# project is now.
 #
 # Two things are set inside the archive only, never in the repo:
 #   - a root `start` script, because Hostinger looks at the root package.json and the

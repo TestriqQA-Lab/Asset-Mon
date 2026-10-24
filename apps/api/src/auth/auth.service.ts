@@ -481,9 +481,10 @@ export class AuthService {
     // Take the row lock BEFORE reading. Every caller reads an attempt counter and
     // then writes it back, so without this two concurrent code submissions both read
     // the same `chainAttempts`/`emailCodeAttempts` and both write value+1 — the
-    // brute-force ceiling silently doubles. Postgres SERIALIZABLE used to cover this;
-    // under MySQL an explicit X lock is the equivalent, and unlike MySQL's
-    // SERIALIZABLE it cannot deadlock on an S→X upgrade.
+    // brute-force ceiling silently doubles. An explicit row lock is deliberate rather
+    // than relying on SERIALIZABLE, which is how this was first written: the lock is
+    // taken before the read, so it cannot deadlock on an S→X upgrade, and it behaves
+    // the same on either engine.
     await tx.$queryRawUnsafe(
       `SELECT "id" FROM "TenantMfaPending" WHERE "tenantId" = $1 AND "nonce" = $2 FOR UPDATE`,
       tenantId, nonce,

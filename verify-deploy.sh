@@ -20,7 +20,7 @@ cd "$(dirname "$0")" || exit 1
 # Runs under its OWN compose project name, deliberately.
 #
 # The cleanup below is `down -v`, which removes the project's named volumes. Under a
-# shared project name that would delete `mysqldata` and `uploads` — the local dev
+# shared project name that would delete `pgdata` and `uploads` — the local dev
 # database and every file uploaded against it. A separate project gets its own
 # throwaway volumes, so a self-check can never destroy real data.
 VERIFY_PROJECT="assetmon-verify"
@@ -40,8 +40,8 @@ cat > "$VERIFY_OVERRIDE" <<YML
 services:
   api:
     ports: ["${VERIFY_PORT}:4000"]
-  mysql:
-    ports: ["3310:3306"]
+  db:
+    ports: ["5434:5432"]
   caddy:
     profiles: ["never"]
 YML
@@ -72,8 +72,8 @@ echo ""; echo "2) Docker engine reachable"
 if docker info >/dev/null 2>&1; then ok "daemon up - $(docker --version)"; else bad "docker not reachable"; exit 1; fi
 
 echo ""; echo "3) Throwaway production-mode config"
-# `docker compose build` interpolates the whole compose file, and the mysql service
-# declares MYSQL_ROOT_PASSWORD as required — so the throwaway env has to exist before
+# `docker compose build` interpolates the whole compose file, and the db service
+# declares POSTGRES_PASSWORD as required — so the throwaway env has to exist before
 # ANY compose command, not just before `up`. Previously this step ran after the build
 # and only worked because the developer's own .env happened to satisfy the
 # interpolation, quietly defeating the point of using throwaway secrets.
@@ -82,10 +82,11 @@ PW="verify_pw_${RANDOM}${RANDOM}"
 cat > .env <<EOF
 NODE_ENV=production
 API_PORT=4000
-MYSQL_ROOT_PASSWORD=$PW
-MYSQL_DATABASE=assetmon
-DATABASE_URL=mysql://root:$PW@mysql:3306/assetmon
-CATALOG_DATABASE_URL=mysql://root:$PW@mysql:3306/assetmon
+POSTGRES_USER=root
+POSTGRES_PASSWORD=$PW
+POSTGRES_DB=assetmon
+DATABASE_URL=postgresql://root:$PW@db:5432/assetmon
+CATALOG_DATABASE_URL=postgresql://root:$PW@db:5432/assetmon
 JWT_ACCESS_SECRET=$(openssl rand -hex 32)
 JWT_REFRESH_SECRET=$(openssl rand -hex 32)
 ENCRYPTION_KEY=$(openssl rand -hex 32)
@@ -115,13 +116,13 @@ if $COMPOSE build >/tmp/am_build.log 2>&1; then ok "docker build OK"; else bad "
 
 echo ""; echo "5) Boot full stack"
 $COMPOSE up -d >/tmp/am_up.log 2>&1
-DBC=$($COMPOSE ps -q mysql)
+DBC=$($COMPOSE ps -q db)
 s=none
 for i in $(seq 1 60); do
   s=$(docker inspect -f '{{.State.Health.Status}}' "$DBC" 2>/dev/null || echo none)
   [ "$s" = "healthy" ] && break; sleep 2
 done
-[ "$s" = "healthy" ] && ok "mysql healthy" || bad "mysql not healthy"
+[ "$s" = "healthy" ] && ok "database healthy" || bad "database not healthy"
 code=000
 for i in $(seq 1 40); do
   code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$VERIFY_PORT/api/health 2>/dev/null)
@@ -131,25 +132,32 @@ done
 [ "$code" != "000" ] && ok "API responding (HTTP $code)" || bad "API not responding"
 
 echo ""; echo "6) Migrate + signup provisions a fully-formed tenant"
-if $COMPOSE exec -T api npm -w @assetmon/db run migrate:deploy >/tmp/am_mig.log 2>&1; then ok "schema + collations applied"; else bad "migrate FAILED - see /tmp/am_mig.log"; fi
+if $COMPOSE exec -T api npm -w @assetmon/db run migrate:deploy >/tmp/am_mig.log 2>&1; then ok "schema applied"; else bad "migrate FAILED - see /tmp/am_mig.log"; fi
 
-# Resolve the database client once. MariaDB 11 ships `mariadb` and no longer provides a
-# `mysql` binary, and because every query below sends stderr to /dev/null, a missing
-# client does not announce itself — it turns each check into an empty string, which reads
-# as "the row was never created". That is exactly how a working application once produced
-# eight failures here, so this fails loudly instead.
-DBCLI=$($COMPOSE exec -T mysql sh -c 'command -v mariadb || command -v mysql' 2>/dev/null | tr -d '\r' | tr -d '[:space:]')
-[ -n "$DBCLI" ] || bad "no mariadb/mysql client inside the database container — the SQL checks below cannot run"
-DBCLI="${DBCLI:-mariadb}"
+# Check the client exists before relying on it. Every query below sends stderr to
+# /dev/null, so a missing client does not announce itself — it turns each check into
+# an empty string, which reads as "the row was never created". That is exactly how a
+# working application once produced eight failures here, so this fails loudly instead.
+# (Under MariaDB this also had to pick between two binary names; the postgres image
+# ships psql under one name, so there is nothing to resolve any more.)
+$COMPOSE exec -T db sh -c 'command -v psql' >/dev/null 2>&1 \
+  || bad "no psql inside the database container — the SQL checks below cannot run"
 
-# Helper: one-shot SQL against the app database, scalar result.
-q(){ $COMPOSE exec -T mysql "$DBCLI" -uroot -p"$PW" -N -B -e "$1" assetmon 2>/dev/null | tr -d '
-' | tr -d '[:space:]'; }
+# Helper: one-shot SQL against the app database, scalar result. -tAq is tuples only,
+# unaligned and quiet. No password: pg_hba trusts local socket connections inside the
+# container, so the throwaway $PW never has to travel through this.
+q(){ $COMPOSE exec -T db psql -U root -d assetmon -tAqc "$1" 2>/dev/null | tr -d '[:space:]'; }
 
-# The searchable columns must be case-insensitive, or search silently regresses to
-# case-sensitive — the collations are applied by migrate:deploy, not by Prisma.
-COLL=$(q "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='assetmon' AND COLLATION_NAME='utf8mb4_general_ci';")
-[ "$COLL" = "12" ] && ok "12 searchable columns collated case-insensitively" || bad "collated columns: ${COLL:-0}/12"
+# This slot used to assert that a dozen columns were collated case-insensitively,
+# because MySQL has no per-query mode and search depended on the collation. Postgres
+# compares case-sensitively and each query opts in with mode: 'insensitive', so the
+# thing worth asserting is the inverse — that the database really IS case-sensitive.
+# If it were not, every insensitive search would pass for the wrong reason and a
+# missing `mode` would never be noticed.
+CS=$(q "SELECT 'a' = 'A';")
+[ "$CS" = "f" ] && ok "database compares case-sensitively (so mode: 'insensitive' is load-bearing)" || bad "case-sensitivity: expected f, got '${CS:-empty}'"
+MIGC=$(q "SELECT COUNT(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL;")
+[ "${MIGC:-0}" -ge 1 ] 2>/dev/null && ok "$MIGC migration(s) recorded as applied" || bad "no finished rows in _prisma_migrations"
 
 SLUG="verify${RANDOM}"
 HTTP=$(curl -s -o /tmp/am_signup.json -w '%{http_code}' -X POST http://127.0.0.1:$VERIFY_PORT/api/auth/signup -H 'Content-Type: application/json' -d "{\"workspaceName\":\"Verify Co\",\"slug\":\"$SLUG\",\"email\":\"admin@$SLUG.test\",\"password\":\"VerifyPass123\",\"firstName\":\"V\",\"lastName\":\"Erify\"}")
@@ -159,18 +167,18 @@ grep -q accessToken /tmp/am_signup.json 2>/dev/null && ok "signup issued JWT tok
 # Provisioning no longer creates a database — it writes rows in one transaction. So
 # assert the transaction did ALL of its work, which is a stronger check than the old
 # "a database exists with >=25 tables".
-TID=$(q "SELECT id FROM Tenant WHERE slug='$SLUG';")
+TID=$(q "SELECT id FROM "Tenant" WHERE slug='$SLUG';")
 [ -n "$TID" ] && ok "Tenant row created" || bad "no Tenant row for $SLUG"
 if [ -n "$TID" ]; then
-  [ "$(q "SELECT COUNT(*) FROM User WHERE tenantId='$TID' AND role='ADMIN';")" = "1" ] && ok "admin User created" || bad "admin User missing"
-  [ "$(q "SELECT COUNT(*) FROM TenantUser WHERE tenantId='$TID';")" = "1" ] && ok "TenantUser mapping created" || bad "TenantUser mapping missing"
-  [ "$(q "SELECT COUNT(*) FROM Category WHERE tenantId='$TID';")" = "5" ] && ok "5 default categories seeded" || bad "categories seeded: $(q "SELECT COUNT(*) FROM Category WHERE tenantId='$TID';")/5"
-  [ "$(q "SELECT COUNT(*) FROM AssetStatusDef WHERE tenantId='$TID';")" = "7" ] && ok "7 status definitions seeded" || bad "status defs seeded: $(q "SELECT COUNT(*) FROM AssetStatusDef WHERE tenantId='$TID';")/7"
+  [ "$(q "SELECT COUNT(*) FROM "User" WHERE tenantId='$TID' AND role='ADMIN';")" = "1" ] && ok "admin User created" || bad "admin User missing"
+  [ "$(q "SELECT COUNT(*) FROM "TenantUser" WHERE tenantId='$TID';")" = "1" ] && ok "TenantUser mapping created" || bad "TenantUser mapping missing"
+  [ "$(q "SELECT COUNT(*) FROM "Category" WHERE tenantId='$TID';")" = "5" ] && ok "5 default categories seeded" || bad "categories seeded: $(q "SELECT COUNT(*) FROM "Category" WHERE tenantId='$TID';")/5"
+  [ "$(q "SELECT COUNT(*) FROM "AssetStatusDef" WHERE tenantId='$TID';")" = "7" ] && ok "7 status definitions seeded" || bad "status defs seeded: $(q "SELECT COUNT(*) FROM "AssetStatusDef" WHERE tenantId='$TID';")/7"
   # Without this row every audited action throws — it is the single most important
   # thing provisioning must not skip.
-  [ "$(q "SELECT COUNT(*) FROM AuditCounter WHERE tenantId='$TID';")" = "1" ] && ok "AuditCounter seeded (audit writes will work)" || bad "AuditCounter MISSING — audited actions will fail"
+  [ "$(q "SELECT COUNT(*) FROM "AuditCounter" WHERE tenantId='$TID';")" = "1" ] && ok "AuditCounter seeded (audit writes will work)" || bad "AuditCounter MISSING — audited actions will fail"
   # No row anywhere may carry a tenantId with no Tenant behind it.
-  ORPH=$(q "SELECT COUNT(*) FROM User u LEFT JOIN Tenant t ON u.tenantId=t.id WHERE t.id IS NULL;")
+  ORPH=$(q "SELECT COUNT(*) FROM "User" u LEFT JOIN "Tenant" t ON u.tenantId=t.id WHERE t.id IS NULL;")
   [ "$ORPH" = "0" ] && ok "no orphaned rows" || bad "$ORPH orphaned User row(s)"
 fi
 
@@ -182,7 +190,7 @@ ST=$(curl -s http://127.0.0.1:$VERIFY_PORT/api/me/mfa -H "Authorization: Bearer 
 echo "$ST" | grep -q '"mfaMethod":"NONE"' && ok "MFA status endpoint live (off by default)" || bad "MFA status endpoint failed ($ST)"
 RS=$(curl -s -X POST http://127.0.0.1:$VERIFY_PORT/api/me/mfa/recovery/send -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' -d '{"email":"recovery@othermail.test","acknowledgeRisk":true}' 2>/dev/null)
 echo "$RS" | grep -q 'maskedEmail' && ok "email-code machinery works (OTP_PEPPER + email-log OK)" || bad "recovery/send failed ($RS)"
-MT=$(q "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='assetmon' AND TABLE_NAME IN ('TenantMfaPending','TenantBackupCode');")
+MT=$(q "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('TenantMfaPending','TenantBackupCode');")
 [ "$MT" = "2" ] && ok "tenant MFA tables present (TenantMfaPending + TenantBackupCode)" || bad "tenant MFA tables: ${MT:-0}/2"
 PMR=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$VERIFY_PORT/api/platform/mfa/setup/state 2>/dev/null)
 [ "$PMR" = "401" ] && ok "platform MFA setup route registered (401 unauthenticated)" || bad "platform MFA route HTTP $PMR (expected 401)"

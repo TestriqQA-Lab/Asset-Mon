@@ -12,7 +12,7 @@
  * LOCAL DEVELOPMENT ONLY. It decrypts MFA secrets; never point it at production.
  *
  * Usage:
- *   ENCRYPTION_KEY=... DATABASE_URL=mysql://USER:PASSWORD@HOST:3306/DBNAME \
+ *   ENCRYPTION_KEY=... DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME \
  *     npx ts-node tools/totp-codes.ts [emailSubstring]
  */
 import { authenticator } from 'otplib';

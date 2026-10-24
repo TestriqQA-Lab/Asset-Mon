@@ -24,7 +24,8 @@ jobs:
         run: npm -w @assetmon/db run generate
 
       # Guards the ways a query can escape tenant scoping (raw SQL, nested relation
-      # writes) and the Postgres-dialect SQL that the MySQL migration kept producing.
+      # writes) and the wrong-dialect SQL that each database move keeps producing. The
+      # dialect half was inverted when the database went back to Postgres.
       - name: Tenant-safety check
         run: bash ci/check-tenant-safety.sh
 

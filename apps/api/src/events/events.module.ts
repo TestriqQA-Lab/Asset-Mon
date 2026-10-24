@@ -93,10 +93,11 @@ export class EventBusService {
   async emit(event: string, payload: any, opts?: { emails?: Array<{ to: string; subject: string; body: string }> }) {
     if (!this.ctx.tenantId) return;
     const db = this.ctx.prisma();
-    // `events` was a Postgres String[] and used the `has` filter; under MySQL it is a
-    // Json column, whose equivalent membership test is `array_contains`. `has` silently
-    // stopped matching after the migration — and every emit() caller swallows errors,
-    // so webhook delivery failed without a trace.
+    // `events` is a Json column, whose membership test is `array_contains`. It was
+    // once a Postgres String[] queried with `has`, and `has` silently stopped matching
+    // when the column changed — while every emit() caller swallows errors, so webhook
+    // delivery failed without a trace. The column is still Json, so this still stands:
+    // do not "restore" `has` just because the database is Postgres again.
     const hooks = await db.webhook.findMany({ where: { active: true, events: { array_contains: event } } });
     for (const h of hooks) {
       const delivery = await db.webhookDelivery.create({

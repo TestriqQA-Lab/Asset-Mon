@@ -26,7 +26,7 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..');
 require('dotenv').config({ path: path.join(repoRoot, '.env') });
 
 const bcrypt = require('bcryptjs');
-// Catalog and tenant data share one MySQL database, so there is a single client.
+// Catalog and tenant data share one Postgres database, so there is a single client.
 // Prisma 7 has no query engine, so the client is built with a driver adapter — see
 // makeAdapter in packages/db/src/index.js.
 const { PrismaClient, makeAdapter } = require('@assetmon/db');

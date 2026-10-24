@@ -97,7 +97,7 @@ async function bootstrap() {
     if (!raw) { log.warn(`${key} is NOT SET`); continue; }
     try {
       const u = new URL(raw);
-      log.info(`${key} -> user=${u.username} host=${u.hostname}:${u.port || '3306'} db=${u.pathname.slice(1)}`);
+      log.info(`${key} -> user=${u.username} host=${u.hostname}:${u.port || '5432'} db=${u.pathname.slice(1)}`);
     } catch {
       log.warn(`${key} is set but is not a parseable URL`);
     }

@@ -1,35 +1,35 @@
 services:
-  # The service keeps the name `mysql` because DATABASE_URL addresses it by that
-  # hostname, but it runs MariaDB — the same server production runs.
+  # Named `db`, not `mysql`. The old name came from DATABASE_URL addressing the service
+  # by that hostname, and it already outlived the truth once — it stayed `mysql` after
+  # the image became MariaDB. Carrying it over to a Postgres container as well would
+  # have been one confusion too many, so the rename happened with the engine change
+  # rather than being left for later.
   #
-  # It used to be mysql:8.4, and that stopped working when the API moved to Prisma 7.
-  # Prisma 7 has no query engine and talks to the database through the pure-JS mariadb
-  # driver, whose POOLED path cannot complete MySQL 8.4's caching_sha2_password
-  # handshake: every query fails with ER_GET_CONNECTION_TIMEOUT having opened no
-  # connection at all. A single connection succeeds, which makes it look like a
-  # networking problem rather than an authentication one. Matching production removes
-  # the question entirely.
-  mysql:
-    image: mariadb:11.8
+  # No charset or collation flags, unlike the MariaDB version of this file. The image
+  # initialises UTF-8, and Postgres compares case-sensitively by default. That default
+  # is load-bearing now: searches opt into case-insensitivity per query with Prisma's
+  # `mode: 'insensitive'`, instead of a dozen columns being collated for it the way
+  # MySQL forced.
+  db:
+    image: postgres:17
     restart: unless-stopped
-    command:
-      # Tables are created with utf8mb4_bin (case-sensitive); a handful of
-      # searchable columns are then relaxed to utf8mb4_general_ci by
-      # packages/db/post-migrate-collations.sql. Pinning the server default keeps a
-      # fresh container consistent with what `prisma migrate deploy` expects.
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_bin
     environment:
-      # The variable names in .env stay MYSQL_* — run-local.sh and verify-deploy.sh
-      # both write them — and are handed to MariaDB under the names it documents.
-      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
-      MARIADB_DATABASE: ${MYSQL_DATABASE:-assetmon}
+      POSTGRES_USER: ${POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-assetmon}
     volumes:
-      - mysqldata:/var/lib/mysql
+      # dbdata, NOT pgdata. The compose project is named after this directory, so a
+      # volume called `pgdata` resolves to `assetmon-source_pgdata` — which already
+      # exists and holds a **Postgres 16** datadir from the pre-MySQL, database-per-tenant
+      # era. Postgres 17 cannot read it and would abort on start, reproducing exactly the
+      # MySQL-8-datadir-under-MariaDB failure that cost a month of nobody noticing. The
+      # old volume is left untouched rather than deleted, because that is irreversible.
+      - dbdata:/var/lib/postgresql/data
     healthcheck:
-      # Shipped by the mariadb image; --innodb_initialized is what distinguishes
-      # "accepting connections" from "actually ready to serve".
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      # The image's own probe. `-U` is not optional: without it pg_isready runs as the
+      # container's default user, finds no such role, and reports a perfectly healthy
+      # server as down — which then stalls `depends_on: service_healthy` forever.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-root} -d ${POSTGRES_DB:-assetmon}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -42,7 +42,7 @@ services:
     restart: unless-stopped
     env_file: .env
     depends_on:
-      mysql:
+      db:
         condition: service_healthy
     volumes:
       - uploads:/app/uploads
@@ -61,7 +61,7 @@ services:
       - api
 
 volumes:
-  mysqldata:
+  dbdata:
   uploads:
   caddy_data:
   caddy_config:

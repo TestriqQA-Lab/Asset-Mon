@@ -46,9 +46,10 @@ export const AUDIT_ASSET_SNAPSHOT_KEY = 'assetId';
  * into `detail`, which is hashed and never rewritten, so the reference is still covered
  * by the chain while the mutable column is free to change.
  *
- * v3 adds `tenantId` to the hash payload. In the shared-table architecture (MySQL
- * migration), audit chains are per-tenant. Including tenantId in the hash cryptographically
- * binds each chain to its tenant, preventing cross-tenant chain grafting.
+ * v3 adds `tenantId` to the hash payload. Under shared tables audit chains are
+ * per-tenant, so including tenantId in the hash cryptographically binds each chain to
+ * its tenant and prevents cross-tenant chain grafting. (It arrived with the move to
+ * shared tables, which was the MySQL migration; the shared-table model outlived it.)
  *
  * Rows keep the version they were written with, so entries created before the change
  * continue to verify against v1/v2.

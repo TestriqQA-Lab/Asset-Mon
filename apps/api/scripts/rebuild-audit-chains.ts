@@ -18,7 +18,7 @@
  * cannot be performed invisibly.
  *
  * Usage:
- *   DATABASE_URL=mysql://USER:PASSWORD@HOST:3306/DBNAME \
+ *   DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME \
  *     npx ts-node scripts/rebuild-audit-chains.ts [--dry-run]
  */
 import { PrismaClient, makeAdapter } from '@assetmon/db';

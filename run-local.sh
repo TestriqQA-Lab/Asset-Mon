@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==================================================================
-#  Run AssetMon locally: Docker backend (mysql + api).
+#  Run AssetMon locally: Docker backend (db + api).
 #  Run this in an Ubuntu (WSL) terminal and LEAVE THE WINDOW OPEN.
 #  Press Ctrl+C here to stop everything and restore your config.
 #  (The website is started separately on Windows — see the banner.)
@@ -29,17 +29,17 @@ printf 'NEXT_PUBLIC_API_URL=http://localhost:4000\nNEXT_PUBLIC_SITE_URL=http://l
 restore() {
   echo ""
   echo "Stopping backend & restoring your config..."
-  # `down` re-reads docker-compose.yml, which requires MYSQL_ROOT_PASSWORD to
+  # `down` re-reads docker-compose.yml, which requires POSTGRES_PASSWORD to
   # interpolate. Restoring .env first would therefore break the teardown — so the
   # value is supplied inline and the order is: stop the stack, then restore config.
-  MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-teardown}" $COMPOSE down
+  POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-teardown}" $COMPOSE down
   [ -f .env.beforelocal.bak ] && mv -f .env.beforelocal.bak .env
   [ -f apps/web/.env.local.beforelocal.bak ] && mv -f apps/web/.env.local.beforelocal.bak apps/web/.env.local
   echo "Done. Your workspaces/data are kept for next time."
 }
 trap restore INT TERM EXIT
 
-echo "Starting backend (mysql + api)..."
+echo "Starting backend (db + api)..."
 # --build, not a bare `up -d`. Compose happily reuses whatever image is tagged for
 # this project, and the tag survives across branches — so without this you can be
 # running a build from days ago while reading today's source, which is a genuinely
@@ -47,13 +47,15 @@ echo "Starting backend (mysql + api)..."
 $COMPOSE up -d --build
 
 echo "Waiting for the database to be ready..."
-# `postgres` now sits behind the `legacy` compose profile and is not started here,
-# so this waits on `mysql`. Its healthcheck has a 30s start_period.
-until [ "$(docker inspect -f '{{.State.Health.Status}}' "$($COMPOSE ps -q mysql)" 2>/dev/null)" = "healthy" ]; do sleep 2; done
+# Waits on the `db` service, whose healthcheck has a 30s start_period. (An earlier
+# version of this comment described a `legacy` compose profile holding a second,
+# Postgres service — that service is long gone, and there is now exactly one.)
+until [ "$(docker inspect -f '{{.State.Health.Status}}' "$($COMPOSE ps -q db)" 2>/dev/null)" = "healthy" ]; do sleep 2; done
 
-echo "Applying migrations + column collations (safe to repeat)..."
-# migrate:deploy also runs post-migrate-collations.sql, which is what makes search
-# case-insensitive now that Prisma's mode: 'insensitive' is gone.
+echo "Applying migrations (safe to repeat)..."
+# Just the migrations now. This used to chain post-migrate-collations.sql to make
+# search case-insensitive, because MySQL has no per-query equivalent; on Postgres
+# the queries ask for it themselves with mode: 'insensitive'.
 $COMPOSE exec -T api npm -w @assetmon/db run migrate:deploy >/dev/null 2>&1 && echo "  database ready" || echo "  (note: if login fails later, re-run this script)"
 
 cat <<'BANNER'

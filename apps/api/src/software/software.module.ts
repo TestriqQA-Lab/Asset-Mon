@@ -159,8 +159,9 @@ class LicensesService {
     // FOR UPDATE on the license row prevents concurrent reads of the same seat count.
     const result = await db.$transaction(async (tx: any) => {
       // Lock the license row to prevent concurrent seat allocation races.
-      // MySQL syntax: backtick identifiers and `?` placeholders — double quotes are
-      // string literals here, not identifiers, and `$1` is a syntax error.
+      // Postgres syntax: double-quoted identifiers and `$n` placeholders. Backticks are
+      // a syntax error here, and `?` binds nothing — ci/check-tenant-safety.sh fails the
+      // build if either creeps back in.
       await tx.$queryRawUnsafe(
         `SELECT "id" FROM "SoftwareLicense" WHERE "id" = $1 FOR UPDATE`,
         licenseId,
