@@ -68,14 +68,19 @@ class ReservationsService {
     return r;
   }
 
-  async create(data: { assetId: string; userId: string; startAt: string; endAt: string; notes?: string }, actor: { userId: string; role: string }) {
+  async create(data: { assetId: string; userId?: string; startAt: string; endAt: string; notes?: string }, actor: { userId: string; role: string }) {
+    // Who the booking is FOR. Omitted means the caller, which is what an employee
+    // always sends: their form has no "for user" picker, because the endpoint that
+    // would populate it (GET /users) is admin-only. Defaulting here rather than
+    // having the client echo its own id back keeps the client out of the decision.
+    const subjectId = data.userId || actor.userId;
     // EMPLOYEE may only request reservations for themselves; reject cross-user
     // bookings outright. ADMIN / ASSET_MANAGER may book on someone else's behalf.
-    if (actor.role === 'EMPLOYEE' && data.userId !== actor.userId) {
+    if (actor.role === 'EMPLOYEE' && subjectId !== actor.userId) {
       throw new ForbiddenException('Employees can only request reservations for themselves');
     }
     const db = this.ctx.prisma();
-    await assertTenantRefs(db, { asset: data.assetId, user: data.userId });
+    await assertTenantRefs(db, { asset: data.assetId, user: subjectId });
     const start = new Date(data.startAt);
     const end = new Date(data.endAt);
     if (end <= start) throw new BadRequestException('endAt must be after startAt');
@@ -89,7 +94,7 @@ class ReservationsService {
       data: {
         tenantId: this.ctx.tenantId!,
         assetId: data.assetId,
-        userId: data.userId,
+        userId: subjectId,
         startAt: start,
         endAt: end,
         notes: data.notes || null,
@@ -213,7 +218,9 @@ class ReservationsService {
 
 class CreateReservationDto {
   @IsString() assetId: string;
-  @IsString() userId: string;
+  // Optional: omitting it books for the caller. An employee has no picker to fill,
+  // and the server is the only side that can be trusted about who is asking.
+  @IsOptional() @IsString() userId?: string;
   @IsISO8601() startAt: string;
   @IsISO8601() endAt: string;
   @IsOptional() @IsString() notes?: string;

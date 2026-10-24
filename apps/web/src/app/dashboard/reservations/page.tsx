@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, List, Calendar as CalIcon } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, getSession } from '@/lib/api';
 import { Modal } from '@/components/Modal';
 import { Field, inputClass, btnPrimary, btnSecondary } from '@/components/Field';
 
@@ -21,7 +21,10 @@ export default function ReservationsPage() {
   if (filter.status) params.set('status', filter.status);
   const list = useQuery({ queryKey: ['reservations', view, filter], queryFn: () => api(`/reservations?${params}`) });
   const assets = useQuery({ queryKey: ['assets-all'], queryFn: () => api('/assets?pageSize=300') });
-  const users = useQuery({ queryKey: ['users'], queryFn: () => api('/users') });
+  // GET /users is ADMIN / ASSET_MANAGER only. Asking for it as an employee just
+  // 403s, which used to leave the picker below empty and every submission rejected.
+  const canBookForOthers = ['ADMIN', 'ASSET_MANAGER'].includes(getSession()?.user.role ?? '');
+  const users = useQuery({ queryKey: ['users'], queryFn: () => api('/users'), enabled: canBookForOthers });
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<any>({ assetId: '', userId: '', startAt: '', endAt: '', notes: '' });
@@ -31,7 +34,8 @@ export default function ReservationsPage() {
       method: 'POST',
       body: JSON.stringify({
         assetId: form.assetId,
-        userId: form.userId,
+        // Left out entirely when booking for yourself; the API fills in the caller.
+        userId: form.userId || undefined,
         startAt: new Date(form.startAt).toISOString(),
         endAt: new Date(form.endAt).toISOString(),
         notes: form.notes || undefined,
@@ -133,12 +137,14 @@ export default function ReservationsPage() {
               {assets.data?.items?.map((a: any) => <option key={a.id} value={a.id}>{a.assetTag} · {a.name}</option>)}
             </select>
           </Field>
-          <Field label="For user">
-            <select className={inputClass} value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })}>
-              <option value="">— Select —</option>
-              {users.data?.map((u: any) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
-            </select>
-          </Field>
+          {canBookForOthers && (
+            <Field label="For user">
+              <select className={inputClass} value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })}>
+                <option value="">— Select —</option>
+                {users.data?.map((u: any) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+              </select>
+            </Field>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Start"><input className={inputClass} type="datetime-local" value={form.startAt} onChange={(e) => setForm({ ...form, startAt: e.target.value })} /></Field>
             <Field label="End"><input className={inputClass} type="datetime-local" value={form.endAt} onChange={(e) => setForm({ ...form, endAt: e.target.value })} /></Field>
