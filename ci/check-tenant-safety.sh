@@ -2,7 +2,9 @@
 # ci/check-tenant-safety.sh
 #
 # Guards the two ways a query can escape the tenant-scoping Prisma extension, plus
-# the SQL-dialect mistake that the Postgres→MySQL move kept producing.
+# the SQL-dialect mistake that each database move keeps producing. The dialect check
+# was inverted when the database went back to Postgres: it used to ban Postgres
+# syntax, and now bans MySQL's.
 #
 # The extension in apps/api/src/tenancy/scoped-client.ts injects `tenantId` on every
 # top-level operation against a tenant-scoped model. It cannot see:
@@ -58,15 +60,21 @@ while IFS= read -r line; do
 done <<< "$raw_hits"
 [ $fail -eq 0 ] && ok "$(printf '%s' "$raw_hits" | grep -c . ) raw queries, all allowlisted"
 
-# ── 2. Postgres syntax in raw SQL ─────────────────────────────────────────────────
-# Double-quoted identifiers are string literals in MySQL, and $1 is a syntax error.
-# Three of these shipped in the migration and threw at runtime.
-note "2. Postgres-only SQL syntax"
-pg_hits=$(grep -rn 'FROM "\|SELECT "\|WHERE "\|= \$[0-9]\|pg_advisory' "$SRC" --include='*.ts' | decomment)
-if [ -n "$pg_hits" ]; then
-  while IFS= read -r l; do bad "Postgres syntax in SQL: $(echo "$l" | cut -c1-110)"; done <<< "$pg_hits"
+# ── 2. MySQL syntax in raw SQL ──────────────────────────────────
+# Backtick identifiers are a syntax error in Postgres (42601) and a ? placeholder
+# binds nothing, so either one fails at RUNTIME rather than at build time — which is
+# exactly why this is a CI check and not a code-review habit. The 19 statements ported
+# in the Postgres move are each on one line, so a line-based grep sees all of them.
+#
+# pg_advisory stays banned in the same breath, from the other direction: the locks
+# here are SELECT ... FOR UPDATE, which works on either engine, and advisory locks
+# would tie the code back to one database for no gain.
+note "2. MySQL-only SQL syntax"
+my_hits=$(grep -rnE '(FROM|SELECT|WHERE|JOIN|ORDER BY) \\?`|= \?|pg_advisory' "$SRC" --include='*.ts' | decomment)
+if [ -n "$my_hits" ]; then
+  while IFS= read -r l; do bad "MySQL syntax in SQL: $(echo "$l" | cut -c1-110)"; done <<< "$my_hits"
 else
-  ok "no Postgres identifier quoting, \$n placeholders, or advisory locks"
+  ok "no backtick identifiers, ? placeholders, or advisory locks"
 fi
 
 # ── 3. Nested relation writes ─────────────────────────────────────────────────────

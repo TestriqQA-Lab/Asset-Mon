@@ -58,7 +58,7 @@ async function runTests() {
       // Inline the transaction logic from software.module.ts
       return await tenant.$transaction(async (tx: any) => {
         // FOR UPDATE lock
-        await tx.$queryRawUnsafe(`SELECT \`id\` FROM \`SoftwareLicense\` WHERE \`id\` = ? FOR UPDATE`, license.id);
+        await tx.$queryRawUnsafe(`SELECT "id" FROM "SoftwareLicense" WHERE "id" = $1 FOR UPDATE`, license.id);
         const lic = await tx.softwareLicense.findUnique({
           where: { id: license.id },
           include: { assignments: { where: { returnedAt: null } } },
@@ -99,7 +99,7 @@ async function runTests() {
       // Inline the transaction logic from platform-mfa.service.ts
       return await catalog.$transaction(async (tx: any) => {
         // FOR UPDATE lock on the request
-        await tx.$queryRawUnsafe(`SELECT \`id\` FROM \`PlatformMfaResetRequest\` WHERE \`id\` = ? FOR UPDATE`, req.id);
+        await tx.$queryRawUnsafe(`SELECT "id" FROM "PlatformMfaResetRequest" WHERE "id" = $1 FOR UPDATE`, req.id);
         const claim = await tx.platformMfaResetRequest.updateMany({
           where: { id: req.id, status: 'PENDING', expiresAt: { gt: new Date() } },
           data: { status: 'APPROVED', approverId: approver.id, approvedAt: new Date() },
@@ -216,9 +216,9 @@ async function runTests() {
   const floorAttempts = await Promise.allSettled([
     // Tx 1
     catalog.$transaction(async (tx: any) => {
-      await tx.$queryRawUnsafe(`SELECT \`id\` FROM \`PlatformMfaResetRequest\` WHERE \`id\` = ? FOR UPDATE`, req1.id);
+      await tx.$queryRawUnsafe(`SELECT "id" FROM "PlatformMfaResetRequest" WHERE "id" = $1 FOR UPDATE`, req1.id);
       await tx.platformMfaResetRequest.updateMany({ where: { id: req1.id, status: 'PENDING' }, data: { status: 'APPROVED', approverId: sa3.id, approvedAt: new Date() } });
-      await tx.$queryRawUnsafe(`SELECT \`id\` FROM \`PlatformUser\` WHERE \`role\` = 'SUPER_ADMIN' AND \`active\` = true ORDER BY \`id\` FOR UPDATE`);
+      await tx.$queryRawUnsafe(`SELECT "id" FROM "PlatformUser" WHERE "role" = 'SUPER_ADMIN' AND "active" = true ORDER BY "id" FOR UPDATE`);
       
       const admins = await tx.platformUser.findMany({ where: { role: 'SUPER_ADMIN', active: true } });
       const complete = admins.filter(mfaSetupComplete);
@@ -230,9 +230,9 @@ async function runTests() {
     
     // Tx 2
     catalog.$transaction(async (tx: any) => {
-      await tx.$queryRawUnsafe(`SELECT \`id\` FROM \`PlatformMfaResetRequest\` WHERE \`id\` = ? FOR UPDATE`, req2.id);
+      await tx.$queryRawUnsafe(`SELECT "id" FROM "PlatformMfaResetRequest" WHERE "id" = $1 FOR UPDATE`, req2.id);
       await tx.platformMfaResetRequest.updateMany({ where: { id: req2.id, status: 'PENDING' }, data: { status: 'APPROVED', approverId: sa3.id, approvedAt: new Date() } });
-      await tx.$queryRawUnsafe(`SELECT \`id\` FROM \`PlatformUser\` WHERE \`role\` = 'SUPER_ADMIN' AND \`active\` = true ORDER BY \`id\` FOR UPDATE`);
+      await tx.$queryRawUnsafe(`SELECT "id" FROM "PlatformUser" WHERE "role" = 'SUPER_ADMIN' AND "active" = true ORDER BY "id" FOR UPDATE`);
       
       const admins = await tx.platformUser.findMany({ where: { role: 'SUPER_ADMIN', active: true } });
       const complete = admins.filter(mfaSetupComplete);
@@ -262,7 +262,7 @@ async function runTests() {
     Array.from({ length: 20 }).map(async (_, i) => {
       return await catalog.$transaction(async (tx: any) => {
         const counters: any[] = await tx.$queryRawUnsafe(
-          `SELECT \`lastSeq\`, \`lastHash\` FROM \`PlatformAuditCounter\` WHERE \`id\` = 'platform' FOR UPDATE`,
+          `SELECT "lastSeq", "lastHash" FROM "PlatformAuditCounter" WHERE "id" = 'platform' FOR UPDATE`,
         );
         let lastSeq = counters.length > 0 ? (counters[0].lastSeq ?? 0) : 0;
         let lastHash = counters.length > 0 ? (counters[0].lastHash ?? null) : null;

@@ -62,7 +62,7 @@ export class PlatformAuditService {
         async (tx) => {
           // Lock the counter row to strictly serialize concurrent appends.
           const counters: any[] = await tx.$queryRawUnsafe(
-            `SELECT \`lastSeq\`, \`lastHash\` FROM \`PlatformAuditCounter\` WHERE \`id\` = 'platform' FOR UPDATE`,
+            `SELECT "lastSeq", "lastHash" FROM "PlatformAuditCounter" WHERE "id" = 'platform' FOR UPDATE`,
           );
           
           let lastSeq = 0;

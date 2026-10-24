@@ -288,7 +288,7 @@ export class PlatformAuthService {
     // AuthService.loadTenantChainTx. The attempt counters below are read-then-written,
     // so concurrent submissions would otherwise each get a fresh attempt budget.
     await tx.$queryRawUnsafe(
-      `SELECT \`id\` FROM \`PlatformMfaPending\` WHERE \`nonce\` = ? FOR UPDATE`,
+      `SELECT "id" FROM "PlatformMfaPending" WHERE "nonce" = $1 FOR UPDATE`,
       nonce,
     );
     const row = await tx.platformMfaPending.findUnique({ where: { nonce } });

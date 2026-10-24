@@ -379,7 +379,7 @@ export class PlatformMfaService {
       // Row-level lock on the specific reset request serializes concurrent approvals
       // for the SAME request, so the single-use claim is strictly atomic.
       await tx.$queryRawUnsafe(
-        `SELECT \`id\` FROM \`PlatformMfaResetRequest\` WHERE \`id\` = ? FOR UPDATE`,
+        `SELECT "id" FROM "PlatformMfaResetRequest" WHERE "id" = $1 FOR UPDATE`,
         requestId,
       );
 
@@ -405,7 +405,7 @@ export class PlatformMfaService {
       // We replace the old pg_advisory_xact_lock by locking the entire active
       // super-admin cohort. ORDER BY id prevents deadlocks between concurrent resets.
       await tx.$queryRawUnsafe(
-        `SELECT \`id\` FROM \`PlatformUser\` WHERE \`role\` = 'SUPER_ADMIN' AND \`active\` = TRUE ORDER BY \`id\` FOR UPDATE`
+        `SELECT "id" FROM "PlatformUser" WHERE "role" = 'SUPER_ADMIN' AND "active" = TRUE ORDER BY "id" FOR UPDATE`
       );
 
       // Availability floor, re-evaluated inside the locked tx against fresh state

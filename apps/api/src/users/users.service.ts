@@ -3,7 +3,7 @@ import * as bcrypt from 'bcryptjs';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { GlobalPrismaService } from '../tenancy/global-prisma.service';
 import { BillingService } from '../billing/billing.module';
-import { writeAuditEntry } from '../common/audit-hash';
+import { writeAuditEntry, isSerializationFailure } from '../common/audit-hash';
 import { clearTenantMfaUserData } from '../auth/tenant-mfa-clear';
 import { NotificationsService } from '../notifications/notifications.module';
 
@@ -317,7 +317,7 @@ export class UsersService {
           // and acted on, so two concurrent role changes on the same user would
           // otherwise each move the same requests/tickets and double-count.
           await tx.$queryRawUnsafe(
-            `SELECT \`id\` FROM \`User\` WHERE \`id\` = ? AND \`tenantId\` = ? FOR UPDATE`,
+            `SELECT "id" FROM "User" WHERE "id" = $1 AND "tenantId" = $2 FOR UPDATE`,
             id, this.ctx.tenantId!,
           );
           let movedRequests = 0;
@@ -353,7 +353,7 @@ export class UsersService {
     for (let attempt = 1; ; attempt++) {
       try { counts = await runTx(); break; }
       catch (e: any) {
-        const serialization = e?.code === 'P2034' || /serial|deadlock/i.test(e?.message || '');
+        const serialization = isSerializationFailure(e);
         if (serialization && attempt < 3) continue;
         throw e;
       }
@@ -538,7 +538,7 @@ export class UsersService {
           // of rows and then releases or reassigns them; concurrent offboards of the
           // same user would otherwise both see the same open assignments.
           await tx.$queryRawUnsafe(
-            `SELECT \`id\` FROM \`User\` WHERE \`id\` = ? AND \`tenantId\` = ? FOR UPDATE`,
+            `SELECT "id" FROM "User" WHERE "id" = $1 AND "tenantId" = $2 FOR UPDATE`,
             id, this.ctx.tenantId!,
           );
           let assets = 0;
@@ -621,13 +621,15 @@ export class UsersService {
         { isolationLevel: 'ReadCommitted' },
       );
 
-    // Serialization-failure retry (codebase pattern, common/audit-hash.ts): retry the
-    // whole transaction on P2034 / Postgres 40001, up to 3 attempts.
+    // Serialization-failure retry: re-run the whole transaction, up to 3 attempts.
+    // What counts as one lives in isSerializationFailure (common/audit-hash.ts) rather
+    // than being spelled out again here — there used to be three copies of this test
+    // and they had already drifted.
     let counts: { assets: number; tickets: number; reservations: number; seats: number; seatsSkipped: number; requests: number; apiKeys: number };
     for (let attempt = 1; ; attempt++) {
       try { counts = await runTx(); break; }
       catch (e: any) {
-        const serialization = e?.code === 'P2034' || /serial|deadlock/i.test(e?.message || '');
+        const serialization = isSerializationFailure(e);
         if (serialization && attempt < 3) continue;
         throw e;
       }

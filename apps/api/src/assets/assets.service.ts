@@ -50,12 +50,12 @@ export class AssetsService {
     if (q.q) {
       const term = q.q.trim();
       where.OR = [
-        { name: { contains: term } },
-        { assetTag: { contains: term } },
-        { serialNumber: { contains: term } },
+        { name: { contains: term, mode: 'insensitive' } },
+        { assetTag: { contains: term, mode: 'insensitive' } },
+        { serialNumber: { contains: term, mode: 'insensitive' } },
         // `notes` is hidden from the EMPLOYEE view (5B); excluding it from their search
         // prevents a blind yes/no oracle on notes content.
-        ...(this.ctx.role === 'EMPLOYEE' ? [] : [{ notes: { contains: term } }]),
+        ...(this.ctx.role === 'EMPLOYEE' ? [] : [{ notes: { contains: term, mode: 'insensitive' } }]),
       ];
     }
     const page = Math.max(1, q.page || 1);

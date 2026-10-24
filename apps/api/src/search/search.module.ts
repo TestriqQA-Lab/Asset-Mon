@@ -14,7 +14,7 @@ class SearchService {
     if (!q || q.length < 2) return { assets: [], tickets: [], users: [] };
     if (q.length > 80) throw new BadRequestException('Query too long');
     const db = this.ctx.prisma();
-    const ins = { contains: q };
+    const ins = { contains: q, mode: 'insensitive' as const };
     const [assets, tickets, users] = await Promise.all([
       db.asset.findMany({
         where: { OR: [{ name: ins }, { assetTag: ins }, { serialNumber: ins }] },

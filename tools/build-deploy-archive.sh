@@ -57,7 +57,7 @@ cp package.json "$STAGE/"
 # dist/ is the one directory that reliably survives, so the packages go inside it.
 PKG_ROOT="$STAGE/dist/packages"
 mkdir -p "$PKG_ROOT/db/src" "$PKG_ROOT/shared"
-cp packages/db/package.json packages/db/post-migrate-collations.sql "$PKG_ROOT/db/"
+cp packages/db/package.json "$PKG_ROOT/db/"
 cp -r packages/db/prisma "$PKG_ROOT/db/"
 cp packages/db/src/index.js packages/db/src/index.d.ts "$PKG_ROOT/db/src/"
 # The generated client ships with the archive instead of being regenerated on the host.

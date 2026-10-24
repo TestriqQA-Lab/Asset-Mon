@@ -162,7 +162,7 @@ class LicensesService {
       // MySQL syntax: backtick identifiers and `?` placeholders — double quotes are
       // string literals here, not identifiers, and `$1` is a syntax error.
       await tx.$queryRawUnsafe(
-        `SELECT \`id\` FROM \`SoftwareLicense\` WHERE \`id\` = ? FOR UPDATE`,
+        `SELECT "id" FROM "SoftwareLicense" WHERE "id" = $1 FOR UPDATE`,
         licenseId,
       );
       const lic = await tx.softwareLicense.findUnique({

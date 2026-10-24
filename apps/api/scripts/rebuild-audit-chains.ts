@@ -90,7 +90,7 @@ async function main() {
     // append onto the pre-rebuild tail and fork the chain being repaired.
     await db.$transaction(async (tx: any) => {
       await tx.$queryRawUnsafe(
-        `SELECT \`lastSeq\` FROM \`AuditCounter\` WHERE \`tenantId\` = ? FOR UPDATE`, t.id,
+        `SELECT "lastSeq" FROM "AuditCounter" WHERE "tenantId" = $1 FOR UPDATE`, t.id,
       );
       let prev: string | null = null;
       let updated = 0;

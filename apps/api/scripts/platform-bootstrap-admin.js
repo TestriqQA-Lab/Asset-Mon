@@ -106,7 +106,7 @@ async function appendPlatformAudit(prisma, entry) {
  */
 async function appendChainedEntryTx(tx, hashPlatformEntry, entry) {
   const rows = await tx.$queryRawUnsafe(
-    "SELECT `lastSeq`, `lastHash` FROM `PlatformAuditCounter` WHERE `id` = 'platform' FOR UPDATE",
+    `SELECT "lastSeq", "lastHash" FROM "PlatformAuditCounter" WHERE "id" = 'platform' FOR UPDATE`,
   );
   if (rows.length === 0) throw new Error('PlatformAuditCounter singleton is missing — seed it at deploy time.');
   const prevHash = rows[0].lastHash ?? null;

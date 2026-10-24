@@ -36,8 +36,8 @@ export class PlatformTenantsService {
     if (filter.plan && filter.plan !== 'all') where.plan = filter.plan;
     if (filter.search) {
       where.OR = [
-        { name: { contains: filter.search } },
-        { slug: { contains: filter.search } },
+        { name: { contains: filter.search, mode: 'insensitive' } },
+        { slug: { contains: filter.search, mode: 'insensitive' } },
       ];
     }
     const tenants = await this.globalPrisma.tenant.findMany({
@@ -484,7 +484,7 @@ export class PlatformTenantsService {
   }) {
     const where: any = {};
     if (filter.actorId) where.actorId = filter.actorId;
-    if (filter.action) where.action = { contains: filter.action };
+    if (filter.action) where.action = { contains: filter.action, mode: 'insensitive' };
     if (filter.targetType) where.targetType = filter.targetType;
     if (filter.targetId) where.targetId = filter.targetId;
     const take = Math.max(1, Math.min(filter.limit || 50, 500));

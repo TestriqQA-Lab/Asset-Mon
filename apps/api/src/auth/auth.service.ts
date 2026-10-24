@@ -485,7 +485,7 @@ export class AuthService {
     // under MySQL an explicit X lock is the equivalent, and unlike MySQL's
     // SERIALIZABLE it cannot deadlock on an S→X upgrade.
     await tx.$queryRawUnsafe(
-      `SELECT \`id\` FROM \`TenantMfaPending\` WHERE \`tenantId\` = ? AND \`nonce\` = ? FOR UPDATE`,
+      `SELECT "id" FROM "TenantMfaPending" WHERE "tenantId" = $1 AND "nonce" = $2 FOR UPDATE`,
       tenantId, nonce,
     );
     const row = await tx.tenantMfaPending.findUnique({ where: { tenantId_nonce: { tenantId, nonce } } });

@@ -104,6 +104,39 @@ export function computeEntryHash(input: {
  * an earlier revision defaulted it to the string 'default', which silently merged
  * every tenant's chain into one.
  */
+/**
+ * Is this error a transient serialization / deadlock failure worth retrying?
+ *
+ * This exists to consolidate what were three separate hand-rolled tests that had
+ * already drifted apart, not to fix a live bug — measurement against Postgres 17
+ * through the pg adapter showed the previous version handled both shapes that can
+ * actually occur here:
+ *
+ *   - a conflict on a TYPED query arrives as `P2034`, with the driver's own code in
+ *     `meta.driverAdapterError.cause.originalCode`.
+ *   - a conflict on a RAW query arrives as `P2010`, and the only trace of the real
+ *     cause is the driver's text folded into `message` ("deadlock detected").
+ *
+ * Matching the word "deadlock" alone caught both, which is what the old test did.
+ * The gap closed here is narrow and currently unreachable: a `40001`
+ * serialization_failure raised by a raw statement would land as `P2010` with a
+ * message saying "could not serialize access", matching neither "deadlock" nor
+ * "lock wait timeout". Postgres only raises `40001` at RepeatableRead or
+ * Serializable, and every transaction in this codebase runs ReadCommitted. Raise
+ * one and this is already ready for it.
+ *
+ * MySQL's wording is kept so the predicate stays correct if the engine changes again.
+ */
+export function isSerializationFailure(e: any): boolean {
+  const code = e?.code;
+  const msg = e?.message || '';
+  return (
+    code === 'P2034' || code === '40001' || code === '40P01' ||
+    /\b(40001|40P01)\b/.test(msg) ||
+    /serializ|deadlock|lock wait timeout/i.test(msg)
+  );
+}
+
 export async function writeAuditEntry(
   db: any,
   data: { tenantId: string; assetId?: string | null; action: string; performedById?: string | null; detail?: any; impersonatedBy?: string | null },
@@ -141,7 +174,7 @@ export async function writeAuditEntry(
     // so the tenantId is bound explicitly here and reused for every write below —
     // read and write must name the same row or the lock guards nothing.
     const counters: any[] = await tx.$queryRawUnsafe(
-      `SELECT \`lastSeq\`, \`lastHash\` FROM \`AuditCounter\` WHERE \`tenantId\` = ? FOR UPDATE`,
+      `SELECT "lastSeq", "lastHash" FROM "AuditCounter" WHERE "tenantId" = $1 FOR UPDATE`,
       tenantId,
     );
     if (counters.length === 0) {
@@ -195,9 +228,9 @@ export async function writeAuditEntry(
     try {
       return await db.$transaction(doIt, { isolationLevel: 'ReadCommitted' });
     } catch (e: any) {
-      // MySQL 1213 (deadlock) and 1205 (lock wait timeout) are both transient under
-      // write contention; one retry is enough. P2034 is Prisma's wrapper for the same.
-      if (e?.code === 'P2034' || /deadlock|lock wait timeout/i.test(e?.message || '')) {
+      // One retry is enough: the FOR UPDATE above is what serializes the chain, so a
+      // loser only needs to re-read the counter it lost the race for.
+      if (isSerializationFailure(e)) {
         return await db.$transaction(doIt, { isolationLevel: 'ReadCommitted' });
       }
       throw e;

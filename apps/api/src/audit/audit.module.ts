@@ -78,7 +78,7 @@ export class AuditService {
     // fork the chain the rebuild is trying to repair.
     return db.$transaction(async (tx: any) => {
     await tx.$queryRawUnsafe(
-      `SELECT \`lastSeq\` FROM \`AuditCounter\` WHERE \`tenantId\` = ? FOR UPDATE`,
+      `SELECT "lastSeq" FROM "AuditCounter" WHERE "tenantId" = $1 FOR UPDATE`,
       tenantId,
     );
     const rows = await tx.auditLog.findMany({ orderBy: { seq: 'asc' } });
