@@ -1,34 +1,47 @@
-const { PrismaMariaDb } = require('@prisma/adapter-mariadb');
+const { PrismaPg } = require('@prisma/adapter-pg');
 
 /**
  * Build the driver adapter that every Prisma client in this repo is constructed with.
  *
  * Prisma 7 ships no query engine: the query compiler is WebAssembly and runs inside this
- * process, and the wire is the pure-JS mariadb driver. Nothing native is loaded and no
- * child process is spawned. That is what makes the API runnable on Hostinger's shared
- * hosting, which is CloudLinux — Prisma cannot identify that distro ("Distro is
- * undefined"), falls back to its Debian engine, and every Rust build tried there died
- * with "PANIC: timer has gone away".
+ * process, and the wire is the pure-JS `pg` driver. Nothing native is loaded and no child
+ * process is spawned.
+ *
+ * That architecture was originally forced on us — Hostinger shared hosting is CloudLinux,
+ * Prisma could not identify the distro ("Distro is undefined"), fell back to its Debian
+ * engine, and every Rust build tried there died with "PANIC: timer has gone away". That
+ * host is retired, so the Rust engine is no longer forbidden; the adapter is kept on
+ * purpose instead. It ships nothing that has to match the runtime, which keeps every AWS
+ * shape open (Lambda, Fargate, ECS, EC2) while the target is still undecided.
+ *
+ * The one cost of that choice: the adapter's error mapping is weaker than the Rust
+ * engine's, so a raw `pg` error (e.g. SQLSTATE 40001) can surface where a Prisma code
+ * would otherwise appear. Error-code checks therefore accept a SQLSTATE fallback — see
+ * the retry in ../../apps/api/src/common/audit-hash.ts.
  *
  * Because there is no engine, a client built without an adapter has no way to reach the
  * database and throws at construction. There is exactly one place that assembles it, so
  * the pool is configured once.
  *
  * The pool settings are here rather than on the URL because `connection_limit` is a
- * Prisma parameter and the mariadb driver ignores it without complaint:
- *   - connectionLimit 3, because the Rust engine sized its pool as num_cpus * 2 + 1 and
- *     CloudLinux reports the physical machine's CPUs, so the old default was asking a
- *     shared server for tens of connections.
- *   - minimumIdle 1, NOT 0. Measured against MariaDB 11.8.8 with mariadb 3.4.5: a pool
- *     with minimumIdle 0 never opens a connection at all and every query fails with
- *     ER_GET_CONNECTION_TIMEOUT, which reads like a dead host rather than a bad option.
- *   - idleTimeout 60s, so connections are not held across an idle period.
+ * Prisma parameter and the pg driver ignores it without complaint:
+ *   - max 3, carried over from the MariaDB era: the Rust engine sized its pool as
+ *     num_cpus * 2 + 1, which on a shared host asked for tens of connections. Still a
+ *     sane ceiling, but it has not been re-measured against Postgres — treat it as a
+ *     starting point, not a finding.
+ *   - idleTimeoutMillis 60s, so connections are not held across an idle period.
+ *   - connectionTimeoutMillis 10s, so a dead host fails as a timeout rather than hanging.
+ *
+ * Note there is deliberately no `minimumIdle` equivalent. The MariaDB driver needed
+ * `minimumIdle: 1` because a pool with 0 never opened a connection at all and every query
+ * failed with ER_GET_CONNECTION_TIMEOUT — which read like a dead host rather than a bad
+ * option. node-postgres opens connections on demand, so that hazard does not exist here
+ * and the setting does not transfer.
  *
  * `overrides` exists for batch scripts that need a different pool — e.g. pinning it to a
  * single connection so that session state stays on the connection that set it. It has no
- * caller today: the one script that used it (the Postgres consolidation) is gone. Kept as
- * the escape hatch rather than rediscovering the pool settings above the next time a batch
- * job needs different ones.
+ * caller today. Kept as the escape hatch rather than rediscovering the pool settings above
+ * the next time a batch job needs different ones.
  */
 function makeAdapter(url = process.env.DATABASE_URL, overrides = {}) {
   // Not necessarily DATABASE_URL: the bootstrap CLI passes CATALOG_DATABASE_URL, so the
@@ -58,30 +71,31 @@ function makeAdapter(url = process.env.DATABASE_URL, overrides = {}) {
     user: decodeURIComponent(parsed.username),
     password: decodeURIComponent(parsed.password),
     database: decodeURIComponent(parsed.pathname.replace(/^\//, '')),
-    connectionLimit: 3,
-    minimumIdle: 1,
-    idleTimeout: 60,
+    max: 3,
+    idleTimeoutMillis: 60_000,
+    connectionTimeoutMillis: 10_000,
     ...overrides,
   };
 
-  // A URL cannot carry a unix socket path, so it is read from the environment.
+  // A URL cannot carry a unix socket path, so it is read from the environment. pg has no
+  // separate socket option: it takes the socket DIRECTORY as `host` (e.g.
+  // /var/run/postgresql) and derives the filename from the port.
   const socketPath = process.env.DATABASE_SOCKET_PATH;
   if (socketPath) {
-    config.socketPath = socketPath;
+    config.host = socketPath;
+    config.port = Number(parsed.port) || 5432;
   } else {
-    // "localhost" is not one address, and MySQL grants are per-host. The mysql CLI reads
-    // it as "use the unix socket"; this driver resolves it as a name and reaches the
-    // server over IPv6, arriving as `::1`. On Hostinger the grant is for `127.0.0.1`, so
-    // a URL saying localhost fails with `Access denied for user '...'@'::1'` — and
-    // through the pool that surfaces as ER_GET_CONNECTION_TIMEOUT, which reads as a
-    // network problem rather than a rejected login. Proven on the host: single
-    // connection to localhost denied, to 127.0.0.1 accepted.
+    // "localhost" is not one address: it resolves over IPv6 and arrives as `::1`. The
+    // MySQL reason for normalising it is gone (grants there were per-host, `user@::1` vs
+    // `user@127.0.0.1`), but pg_hba.conf rules are per-address too, so a URL saying
+    // localhost can match a different line than 127.0.0.1 and be rejected for reasons
+    // that read as a network fault. The rewrite costs nothing, so it stays.
     const host = parsed.hostname;
     config.host = host === 'localhost' ? '127.0.0.1' : host;
-    config.port = Number(parsed.port) || 3306;
+    config.port = Number(parsed.port) || 5432;
   }
 
-  return new PrismaMariaDb(config);
+  return new PrismaPg(config);
 }
 
 const prisma = require('./generated');

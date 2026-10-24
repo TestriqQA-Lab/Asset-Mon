@@ -1,4 +1,4 @@
-import type { PrismaMariaDb } from '@prisma/adapter-mariadb';
+import type { PrismaPg } from '@prisma/adapter-pg';
 
 export * from './generated';
 
@@ -11,4 +11,4 @@ export * from './generated';
 export declare function makeAdapter(
   url?: string,
   overrides?: Record<string, unknown>,
-): PrismaMariaDb;
+): PrismaPg;

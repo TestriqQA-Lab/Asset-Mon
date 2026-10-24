@@ -7,7 +7,7 @@ generator client {
 // makeAdapter in ../src/index.js) rather than a connection string, and Prisma 7 raises
 // P1012 if a datasource declares both. The CLI reads its URL from ../prisma.config.ts.
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
 }
 
 model Tenant {
