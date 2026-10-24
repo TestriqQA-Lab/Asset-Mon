@@ -1,3 +1,15 @@
+> **HISTORICAL — superseded on 2026-10-24.** This is the plan for deploying to Hostinger.
+> That subscription lapsed and is deliberately not being renewed, the host is gone, and the
+> database has since moved back to PostgreSQL. Nothing here describes the current system:
+> the hPanel mechanics, the `utf8mb4_general_ci` collation checks, the MariaDB versions and
+> the SSH-tunnel migration route all died with it.
+>
+> It is kept for the measured facts that outlived the host — chiefly why Prisma runs with no
+> query engine, and the env-wipe incident. The project is going to AWS; see
+> `docs/postgres-migration-plan.md` for where the codebase is now.
+
+---
+
 # Hostinger deployment plan
 
 AssetMon has never been deployed anywhere. This is the hosting-side plan: what the
