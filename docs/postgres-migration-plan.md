@@ -134,7 +134,11 @@ not. That difference does **not** bite here: both counter sites (`audit-hash.ts:
 `platform-bootstrap-admin.js:111`) *throw* when zero rows come back rather than inserting, so
 there is no "two transactions both insert" race to lose. Verified by reading both paths.
 
-### 2.2 — Restore the 7 `mode: 'insensitive'` sites, delete the collation script
+### 2.2 — Restore the case-insensitive search sites, delete the collation script
+
+> **Amended during the build: there are 8 call sites, not 7.** The old commit counted 7,
+> but `post-migrate-collations.sql` also collated `PlatformAuditLog.action`, and the
+> audit-action filter that reads it would have gone quietly case-sensitive.
 
 MySQL has no per-query case-insensitivity and Prisma's MySQL connector rejects `mode` outright,
 so step 8 of the old plan removed these and compensated by collating 12 columns
@@ -150,6 +154,7 @@ being a per-query concern (`mode: 'insensitive'` compiles to `ILIKE`).
 | `apps/api/src/platform/platform-tenants.service.ts:37` | `name` |
 | `apps/api/src/platform/platform-tenants.service.ts:38` | `slug` |
 | `apps/api/src/search/search.module.ts:17` | the shared `ins` object — widest blast radius |
+| `apps/api/src/platform/platform-tenants.service.ts:487` | `PlatformAuditLog.action` — **the 8th site, missed by this plan** |
 
 Then **delete `packages/db/post-migrate-collations.sql`** and the compose comment that points at
 it.
@@ -184,7 +189,20 @@ That commit also removed an `as any` which had been masking the type error. Reve
 **not** bring the `as any` back — if the array form type-checks cleanly on the Postgres provider,
 that is the correct end state.
 
-### 2.4 — Fix the serialization-retry gap (confirmed defect)
+### 2.4 — Broaden the serialization-retry matcher (hardening, NOT a defect)
+
+> **Amended during the build. This plan called it a confirmed defect; measurement
+> disproved that, and the claim was wrong.** Provoked against Postgres 17 through the pg
+> adapter: a conflict on a typed query arrives as `P2034` (which the old test already
+> caught), and a conflict on a raw query arrives as `P2010` with the driver's text
+> folded into `message` — "deadlock detected" — which the old `/deadlock/i` also
+> caught. The only shape it would miss is `40001` from a raw statement, and Postgres
+> raises `40001` only at RepeatableRead or Serializable, while **every transaction in
+> this codebase runs ReadCommitted**. So nothing reachable was broken.
+>
+> The change was kept anyway, for the reason in 2.5 rather than this one: there were
+> three copies of this test and they had already drifted. They are now one exported
+> predicate, `isSerializationFailure`.
 
 `apps/api/src/common/audit-hash.ts:200`:
 
@@ -215,6 +233,35 @@ like 2.4.
 ### 2.6 — Normalisation pass
 
 Confirm every email and slug write path normalises, per the caveat in 2.2.
+
+**Done, and clean.** Primary email is lowercased on every write path that matters
+(`auth.service.ts` signup/login/invite, `platform-auth.service.ts` login and
+`createAdmin`, `users.service.ts` create) and the slug is forced lowercase by the DTO
+regex. `recoveryEmail` is stored **un-normalised** in two places
+(`tenant-mfa.service.ts`, `platform-mfa.service.ts`) and that is harmless: the column
+has no unique constraint and is never a query key — it is only masked for display and
+used as a mail recipient.
+
+### 2.7 — Invert the CI dialect guard (this plan missed it)
+
+`ci/check-tenant-safety.sh` check 2 was "Postgres-only SQL syntax", added by the MySQL
+move to stop Postgres syntax creeping back in. It is now backwards and fails the build on
+the 19 statements ported in 2.1. Inverted to ban MySQL's dialect instead — backtick
+identifiers and `?` placeholders — while still banning `pg_advisory`, from the other
+direction: `FOR UPDATE` works on both engines and advisory locks would re-tie the code to
+one database.
+
+A guard that passes because its own pattern is broken is worse than no guard, so the
+inverted check was proved by planting a MySQL statement and confirming it fails (exit 1),
+then removing it and confirming it passes (exit 0).
+
+### 2.8 — One Phase 3 item pulled forward
+
+Deleting `post-migrate-collations.sql` in 2.2 breaks
+`tools/build-deploy-archive.sh`, which copies it. Fixed here rather than left broken
+until Phase 3.9. The other stale references (`docker-compose.yml`'s comment,
+`run-local.sh`, the two MySQL docs) are untouched, because Phase 3 rewrites those same
+lines and doing it twice would only churn them.
 
 ## Phase 3 — infrastructure, tooling, environment, docs
 
