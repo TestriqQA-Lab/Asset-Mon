@@ -171,7 +171,7 @@ export default function LoginPage() {
             <span className="text-ink-400">Pick up where you left off.</span>
           </h2>
           <ul className="space-y-3">
-            <Bullet icon={<Boxes className="h-4 w-4" />} text="A dedicated database per workspace — true isolation" />
+            <Bullet icon={<Boxes className="h-4 w-4" />} text="Every row scoped to your workspace — enforced, not assumed" />
             <Bullet icon={<ShieldCheck className="h-4 w-4" />} text="Audit-ready: every asset event is logged" />
             <Bullet icon={<Sparkles className="h-4 w-4" />} text="From procurement to depreciation, in one place" />
           </ul>

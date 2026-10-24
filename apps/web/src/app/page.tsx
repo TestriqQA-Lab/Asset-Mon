@@ -171,7 +171,7 @@ export default function LandingPage() {
             body="Custom fields per category, photos, QR-coded labels, immutable audit trail, full CSV import & export. Spreadsheets, retired."
             big
           />
-          <BentoTile className="col-span-12 sm:col-span-6 md:col-span-4" tone="indigo" icon={<Wrench className="h-5 w-5" />} title="Service tickets" body="Asset auto-flips to IN_REPAIR. Priority-routed. Vendor-aware." />
+          <BentoTile className="col-span-12 sm:col-span-6 md:col-span-4" tone="indigo" icon={<Wrench className="h-5 w-5" />} title="Service tickets" body="Asset auto-flips to OUT_OF_SERVICE. Priority-routed. Vendor-aware." />
           <BentoTile className="col-span-12 sm:col-span-6 md:col-span-4" tone="cyan" icon={<CalendarClock className="h-5 w-5" />} title="Preventive maintenance" body="Recurring schedules that auto-bump their next due date." />
           <BentoTile className="col-span-12 sm:col-span-6 md:col-span-4" tone="rose" icon={<TrendingDown className="h-5 w-5" />} title="Depreciation engine" body="Straight-line + double-declining, fleet report, CSV export." />
           <BentoTile className="col-span-12 sm:col-span-6 md:col-span-4" tone="emerald" icon={<AppWindow className="h-5 w-5" />} title="Software & licenses" body="Seats used vs. owned. Expiry alerts. Audit-ready." />
@@ -196,7 +196,7 @@ export default function LandingPage() {
             <p className="mt-4 text-balance text-base text-white/70">No long-winded onboarding. No mandatory call.</p>
           </div>
           <ol className="mt-14 grid gap-5 md:grid-cols-3" role="list">
-            <Step n={1} tone="fuchsia" title="Sign up" body="Your dedicated database is provisioned in seconds with sensible defaults." />
+            <Step n={1} tone="fuchsia" title="Sign up" body="Your workspace is provisioned in seconds with sensible defaults." />
             <Step n={2} tone="violet" title="Import or add" body="CSV import or new asset form. QR labels print right from the browser." />
             <Step n={3} tone="cyan" title="Run your op" body="Tickets, audits, procurement, depreciation — toggle modules to match your team." />
           </ol>

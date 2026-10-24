@@ -78,7 +78,7 @@ export default function StatusesSettingsPage() {
           </Field>
           <Field label="Maps to" hint="System state used for reports and reservations">
             <select className={selectClass} value={form.mapsTo} onChange={(e) => setForm({ ...form, mapsTo: e.target.value })}>
-              {MAPS_TO.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+              {MAPS_TO.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
             </select>
           </Field>
           <div className="rounded-lg bg-ink-50 p-3 text-xs text-ink-600">
@@ -109,10 +109,10 @@ function Row({ d, onPatch, onDelete }: { d: any; onPatch: (p: any) => void; onDe
       </td>
       <td className="px-4 py-3">
         {d.isSystem ? (
-          <span className="text-xs text-ink-500">{d.mapsTo.replace('_', ' ')}</span>
+          <span className="text-xs text-ink-500">{d.mapsTo.replace(/_/g, ' ')}</span>
         ) : (
           <select className={selectClass + ' max-w-[160px]'} value={mapsTo} onChange={(e) => setMapsTo(e.target.value)}>
-            {MAPS_TO.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+            {MAPS_TO.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
           </select>
         )}
       </td>

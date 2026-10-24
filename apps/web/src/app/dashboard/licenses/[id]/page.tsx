@@ -58,7 +58,13 @@ export default function LicenseDetail() {
           </div>
         </div>
         <div className="flex gap-2">
-          <button className={btnPrimary} disabled={used >= l.seats} onClick={() => { setForm({ target: 'user', userId: '', assetId: '', notes: '' }); setOpen(true); }}>Assign seat</button>
+          {/* A greyed-out button with no reason reads as a broken page, so say the limit. */}
+          <button
+            className={btnPrimary}
+            disabled={used >= l.seats}
+            title={used >= l.seats ? 'Every seat on this licence is in use. Unassign one, or raise the seat count, to assign another.' : undefined}
+            onClick={() => { setForm({ target: 'user', userId: '', assetId: '', notes: '' }); setOpen(true); }}
+          >Assign seat</button>
           <button className={btnDanger} onClick={() => { if (confirm('Delete license?')) del.mutate(); }}>Delete</button>
         </div>
       </div>

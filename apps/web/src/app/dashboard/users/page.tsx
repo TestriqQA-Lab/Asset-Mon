@@ -323,7 +323,7 @@ export default function UsersPage() {
       >
         <div className="space-y-3 text-sm">
           <p className="text-ink-700">
-            This {reassigning ? 'reassigns' : 'releases'} everything <b>{offboardTarget?.firstName} {offboardTarget?.lastName}</b> is holding{' '}
+            This {reassigning ? 'reassigns' : 'releases'} everything <b>{offboardTarget ? `${offboardTarget.firstName} ${offboardTarget.lastName}` : 'this user'}</b> is holding{' '}
             {reassigning ? 'to the chosen teammate' : 'back to the pool'}
             {isLastAdmin ? '.' : ' and deactivates their account.'}
           </p>

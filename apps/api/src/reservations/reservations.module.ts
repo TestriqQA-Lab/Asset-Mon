@@ -68,6 +68,10 @@ class ReservationsService {
     return r;
   }
 
+  // "2026-12-01 10:00" rather than a full ISO string. The caller states UTC out loud,
+  // because the server has no idea what the reader's clock says.
+  private fmtW(d: Date) { return d.toISOString().slice(0, 16).replace('T', ' '); }
+
   async create(data: { assetId: string; userId?: string; startAt: string; endAt: string; notes?: string }, actor: { userId: string; role: string }) {
     // Who the booking is FOR. Omitted means the caller, which is what an employee
     // always sends: their form has no "for user" picker, because the endpoint that
@@ -87,7 +91,7 @@ class ReservationsService {
     const conflict = await this.findConflict(data.assetId, start, end);
     if (conflict) {
       throw new BadRequestException(
-        `Conflicts with reservation ${conflict.id} (${conflict.startAt.toISOString()} → ${conflict.endAt.toISOString()})`,
+        `That asset is already reserved from ${this.fmtW(conflict.startAt)} to ${this.fmtW(conflict.endAt)} (UTC).`,
       );
     }
     return this.ctx.prisma().reservation.create({
@@ -123,7 +127,9 @@ class ReservationsService {
       const end = patch.endAt || r.endAt;
       if (end <= start) throw new BadRequestException('endAt must be after startAt');
       const conflict = await this.findConflict(r.assetId, start, end, id);
-      if (conflict) throw new BadRequestException(`Conflicts with reservation ${conflict.id}`);
+      if (conflict) throw new BadRequestException(
+        `That asset is already reserved from ${this.fmtW(conflict.startAt)} to ${this.fmtW(conflict.endAt)} (UTC).`,
+      );
     }
     return this.ctx.prisma().reservation.update({ where: { id }, data: patch });
   }

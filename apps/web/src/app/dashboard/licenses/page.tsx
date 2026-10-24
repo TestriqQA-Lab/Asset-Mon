@@ -360,7 +360,7 @@ export default function LicensesPage() {
             </Field>
           </div>
 
-          <Field label="License key" hint="Optional. Stored as plain text inside your tenant DB.">
+          <Field label="License key" hint="Optional. Stored as plain text — anyone with access to this workspace can read it.">
             <input
               className={inputClass}
               value={form.licenseKey}
